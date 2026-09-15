@@ -1,239 +1,285 @@
 ## Context
 
-`mouse-input` enabled mouse capture at start-up and never turned it off again. A terminal
-with reporting on routes drags to the application, so the pane gained click, wheel, fold, and
-tab-switch and lost the terminal's own text selection.
+The reader cannot select text in the pane. `mouse-input` enabled capture, and a terminal with
+reporting on routes drags to the application rather than selecting natively.
 
-This change's investigation is finished and recorded in `notes/measurements.md`: two runs of
-`notes/probe.sh`, Ghostty inside a Herdr pane and Ghostty bare, identical row for row. What
-they establish, and what this design is built on:
+Everything here rests on `notes/measurements.md`, which took several turns to get right and
+overturned two conclusions on the way. The three facts the design stands on:
 
-- Plain drag-selection is suppressed under **every** mode set and works only with reporting
-  fully off. No mode set and no code in this crate changes that — it is the terminal's
-  decision.
-- `Shift`+drag restores selection under every mode set. `Option`+drag does **not**, which
-  falsifies a sentence already in `specs/mouse-input/spec.md`.
-- Narrowing the enabled DEC modes buys nothing for selection, while `?1000 ?1006` alone was
-  measured to deliver click and wheel intact.
-- Herdr is not involved.
+1. **Native selection and mouse reporting are exclusive.** `?1000` alone — press and release,
+   no motion requested — still suppresses drag-selection. There is no narrower ask.
+2. **Copilot CLI has both because it does not use native selection at all.** Captured through
+   a pty, the terminal hands it a press, eighteen `left+motion` reports and a release, with
+   the `Shift` bit on 0 of 79. Its output carries OSC 52 writes and reverse-video spans.
+3. **It partitions the screen rather than disambiguating gestures.** A drag cannot select its
+   top two rows, which are its tab bar.
 
-So the only way to give the reader plain drag-selection is to stop reporting, and the only way
-to keep the bindings is to start again afterwards. That is a toggle, and the seam it needs
-already exists: `TerminalOps` has both `enable_mouse` and `disable_mouse`, and `TerminalGuard`
-already treats a refused capture as a stored, non-fatal problem.
+Point 3 is what makes this affordable. The partition already exists here as tested code:
+`ui::layout::zone` resolves any point to exactly one of six `Zone` values.
 
 ## Goals / Non-Goals
 
 **Goals:**
 
-- A key that releases mouse capture for as long as the reader wants, and restores it.
-- The pane says so while capture is released, at every width and at every route.
-- The panic-restore guarantee survives a toggle without the hook gaining state to consult.
-- The falsified `Option` claim is corrected where it is written down.
+- Drag-select and copy artifact text, with clicks still working, and **no toggle key**.
+- Press-count gestures — one arms, two select a word, three select the row — with no clock.
+- Reuse the existing partition rather than inventing a gesture-disambiguation rule.
 
 **Non-Goals:**
 
-- Selection, a clipboard, or a copy buffer inside the TUI. The terminal already does this.
-- Narrowing the capture mode set. Measured to buy nothing here; a separate change with a
-  separate justification if anyone wants the dead modes gone.
-- Changing the default capture state, or any existing binding.
-- Claiming the `Shift` bypass on terminals it was never measured on.
+- No auto-scroll when a drag runs off the edge; a selection covers what is drawn.
+- No selection in the list region, the tab bar, or on a section header row.
+- No toggle key, no capture-mode narrowing, no keyboard selection path.
 
 ## Boundaries
 
-| Piece | Where it lands | Pattern it follows |
+| Piece | Where | Pattern it follows |
 |---|---|---|
-| `TerminalGuard::set_mouse(bool)` | `src/ui/terminal.rs` | the file's existing rule: it is the only one naming a crossterm terminal-mode function, and the method calls `TerminalOps`, never crossterm directly |
-| the injected capture seam | `src/ui/mod.rs` | **exactly** `ui::read_artifact`: one production binding in `mod.rs`, threaded into `run_loop` as a `&dyn Fn`, never named by a view |
-| `Action::ToggleMouse`, `mouse_capture` | `src/ui/app.rs` | a pure action over pure state, on `Action::Refresh`'s terms |
-| `m`'s inventory row | `src/ui/help.rs` | a `Binding` in the `Pane` group reaching a real `Action` — no `EXEMPT_ACTIONS` entry |
-| `mouse off (m)` badge | `src/ui/view.rs` footer | the footer's existing conditional hints (`a/c/s launch`, `g focus`), which appear and vanish on state |
-| `Role::MouseOff` | `src/ui/palette.rs` | the only file naming `ratatui::style::Color`; every call site asks for the role |
+| drag + press-count resolution | `src/ui/driver.rs` — **`run_loop` and `mouse_action` both live here**, not in `src/ui/mod.rs` | the existing zone-dispatch `match` in `mouse_action` |
+| `Action::Select`, `Selection`, `apply` | `src/ui/app.rs` | `Action::Click(Target)` — one variant carrying its payload |
+| span → text, word bounds | `src/ui/detail.rs` | `content_lines`, already pure and already returning `Vec<ContentRow>` |
+| the highlight | `src/ui/view.rs` | the existing span-to-role mapping, composed not replaced |
+| `Role::Selected` | `src/ui/palette.rs` | the crate's only `Color` site |
+| OSC 52 | `src/ui/terminal.rs` behind `TerminalOps` | the six existing mode methods; no new seam |
 
-`src/ui/driver.rs` is **not** touched. Whether a gesture arrives is the terminal's decision
-and the loop's; the resolver stays a pure, total function of event and frame with no capture
-parameter.
+`ui::layout::zone` is **used, not changed**: `Zone` gains no variant.
 
 ## Contracts
 
-The pane is the only consumer. `Action` and `Dashboard` are crate-internal; no Herdr surface,
-no `config.toml` key, no manifest field, and no CLI argument changes.
+Crate-internal only. No Herdr surface, no `config.toml` key, no manifest field, no CLI
+argument. Additive for the keyboard — no key changes meaning.
 
-**Additive, not breaking.** Capture is entered at start-up exactly as today and
-`mouse_capture` initialises to `true`, so a reader who never presses `m` sees a pane
-byte-identical to the current one — the specs assert that byte-identity rather than asserting
-it in prose.
+**One removal:** `Target::DetailLine`, four `Target` members to three. A reader who clicked a
+body line to move the detail cursor uses `j`/`k` or the arrows, which always did the same.
 
-Error surface: the seam answers `Result<(), String>`, carrying the `TerminalError`'s own
-`Display` text. A failure is rendered as a `!`-marked problem row and changes no state.
+Error surface: `TerminalOps::write_clipboard` returns `Result<(), TerminalError>`; a failure
+is rendered as a `!`-marked problem row. A terminal that silently ignores OSC 52 cannot be
+detected, and the pane claims nothing about the clipboard — see Decision 6.
 
 ## Persistence and Rollout
 
 - **migration** — none. **backfill** — none. **seeding** — none.
 - **cache invalidation** — none. The `(change directory, tab)` artifact cache is untouched;
-  capture state is not part of its key and does not invalidate it.
+  a selection is cleared on reload rather than keyed into it.
 - **index rebuild** — none. **authorization** — none; the pane has no actors.
-- **observability** — a refused capture change becomes a rendered problem row and a new
+- **observability** — a failed clipboard write becomes a problem row and a new
   `SPEC.md` degraded-states row bound to a named test in `tests/degraded-coverage.toml`.
-- **deployment** — `make build` and the existing Herdr pane; no manifest change, so no
-  `herdr plugin link` re-run is required.
-- **The plugin's own writes are unchanged**: still exactly `agent-names.toml` under
-  `HERDR_PLUGIN_STATE_DIR`. Capture state is per-session and is deliberately **not**
-  persisted — see Decision 6.
+- **deployment** — one `make build`; the manifest is untouched, so an already-linked plugin
+  picks it up.
+- **The plugin's own writes are unchanged.** OSC 52 writes to the *terminal*, not to disk;
+  `agent-names.toml` under `HERDR_PLUGIN_STATE_DIR` remains the only file the plugin writes.
 
 ## Test Boundaries
 
 | Dependency | In acceptance test | In unit tests |
 |---|---|---|
-| The real terminal (raw mode, alternate screen, capture) | **replaced** — never real, at any tier. `cargo test` spawns this binary, so a test reaching `CrosstermOps` corrupts the developer's own session | **replaced** — the existing `Recorder` double implementing `TerminalOps` |
+| The real terminal (raw mode, alternate screen, capture, **OSC 52**) | **replaced** — never real at any tier; `cargo test` spawns this binary, so reaching `CrosstermOps` corrupts the developer's session *and* their clipboard | **replaced** — the existing `Recorder` implementing `TerminalOps`, extended to record `write_clipboard` |
 | `TerminalOps` | replaced (`Recorder`) | replaced (`Recorder`) |
-| The capture seam `&dyn Fn(bool) -> Result<(), String>` | replaced — a closure recording calls and answering `Ok`/`Err` on demand | replaced — same |
+| The system clipboard | **replaced everywhere.** No test asserts against the real clipboard: it is shared mutable state on the developer's machine | replaced |
 | ratatui backend | **real** `TestBackend`, in memory, at 120x20 and 60x20 | real `TestBackend` |
-| The artifact reader `&dyn Fn(&Path) -> Result<String, String>` | replaced — the injected reader already used by every loop test | replaced |
+| `ui::layout::zone` | **real** — it is pure, and replacing the thing under test would prove nothing | real |
+| `ui::detail::content_lines` | **real** — pure over `&str`, and the span's text comes from it | real |
+| The artifact reader `&dyn Fn(&Path) -> Result<String, String>` | replaced — the injected reader every loop test already uses | replaced |
 | Filesystem (`openspec/` tree) | real, a scratch directory, only where a test already builds one | not reached |
-| `openspec` CLI (`OpenspecCli`) | **not touched** by this change; replaced wherever an existing test already reaches it | not touched |
-| Herdr CLI (`HerdrCli`) | **not touched**; replaced wherever an existing test reaches it | not touched |
-| `notify` watcher, refresh worker, agent poller, launcher | **not touched**; already behind non-blocking trait objects and replaced in every loop test | not touched |
-| The process environment | replaced — the injected `&dyn Fn(&str) -> Option<String>`, never `std::env::var` | replaced |
+| `openspec` CLI, Herdr CLI | **not touched**; replaced wherever an existing test reaches them | not touched |
+| `notify` watcher, refresh worker, agent poller, launcher | **not touched**; already behind non-blocking trait objects | not touched |
+| The process environment | replaced — the injected `&dyn Fn(&str) -> Option<String>` | replaced |
+| A clock | **none exists.** `NOBLOCK` forbids `src/ui/` naming one, and the press counting is deliberately state-based so none is introduced | none |
 
 ## Test Strategy
 
-Tiers in this repository: **unit** (inline `#[cfg(test)]` modules, `cargo test`), **contract**
-(`tests/*.rs`, also `cargo test`), and **gates** (`make gates`). There is no containerised or
-network tier and nothing here adds one.
+Tiers: **unit** (inline `#[cfg(test)]`, `cargo test`), **contract** (`tests/*.rs`, also
+`cargo test`), **gates** (`make gates`). No containerised or network tier, and none is added.
 
-**This change does not take an outer-loop acceptance test in the usual sense, and the reason
-is structural rather than a shortcut:** the only true end-to-end proof would drive a real
-terminal, and this repository forbids that at every tier because `cargo test` spawns this
-binary. The outermost honest test is `run_loop` driven over a `TestBackend` with every
-collaborator replaced — which is what the loop scenarios below are — and that is the same
-outer loop every landed change in this crate has used.
+**No outer-loop acceptance group.** The only true end-to-end proof would drive a real terminal
+and a real clipboard, which this repository forbids at every tier because `cargo test` spawns
+this binary. The outermost honest test is `run_loop` over a `TestBackend` with every
+collaborator replaced.
+
+92 scenarios across nine capabilities — **33 new, 59 carried** (counted by enumerating
+`#### Scenario:` across `specs/*/spec.md` and diffing each name against the base spec). A
+carried scenario is a regression that must stay green; it is listed because a `MODIFIED` or
+re-`ADDED` requirement replaces its whole block, so every one is this change's responsibility.
 
 | Spec Scenario | Verification | Tier | Collaborators | Command |
 |---|---|---|---|---|
-| Releasing and re-entering records exactly the two operations | new `#[test]` in `src/ui/terminal.rs` extending the `Recorder` suite | unit | `TerminalOps` replaced | `cargo test ui::terminal` |
-| Teardown is unconditional whatever state capture is left in | new `#[test]`, normal drop and `catch_unwind` drop | unit | `TerminalOps` replaced | `cargo test ui::terminal` |
-| A start-up refusal is not overwritten by a later success | new `#[test]` asserting `mouse_problem()` after a successful `set_mouse(true)` | unit | `TerminalOps` replaced | `cargo test ui::terminal` |
-| A refused release is a problem row and no state change | new `#[test]` in `src/ui/mod.rs`'s loop suite, seam answering `Err` | unit | seam + backend replaced | `cargo test ui::` |
-| The documented bindings match the resolver | existing `tests/doc_contract.rs` leg, unchanged — regression | contract | files on disk | `cargo test --test doc_contract` |
-| The documented confined set matches the gate | existing `tests/doc_contract.rs` leg, unchanged — regression | contract | files on disk | `cargo test --test doc_contract` |
-| The documented bypass names what was measured | new `tests/doc_contract.rs` leg reading `SPEC.md`, with a recorded negative control | contract | `SPEC.md` | `cargo test --test doc_contract` |
-| The resolver gains no capture parameter | `src/ui/driver.rs` compiles unchanged; its existing suite passes | unit | none | `cargo test ui::driver` |
-| A released capture withdraws the gestures and nothing else | render both dashboards, compare buffers cell by cell at 120x20 and 60x20 | unit | `TestBackend` real | `cargo test ui::view` |
-| `Dashboard` has no `Default` and no site elides a field | existing sweep + compile-time companion — regression, count moves to sixteen | unit | none | `cargo test ui::app` |
-| The pure view files name no I/O API | existing `NOIO-VIEW` gate — regression | gates | files on disk | `make gates` |
-| The shell never names the CLI seam | existing `NOCLI-SHELL` gate — regression | gates | files on disk | `make gates` |
-| Change literals live only in the gated file | existing gate — regression | gates | files on disk | `make gates` |
-| The render path names no channel, thread, lock, or clock | existing `NOBLOCK` gate — regression; the seam is a `Fn`, not a channel | gates | files on disk | `make gates` |
-| No test sleeps and then asserts something has already happened | existing gate — regression | gates | files on disk | `make gates` |
-| `file_mode` is set by the composition root and by nothing else | existing `#[test]` — regression | unit | replaced | `cargo test ui::` |
-| Every field is named at every construction site | existing sweep and companion, updated to sixteen | unit | none | `cargo test ui::app` |
-| `mouse_capture` starts true and only the toggle moves it | new `#[test]` over `ui::load` and `run_wired` | unit | replaced | `cargo test ui::` |
-| `m` toggles at both routes and types while filtering | new `#[test]` table-driving `action_for` over both routes and both filter modes | unit | none | `cargo test ui::app` |
-| A refused release leaves the state it failed to leave | new `#[test]`, seam answering `Err`, asserting the flag and the problem row | unit | seam replaced | `cargo test ui::` |
-| The keyboard is unaffected by a released capture | new `#[test]` stepping both dashboards through one key sequence and comparing | unit | seam replaced | `cargo test ui::app` |
-| The inventory's shape is asserted, not described | existing `#[test]`, counts updated to 5,7,4,5,5,6 summing to 32 | unit | none | `cargo test ui::help` |
-| `Space` and `Esc` each appear under their route | existing `#[test]` — regression | unit | none | `cargo test ui::help` |
-| Both quit keys have a row | existing `#[test]` — regression | unit | none | `cargo test ui::help` |
-| `m` has a row in the `Pane` group | new `#[test]`, plus the existing executed binding sweep in `tests/doc_contract.rs` | unit + contract | none | `cargo test` |
-| The badge is drawn first and is additive | new render `#[test]` at 120x20 and 60x20, asserting columns and `DIM` | unit | `TestBackend` real | `cargo test ui::view` |
-| The badge survives a width that drops every hint | new render `#[test]` at 14x20, 13x20, 12x20 | unit | `TestBackend` real | `cargo test ui::view` |
-| A released capture drops `g focus` at the mandated narrow width | new render `#[test]` at 60x20, reachable socket | unit | `TestBackend` real | `cargo test ui::view` |
-| Both badges can be on screen at once and are distinguishable | new render `#[test]` with `file_mode` and released capture both set | unit | `TestBackend` real | `cargo test ui::view` |
+| binding-inventory · An action added without a help row fails `cargo test` | `#[test]` + executed sweep — **carried**, must stay green | unit + contract | none | `cargo test` |
+| binding-inventory · A binding removed from the driver and left in the help fails | `#[test]` + executed sweep — **carried**, must stay green | unit + contract | none | `cargo test` |
+| binding-inventory · The sweep's totals and the exemption set are pinned | `#[test]` + executed sweep | unit + contract | none | `cargo test` |
+| binding-inventory · The sweep covers the mouse under both overlay states | `#[test]` + executed sweep — **carried**, must stay green | unit + contract | none | `cargo test` |
+| binding-inventory · `Action::Select` has a `Mouse` row and no exemption | `#[test]` + executed sweep | unit + contract | none | `cargo test` |
+| binding-inventory · The inventory's shape is asserted, not described | `#[test]` + executed sweep — **carried**, must stay green | unit + contract | none | `cargo test` |
+| binding-inventory · `Space` and `Esc` each appear under their route | `#[test]` + executed sweep — **carried**, must stay green | unit + contract | none | `cargo test` |
+| binding-inventory · Both quit keys have a row | `#[test]` + executed sweep — **carried**, must stay green | unit + contract | none | `cargo test` |
+| dashboard-loop · Pointer motion does not cost a frame | `#[test]` in `src/ui/app.rs` — **carried**, must stay green | unit | seam replaced | `cargo test ui::app` |
+| dashboard-loop · A click after motion still resolves against the drawn frame | `#[test]` in `src/ui/app.rs` — **carried**, must stay green | unit | seam replaced | `cargo test ui::app` |
+| dashboard-loop · A held-button drag draws and a free pointer motion does not | `#[test]` in `src/ui/app.rs` | unit | seam replaced | `cargo test ui::app` |
+| dashboard-loop · `Dashboard` has no `Default` and no site elides a field | `#[test]` in `src/ui/app.rs` — **carried**, must stay green | unit | seam replaced | `cargo test ui::app` |
+| dashboard-loop · The pure view files name no I/O API | `#[test]` in `src/ui/app.rs` — **carried**, must stay green | unit | seam replaced | `cargo test ui::app` |
+| dashboard-loop · The shell never names the CLI seam | `#[test]` in `src/ui/app.rs` — **carried**, must stay green | unit | seam replaced | `cargo test ui::app` |
+| dashboard-loop · Change literals live only in the gated file | `#[test]` in `src/ui/app.rs` — **carried**, must stay green | unit | seam replaced | `cargo test ui::app` |
+| dashboard-loop · The render path names no channel, thread, lock, or clock | `#[test]` in `src/ui/app.rs` — **carried**, must stay green | unit | seam replaced | `cargo test ui::app` |
+| dashboard-loop · No test sleeps and then asserts something has already happened | `#[test]` in `src/ui/app.rs` — **carried**, must stay green | unit | seam replaced | `cargo test ui::app` |
+| dashboard-loop · `file_mode` is set by the composition root and by nothing else | `#[test]` in `src/ui/app.rs` — **carried**, must stay green | unit | seam replaced | `cargo test ui::app` |
+| dashboard-loop · Every field is named at every construction site | `#[test]` in `src/ui/app.rs` | unit | seam replaced | `cargo test ui::app` |
+| dashboard-loop · `selection` starts empty and is cleared rather than reloaded | `#[test]` in `src/ui/app.rs` | unit | seam replaced | `cargo test ui::app` |
+| doc-conformance · The twelfth claim holds and is falsifiable | leg in `tests/doc_contract.rs` | contract | files on disk | `cargo test --test doc_contract` |
+| doc-conformance · The documented claim count matches the file | leg in `tests/doc_contract.rs` | contract | files on disk | `cargo test --test doc_contract` |
+| help-overlay · The agent keys launch nothing while the overlay is open | render `#[test]` — **carried**, must stay green | unit | `TestBackend` real | `cargo test ui::help` |
+| help-overlay · Both quit keys still quit from inside the overlay | render `#[test]` — **carried**, must stay green | unit | `TestBackend` real | `cargo test ui::help` |
+| help-overlay · The overlay swallows every inert action | render `#[test]` | unit | `TestBackend` real | `cargo test ui::help` |
+| help-overlay · `j` and `k` scroll the overlay rather than the frame beneath | render `#[test]` — **carried**, must stay green | unit | `TestBackend` real | `cargo test ui::help` |
+| help-overlay · The overlay lists the agent keys when the socket is unreachable | render `#[test]` — **carried**, must stay green | unit | `TestBackend` real | `cargo test ui::help` |
+| help-overlay · `Action::Select` is inert while the overlay is open | render `#[test]` | unit | `TestBackend` real | `cargo test ui::help` |
+| help-overlay · The grammar renders at 120 columns | render `#[test]` — **carried**, must stay green | unit | `TestBackend` real | `cargo test ui::help` |
+| help-overlay · The grammar renders at 60 columns | render `#[test]` — **carried**, must stay green | unit | `TestBackend` real | `cargo test ui::help` |
+| help-overlay · The key column is measured in display columns | render `#[test]` — **carried**, must stay green | unit | `TestBackend` real | `cargo test ui::help` |
+| list-selection · The first target is selected on startup at both widths | `#[test]` in `src/ui/app.rs` — **carried**, must stay green | unit | none | `cargo test ui::app ui::list` |
+| list-selection · `j`, `k`, and the arrows move the cursor over headers and changes | `#[test]` in `src/ui/app.rs` — **carried**, must stay green | unit | none | `cargo test ui::app ui::list` |
+| list-selection · The cursor clamps at both ends rather than wrapping | `#[test]` in `src/ui/app.rs` — **carried**, must stay green | unit | none | `cargo test ui::app ui::list` |
+| list-selection · The cursor crosses the archived header into the archived rows | `#[test]` in `src/ui/app.rs` — **carried**, must stay green | unit | none | `cargo test ui::app ui::list` |
+| list-selection · A collapsed section's changes are neither visible nor addressable | `#[test]` in `src/ui/app.rs` — **carried**, must stay green | unit | none | `cargo test ui::app ui::list` |
+| list-selection · Navigation over an empty visible list is inert | `#[test]` in `src/ui/app.rs` — **carried**, must stay green | unit | none | `cargo test ui::app ui::list` |
+| list-selection · `Enter` on a section header does nothing | `#[test]` in `src/ui/app.rs` — **carried**, must stay green | unit | none | `cargo test ui::app ui::list` |
+| list-selection · `Target` carries three members and no resolver emits a fourth | `#[test]` in `src/ui/app.rs` | unit | none | `cargo test ui::app ui::list` |
+| mouse-input · The key table is unchanged | `#[test]` in `src/ui/driver.rs` — **carried**, must stay green | unit | none — pure resolver | `cargo test ui::driver` |
+| mouse-input · Every mouse action has a key that produces the same effect | `#[test]` in `src/ui/driver.rs` — **carried**, must stay green | unit | none — pure resolver | `cargo test ui::driver` |
+| mouse-input · `Action::Select` is the only mouse-only action, by name and count | `#[test]` in `src/ui/driver.rs` | unit | none — pure resolver | `cargo test ui::driver` |
+| mouse-input · The pane is still complete without a pointer | `#[test]` in `src/ui/driver.rs` | unit | none — pure resolver | `cargo test ui::driver` |
+| mouse-input · The documented bindings match the resolver | `#[test]` in `src/ui/driver.rs` — **carried**, must stay green | unit | none — pure resolver | `cargo test ui::driver` |
+| mouse-input · The documented confined set matches the gate | `#[test]` in `src/ui/driver.rs` — **carried**, must stay green | unit | none — pure resolver | `cargo test ui::driver` |
+| mouse-input · The documented bypass names what was measured | `#[test]` in `src/ui/driver.rs` | unit | none — pure resolver | `cargo test ui::driver` |
+| mouse-input · A click selects a change row and a second click opens it | `#[test]` in `src/ui/driver.rs` — **carried**, must stay green | unit | none — pure resolver | `cargo test ui::driver` |
+| mouse-input · A click on a section header folds it exactly as `Space` does | `#[test]` in `src/ui/driver.rs` — **carried**, must stay green | unit | none — pure resolver | `cargo test ui::driver` |
+| mouse-input · A click on an archived header opens an unresolved archive and requests its refresh | `#[test]` in `src/ui/driver.rs` — **carried**, must stay green | unit | none — pure resolver | `cargo test ui::driver` |
+| mouse-input · A click on an artifact-section header folds it exactly as `Space` does | `#[test]` in `src/ui/driver.rs` — **carried**, must stay green | unit | none — pure resolver | `cargo test ui::driver` |
+| mouse-input · A click in an open section's body arms a selection and folds nothing | `#[test]` in `src/ui/driver.rs` | unit | none — pure resolver | `cargo test ui::driver` |
+| mouse-input · A non-foldable tab's content is selectable too | `#[test]` in `src/ui/driver.rs` | unit | none — pure resolver | `cargo test ui::driver` |
+| mouse-input · A click on a tab cell switches to that artifact | `#[test]` in `src/ui/driver.rs` — **carried**, must stay green | unit | none — pure resolver | `cargo test ui::driver` |
+| mouse-input · Clicks that address nothing are inert | `#[test]` in `src/ui/driver.rs` — **carried**, must stay green | unit | none — pure resolver | `cargo test ui::driver` |
+| mouse-input · The other buttons and the non-press kinds are inert | `#[test]` in `src/ui/driver.rs` — **carried**, must stay green | unit | none — pure resolver | `cargo test ui::driver` |
+| mouse-input · A click on a task group's header folds that group | `#[test]` in `src/ui/driver.rs` — **carried**, must stay green | unit | none — pure resolver | `cargo test ui::driver` |
+| mouse-input · A click on a nested scenario header folds only that scenario | `#[test]` in `src/ui/driver.rs` — **carried**, must stay green | unit | none — pure resolver | `cargo test ui::driver` |
+| terminal-lifecycle · The real implementation is the only place naming a terminal-mode function | `#[test]` with the `Recorder` double — **carried**, must stay green | unit | `TerminalOps` replaced | `cargo test ui::terminal` |
+| terminal-lifecycle · No test constructs the real terminal implementation | `#[test]` with the `Recorder` double — **carried**, must stay green | unit | `TerminalOps` replaced | `cargo test ui::terminal` |
+| terminal-lifecycle · The clipboard write is confined and reports its own failure | `#[test]` with the `Recorder` double | unit | `TerminalOps` replaced | `cargo test ui::terminal` |
+| terminal-lifecycle · A clipboard write changes no terminal mode | `#[test]` with the `Recorder` double | unit | `TerminalOps` replaced | `cargo test ui::terminal` |
+| text-selection · A drag begins only in the detail content area | new `#[test]` | unit | seam replaced, `TestBackend` real | `cargo test ui::` |
+| text-selection · A section header stays clickable and is never selectable | new `#[test]` | unit | seam replaced, `TestBackend` real | `cargo test ui::` |
+| text-selection · Anchor holds while the focus follows | new `#[test]` | unit | seam replaced, `TestBackend` real | `cargo test ui::` |
+| text-selection · A drag past the edge clamps and does not scroll | new `#[test]` | unit | seam replaced, `TestBackend` real | `cargo test ui::` |
+| text-selection · A single press with no motion selects nothing | new `#[test]` | unit | seam replaced, `TestBackend` real | `cargo test ui::` |
+| text-selection · The span is highlighted at both mandated widths | new `#[test]` | unit | seam replaced, `TestBackend` real | `cargo test ui::` |
+| text-selection · The highlight persists after release and clears on the next interaction | new `#[test]` | unit | seam replaced, `TestBackend` real | `cargo test ui::` |
+| text-selection · A single-line selection copies exactly the selected columns | new `#[test]` | unit | seam replaced, `TestBackend` real | `cargo test ui::` |
+| text-selection · A multi-line selection joins with newlines and drops padding | new `#[test]` | unit | seam replaced, `TestBackend` real | `cargo test ui::` |
+| text-selection · The clipboard write cannot be confirmed, and the pane claims nothing | new `#[test]` | unit | seam replaced, `TestBackend` real | `cargo test ui::` |
+| text-selection · One press arms, two select a word, three select the row | new `#[test]` | unit | seam replaced, `TestBackend` real | `cargo test ui::` |
+| text-selection · A press elsewhere restarts the count | new `#[test]` | unit | seam replaced, `TestBackend` real | `cargo test ui::` |
+| text-selection · A click selects the whole token, not a fragment | new `#[test]` | unit | seam replaced, `TestBackend` real | `cargo test ui::` |
+| text-selection · A dragged span arms rather than widening | new `#[test]` | unit | seam replaced, `TestBackend` real | `cargo test ui::` |
+| view-palette · The palette answers every role with a `Style` | render `#[test]` — **carried**, must stay green | unit | `TestBackend` real | `cargo test ui::palette ui::view` |
+| view-palette · The confinement gate catches a `Color` named outside the palette | render `#[test]` — **carried**, must stay green | unit | `TestBackend` real | `cargo test ui::palette ui::view` |
+| view-palette · The palette module reaches no I/O and measures no width | render `#[test]` — **carried**, must stay green | unit | `TestBackend` real | `cargo test ui::palette ui::view` |
+| view-palette · The enum's membership is exactly this list | render `#[test]` — **carried**, must stay green | unit | `TestBackend` real | `cargo test ui::palette ui::view` |
+| view-palette · The three delta roles carry their colour and no modifier | render `#[test]` — **carried**, must stay green | unit | `TestBackend` real | `cargo test ui::palette ui::view` |
+| view-palette · The full set of shared coloured styles is still exactly five groups | render `#[test]` — **carried**, must stay green | unit | `TestBackend` real | `cargo test ui::palette ui::view` |
+| view-palette · A badged header row's colours survive the row's own role | render `#[test]` — **carried**, must stay green | unit | `TestBackend` real | `cargo test ui::palette ui::view` |
+| view-palette · A delta badge and a clause keyword are the same style in one frame | render `#[test]` — **carried**, must stay green | unit | `TestBackend` real | `cargo test ui::palette ui::view` |
+| view-palette · `style_for` maps each `DeltaOp` to its own role | render `#[test]` — **carried**, must stay green | unit | `TestBackend` real | `cargo test ui::palette ui::view` |
+| view-palette · `Selected` reverses and colours nothing | render `#[test]` | unit | `TestBackend` real | `cargo test ui::palette ui::view` |
+| view-palette · Faces reach the buffer as coloured styles at both mandated widths | render `#[test]` — **carried**, must stay green | unit | `TestBackend` real | `cargo test ui::palette ui::view` |
+| view-palette · A section header's role is selected by its kind, not by its face | render `#[test]` — **carried**, must stay green | unit | `TestBackend` real | `cargo test ui::palette ui::view` |
+| view-palette · Heading foreground wins over a code span inside it | render `#[test]` — **carried**, must stay green | unit | `TestBackend` real | `cargo test ui::palette ui::view` |
+| view-palette · A plain face is the default style | render `#[test]` — **carried**, must stay green | unit | `TestBackend` real | `cargo test ui::palette ui::view` |
+| view-palette · The two new face fields compose in their stated positions | render `#[test]` — **carried**, must stay green | unit | `TestBackend` real | `cargo test ui::palette ui::view` |
+| view-palette · A checklist row reaches the buffer with its label coloured | render `#[test]` — **carried**, must stay green | unit | `TestBackend` real | `cargo test ui::palette ui::view` |
+| view-palette · A selected cell keeps its own role and gains the reversal | render `#[test]` | unit | `TestBackend` real | `cargo test ui::palette ui::view` |
 
 ## Decisions
 
-**Decision 1 — The capture change is an injected `&dyn Fn(bool) -> Result<(), String>`, not a
-`&TerminalGuard` parameter.** `run_loop` already takes the artifact reader this way, so the
-pattern is the crate's own rather than a new one, and a test drives the toggle with a closure
-instead of constructing a guard. *Alternative considered:* pass `&TerminalGuard` into
-`run_loop`. Rejected — it puts a terminal-owning type in the loop's signature, and
-`NOCLI-SHELL`-style confinement is easier to keep when the loop names a function type rather
-than a struct that owns real terminal state.
+**Decision 1 — Partition by region, never disambiguate by motion.** `ui::layout::zone` already
+answers "what is under this point". A drag begins only on a non-header `Zone::DetailRow`.
+*Alternative considered:* press/release disambiguation — dispatch a click on release only when
+no motion intervened. Rejected: it changes the dispatch timing of all four existing click
+bindings, and Copilot demonstrates the partition works without it.
 
-**Decision 2 — `mouse_capture` is a `Dashboard` field, making sixteen.** The footer renders it
-and every view is a pure function of `Dashboard`, so it cannot live anywhere the views cannot
-see. *Alternative considered:* a local in `run_loop`. Rejected — the footer could not read it.
-*Alternative considered:* a fourth `Refresh` field. Rejected for the reason `file_mode` is a
-`Dashboard` field: `Refresh`'s fields are one-shot flags the loop consumes or are replaced
-wholesale on any iteration, and a toggle's state must survive both.
+**Decision 2 — Press counting, not a clock.** `NOBLOCK` sweeps `src/ui/` for `Instant::now`,
+`SystemTime::now` and `.elapsed()`, and crossterm synthesises no double-click event.
+Consecutive presses at one cell are counted. *Alternative considered:* timestamping at the
+`EventSource` seam and passing a monotonic `u64` inward. Rejected as a seam change for one
+gesture, when `list-selection`'s "second click opens" already establishes the state-based
+idiom in this pane.
 
-**Decision 3 — The badge goes in the footer, not the list region's heading row.** Below the
-100-column breakpoint at `Route::Detail` the list region is not drawn at all, and the detail
-route is exactly where a reader releases capture to copy a requirement out of a spec — a
-heading-row badge would be invisible at the moment it is most needed. The footer is drawn at
-every width and route. *Alternative considered:* the heading row beside `file mode`, with a
-combined drop-whole rule. Rejected for the invisibility above, and because two right-aligned
-badges competing for one row needs an ordering rule that buys nothing.
+**Decision 3 — `Selection` is one `Dashboard` field carrying a granularity.** Armed, word, row
+or span. Armed is the state after a first press: anchor and focus at one cell, drawn as
+nothing. *Alternative considered:* a separate `last_click` field. Rejected — two fields that
+must be cleared together are one field that cannot be forgotten.
 
-**Decision 4 — The badge is `mouse off (m)` and carries its own key.** `mouse off` names a
-state and offers no way out of it. The reader who pressed `m` by accident needs the way back
-where they are already looking. *Alternative considered:* `mouse off` alone, nine columns to
-match `file mode`. Rejected — the symmetry is pleasing and the omission is a trap.
+**Decision 4 — A sibling of `detail`, not a field inside it.** `sync_detail` reloads `Detail`
+wholesale on a tab switch, a selection change, or an adopted refresh. A selection living
+inside it would be *silently discarded* by a reload rather than *deliberately cleared* by one,
+which is the difference between a rule and an accident.
 
-**Decision 5 — The key is `m`.** Free, mnemonic, and harmless when mis-keyed. Its neighbours
-in the `Pane` and `Agents` groups — `a`, `c`, `s`, `g` — all start or focus an agent, so a
-slip there starts a process; a slip onto `m` releases capture and pressing it again undoes it.
-*Alternatives considered:* `M` (shifted keys are used nowhere in the pane), `Ctrl-M` (which is
-`Enter`, and would be a genuine bug).
+**Decision 5 — One `Action` variant carrying the phase.** Each variant costs a `Mouse`
+inventory row, and each row moves `content_rows`, `binding-inventory`'s counts and
+`help-overlay`'s arithmetic. One row reading "select text in the artifact area" is also what a
+reader needs; three phase rows would describe an implementation.
 
-**Decision 6 — Capture state is per-session and is not persisted.** It is not written to
-`agent-names.toml`, not added to `config.toml`, and not remembered across restarts. The pane's
-one write stays what `SPEC.md` says it is. A reader who wants capture off permanently is
-asking for a configuration key, which is a different change with a different argument.
-*Alternative considered:* a `config.toml` key for the start-up state. Rejected as scope, and
-because the measured problem is momentary — select, copy, resume.
+**Decision 6 — The pane claims nothing about the clipboard.** An OSC 52 write cannot be
+acknowledged, so a terminal that ignores it is indistinguishable from one that honoured it.
+The pane therefore renders no "copied" message. The **persisting highlight** is the only claim
+it makes: this is what was selected. A write that fails *locally* is observable and is
+reported. *Alternative considered:* a footer confirmation. Rejected as a claim the pane cannot
+support.
 
-**Decision 7 — `restore_then` keeps calling `disable_mouse` unconditionally.** This is the
-proposal's Open Question 3, and the answer is that nothing has to change: the hook already
-consults no state, which is exactly what makes it safe across a toggle. Making it conditional
-on live capture state would require reading that state from a panicking thread, which is the
-hazard the unconditional call was chosen to avoid in `mouse-input`. Writing a disable sequence
-to a terminal that is not reporting is inert.
+**Decision 7 — The highlight composes with the underlying role.** A selected cell is its own
+role's style patched with `Role::Selected`, which is `REVERSED` and carries no colour.
+*Alternative considered:* draw selected cells as `Role::Selected` alone. Rejected — it would
+flatten headings, code spans and delta badges into one undifferentiated block, erasing exactly
+what the content area exists to show.
 
-**Decision 8 — A refused change leaves the old state.** No optimistic flip. A pane claiming
-capture is released while the terminal is still reporting would show the badge while the mouse
-keeps being captured — the worst of both, and unfalsifiable from the reader's seat.
+**Decision 8 — Selection works on non-foldable artifacts.** `detail_row_click` short-circuits
+on `!detail.foldable()` and returns `Ignore`. Selection must not inherit that: a
+single-section artifact is a whole rendered document and the likeliest thing to copy. Stated
+because inheriting it would be the path of least resistance.
 
-**Decision 9 — `Role::MouseOff` is a new palette role, not a reuse of `Role::FileMode`.** Both
-badges can be on screen at once. Two badges sharing a full style while meaning unrelated
-things is the collision Decision 3's placement exists to avoid, and reusing the role would
-reintroduce it one layer down. Both are `DIM`, because both name a mode rather than a fault.
+**Decision 9 — `Target::DetailLine` is removed, not left unused.** A variant no resolver emits
+rots, and the crate's `NODEFAULT-UI` discipline is built on exhaustive matches that would keep
+demanding an arm for it.
 
-**Decision 10 — The mode set is not narrowed.** Measured to buy nothing for selection. Left
-alone deliberately so that a future change removing `?1002`/`?1003`/`?1015` has to make its
-own argument — dead-cost removal — rather than inheriting this change's.
+**Decision 10 — No auto-scroll at the edges.** The focus clamps to the content area. This
+bounds the change, keeps `detail.scroll` out of the drag path entirely, and leaves a
+well-defined follow-up. Copilot's behaviour here is unmeasured, so copying it would be guessing.
 
 ## Risks / Trade-offs
 
-- **A redraw mid-selection makes the copied text stale.** The loop still draws when a refresh
-  or an agent poll is adopted, and a terminal's selection is a region of the screen, not of
-  the text. → Not mitigated in code, and deliberately: pausing refreshes while capture is
-  released would make the pane lie about the repository to protect a selection, and the window
-  is a second or two. Recorded here so a later change does not "fix" it that way.
-- **Footer width pressure.** Fifteen columns pushes the reachable footer to 76, dropping
-  `g focus` at the mandated 60-column frame. → Accepted on the terms the capability already
-  accepts dropping `s archive`; the keys stay in `SPEC.md`, `README.md`, and the help overlay,
-  and the badge is only present while capture is released.
-- **One terminal family measured.** Ghostty, macOS. → The documentation says exactly that and
-  claims nothing about iTerm2, Terminal.app, or Linux. The toggle itself is terminal-agnostic:
-  it works by not reporting, which every terminal understands.
-- **Three pinned counts move at once** — `INVENTORY`'s group counts (to 5,7,4,5,5,6 = 32), the
-  overlay's row count (32 bindings + 6 headings + 5 blanks = **43**, from 42), and
-  `Dashboard`'s field count (to sixteen). → All three are asserted in `cargo test`, and the
-  failure names both sides; the task list moves them in one group so the tree is never half-way.
-- **`m` is not reachable while filtering.** A reader filtering the list cannot release capture
-  without leaving filter mode first. → Accepted: `m` must type there, as every printable key
-  does, and `Esc` is one key away.
+- **A slow second press at one cell still widens.** No clock means no timeout. → Accepted on
+  the same terms `list-selection`'s "second click opens" already accepts it; that rule has
+  shipped without complaint.
+- **A refresh can move the rows under a selection.** The live tier replaces the change set on
+  its own cadence. → The selection is cleared whenever the detail content reloads. A cleared
+  selection is honest; a stale span pointing at different text is not.
+- **The clipboard is shared mutable state on the developer's machine.** → No test touches the
+  real clipboard at any tier; `TerminalOps` is replaced everywhere, and the `NORAW`-style
+  confinement keeps the real write in one file.
+- **Five pinned counts move at once** — `Dashboard` fields to 16, `Action` to 25, bound
+  actions to 23, `INVENTORY` to 32, `content_rows` to 43, `Target` down to 3. → Each is
+  asserted in `cargo test` and the failure names both sides. The task list must move each
+  count **in the same group as the code that changes it**, or `make check` is red between
+  groups — the defect that deadlocked the previous plan.
+- **`?1003` becomes load-bearing.** It was previously dead cost a future change might drop. →
+  Recorded as a non-goal reversal in the proposal, so a later dead-code sweep does not remove
+  the mode this feature consumes.
 
 ## Migration Plan
 
-No migration, no backfill, no rollback procedure. The change is additive and per-session: it
-adds a field initialised to today's behaviour, a key, and a conditional footer badge. Reverting
-is deleting them. Deploy order is a single `make build`; the manifest is untouched, so an
-already-linked plugin picks it up.
+No migration, no backfill, no rollback procedure. Additive except for one removed `Target`
+variant with a keyboard equivalent that predates it. Deploy order is a single `make build`;
+the manifest is untouched.
 
 ## Open Questions
 
-None. The proposal's three are closed: the mode-set question by the measurement (Decision 10),
-the badge's home by Decision 3, and the panic-safety question by Decision 7.
+None. The proposal's three are closed: Decision 5 settles the variant count, Decision 6 the
+unacknowledgeable write, and the refresh interaction is resolved by clearing on reload
+(Decision 4 and the second risk above).
