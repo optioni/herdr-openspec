@@ -81,6 +81,7 @@ pub enum Role {
     DeltaAdded,
     DeltaModified,
     DeltaRemoved,
+    Selected,
 }
 
 /// The role table, transcribed from `specs/view-palette/spec.md`'s modifier table
@@ -221,6 +222,13 @@ pub fn style(role: Role) -> Style {
         Role::DeltaAdded => Style::default().fg(Color::Green),
         Role::DeltaModified => Style::default().fg(Color::Yellow),
         Role::DeltaRemoved => Style::default().fg(Color::LightRed),
+        // `text-selection` -> design.md -> Decision 7: the highlight composes
+        // with the underlying role rather than replacing it, so `Selected`
+        // carries no colour of its own — a coloured heading or code span stays
+        // coloured, only inverted. `REVERSED` alone, and no other role carries
+        // `REVERSED` alone, which is what keeps a selected span distinguishable
+        // from `ListRowSelected`'s plain `BOLD` without naming a colour.
+        Role::Selected => Style::default().add_modifier(Modifier::REVERSED),
     }
 }
 
@@ -257,10 +265,12 @@ mod tests {
     }
 
     /// Every `Role` variant, the five `AgentStatus` values, and heading levels 1
-    /// through 6 — thirty-six rows, so no arm of `style` is asserted by a
-    /// hand-listed subset of the enum. `tasks-emphasis` added the last five,
-    /// `Muted` and the four `task-labels` roles; `foldable-spec-sections` added
-    /// `DetailSection` and `DetailSectionSelected` before them.
+    /// through 6 — forty rows, so no arm of `style` is asserted by a
+    /// hand-listed subset of the enum. `text-selection` added the last one,
+    /// `Selected`; `spec-emphasis` added the three delta roles before it;
+    /// `tasks-emphasis` added `Muted` and the four `task-labels` roles before
+    /// those; `foldable-spec-sections` added `DetailSection` and
+    /// `DetailSectionSelected` before them all.
     fn table() -> Vec<Expect> {
         vec![
             row(Role::FileMode, Modifier::DIM, Some(Color::Yellow), None),
@@ -342,6 +352,7 @@ mod tests {
             row(Role::DeltaAdded, NONE, Some(Color::Green), None),
             row(Role::DeltaModified, NONE, Some(Color::Yellow), None),
             row(Role::DeltaRemoved, NONE, Some(Color::LightRed), None),
+            row(Role::Selected, Modifier::REVERSED, None, None),
         ]
     }
 
@@ -382,6 +393,7 @@ mod tests {
             Role::DeltaAdded => "DeltaAdded".to_string(),
             Role::DeltaModified => "DeltaModified".to_string(),
             Role::DeltaRemoved => "DeltaRemoved".to_string(),
+            Role::Selected => "Selected".to_string(),
         }
     }
 
@@ -716,6 +728,7 @@ mod tests {
                 "Quoted",
                 "Strikethrough",
                 "Muted",
+                "Selected",
             ],
             "the uncoloured set moved"
         );
@@ -865,6 +878,7 @@ mod tests {
                 Role::DeltaAdded => "DeltaAdded",
                 Role::DeltaModified => "DeltaModified",
                 Role::DeltaRemoved => "DeltaRemoved",
+                Role::Selected => "Selected",
             }
         }
 
@@ -913,11 +927,12 @@ mod tests {
                 "DeltaAdded",
                 "DeltaModified",
                 "DeltaRemoved",
+                "Selected",
             ]
         );
 
-        // The three this change adds are among them, as are the five
-        // `tasks-emphasis` added before them.
+        // `Selected` is among them, as are the three `spec-emphasis` added and
+        // the five `tasks-emphasis` added before it.
         for role in [
             Role::Muted,
             Role::TaskEvidence,
@@ -927,6 +942,7 @@ mod tests {
             Role::DeltaAdded,
             Role::DeltaModified,
             Role::DeltaRemoved,
+            Role::Selected,
         ] {
             assert!(named.contains(&variant(role)), "{} is missing", label(role));
         }
