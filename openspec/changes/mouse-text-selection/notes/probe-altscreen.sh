@@ -23,13 +23,17 @@ RESULTS="${HERE}/measurements.md"
 
 flag() { [ -n "${1:-}" ] && echo yes || echo no; }
 
-SET_IDS="alt-off alt-minimal alt-full"
+# Override with PROBE_SETS to re-measure a subset, e.g.
+#   PROBE_SETS="press-only press-sgr" bash notes/probe-altscreen.sh
+SET_IDS="${PROBE_SETS:-alt-off alt-minimal alt-full}"
 
 set_modes() {
   case "$1" in
     alt-off)     echo "" ;;
     alt-minimal) echo "1000 1006" ;;
     alt-full)    echo "1000 1002 1003 1015 1006" ;;
+    press-only)  echo "1000" ;;
+    press-sgr)   echo "1000 1006" ;;
   esac
 }
 
@@ -38,6 +42,8 @@ set_label() {
     alt-off)     echo "ALTERNATE screen, no reporting — the hypothesis under test" ;;
     alt-minimal) echo "ALTERNATE screen, press/release + SGR" ;;
     alt-full)    echo "ALTERNATE screen, today's full bundle" ;;
+    press-only)  echo "?1000 ONLY — no motion asked for. DOES PLAIN DRAG STILL SELECT?" ;;
+    press-sgr)   echo "?1000 + ?1006 — same, with extended coords. PLAIN DRAG?" ;;
   esac
 }
 
@@ -93,8 +99,8 @@ run_set() {
   at 6;  printf '    india juliett kilo lima mike november oscar papa'
   at 7;  printf '    quebec romeo sierra tango uniform victor whiskey'
   at 9;  printf 'Then, watching the log below:'
-  at 10; printf '  1. SCROLL THE WHEEL — the key question. Does ^[[A / ^[[B appear?'
-  at 11; printf '  2. single click      3. Shift+drag'
+  at 10; printf '  1. PLAIN DRAG across the words above — does the TERMINAL highlight them?'
+  at 11; printf '  2. single click      3. scroll wheel      4. Shift+drag'
   at 13; printf 'Press  q  to finish this set.'
   at "$LOG_TOP"; printf 'events the APPLICATION received:'
 

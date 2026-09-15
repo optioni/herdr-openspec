@@ -219,3 +219,41 @@ What the pane actually loses with reporting off is narrower than it first appear
 So the live question is no longer "how do we add a toggle" but "which way round is the
 default", and the honest answer depends on how much the four click bindings are worth
 against selection working without anyone pressing anything.
+
+
+## The open cell: can we have both, with no toggle?
+
+The requirement is now "native selection **and** click events, no toggle". Whether that is
+achievable turns on exactly one cell that has never been answered: **`alt-minimal`'s plain
+drag**, recorded as `?` in the run above.
+
+The reasoning that makes it worth measuring rather than assuming:
+
+- `alt-full` suppresses plain drag, but `alt-full` enables `?1002` (button-motion) and
+  `?1003` (any-motion) — the two modes that *are* the terminal handing drags to the
+  application. Its `no` says nothing about a mode set that asks for no motion.
+- `?1000` asks for **press and release only**. A terminal that is not being asked to report
+  motion has no reason to stop doing its own drag-selection, and `alt-minimal` already
+  measured `app saw click: yes`. If plain drag also selects there, the pane can have both
+  with no key, no badge, and no new state — the smallest version of this change by a wide
+  margin.
+- The known cost if it works: a press that begins a native drag is *also* delivered to the
+  app as a click, so dragging to select text would additionally select the row under the
+  press. Harmless in this pane — selecting a row renders a different artifact and writes
+  nothing — but it must be specified rather than discovered.
+
+Measured with:
+
+```sh
+PROBE_SETS="press-only press-sgr" bash openspec/changes/mouse-text-selection/notes/probe-altscreen.sh
+```
+
+`press-only` is `?1000` alone; `press-sgr` is `?1000 ?1006`. The pair separates the
+coordinate extension from the tracking mode, in case the terminal treats them differently.
+
+**If plain drag is `no` in both**, then native selection and click reporting are mutually
+exclusive on this terminal, no arrangement of DEC modes changes it, and the change must pick
+a trade rather than deliver both. Two fallbacks would remain, and neither is plugin code:
+the `Shift` bypass, already measured to work under every mode set; and Ghostty's own
+configuration, which may expose a setting permitting selection while an application is
+reporting.
