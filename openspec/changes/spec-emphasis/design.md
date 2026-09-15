@@ -63,9 +63,13 @@ disagree about it.
 Every interface this change touches is internal to the crate — there is no wire format, no
 persisted schema, and no consumer outside `src/`.
 
-- **`crate::tasks::role_of`** — new `pub fn`, **additive**. `label_of` is reimplemented in
-  terms of it and its observable behaviour is unchanged, asserted by a scenario that calls both
-  and compares. Consumers: `crate::specs::clause_of` (new) and `label_of` itself.
+- **`crate::tasks::role_of`** — an **existing private** `fn role_of(run: &str) -> LabelRole`
+  (`src/tasks.rs:205`, found by `grep -n "fn role_of" src/tasks.rs`) that becomes `pub` and
+  returns `Option<LabelRole>`; its `_ => Other` arm moves to `label_of`'s call site as
+  `.unwrap_or(LabelRole::Other)`. `label_of`'s observable behaviour is unchanged, asserted by a
+  scenario that calls both over all thirteen tokens and compares. Consumers:
+  `crate::specs::clause_of` (new) and `label_of` itself. This is a **widening of an existing
+  seam**, not a new one — the table was already reached through exactly one function.
 - **`crate::specs`** — a new module, wholly additive. Consumers: `ui::app::sync_detail` and
   `ui::markdown::lines`.
 - **`ArtifactSection`** — gains a fifth field. **Breaking at compile time** for every literal
@@ -279,9 +283,11 @@ Relaxing rule 4 was rejected outright. `task-labels` measured **zero** false pos
 2563 task items, and that asymmetry — the rule's errors are misses, never wrong colours — is
 the property the colon test buys.
 
-Chosen: **share the classification, split the recognition.** `tasks::role_of` exposes the table;
-`label_of` is reimplemented in terms of it, so the two cannot drift; `specs::clause_of` looks a
-bold run up in that same table. Two implementations of one fact drift, and a spec's `WHEN` and a
+Chosen: **share the classification, split the recognition.** `tasks::role_of` already *is* the
+table's one site and `label_of` already reaches it only through that function, so the work is to
+widen it — `pub`, and `Option<LabelRole>` so a caller that has not already decided the run is a
+label can decline — not to extract it. `specs::clause_of` then looks a bold run up in that same
+table. Two implementations of one fact drift, and a spec's `WHEN` and a
 task's `WHEN` are one fact.
 
 This forced the narrowing of `markdown-render`'s "SHALL NOT call any function of `crate::tasks`"

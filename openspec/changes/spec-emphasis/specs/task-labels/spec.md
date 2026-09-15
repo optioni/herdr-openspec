@@ -12,8 +12,9 @@ table, and everything unmatched SHALL be `Other`:
 | `Confirm` | `VERIFY`, `THEN`, `ASSERT` |
 | `Other` | every other recognised run |
 
-The table SHALL be reachable as a function of its own, so a second consumer classifies against
-it rather than against a copy of it:
+The table already **is** a function of its own — `fn role_of(run: &str) -> LabelRole` in
+`src/tasks.rs`, private, with `Other` as its fallback arm. It SHALL become reachable to a second
+consumer, which changes its visibility and its return type and nothing else:
 
 ```rust
 /// The lifecycle position `run` names, or `None` when the table holds no row
@@ -21,11 +22,15 @@ it rather than against a copy of it:
 pub fn role_of(run: &str) -> Option<LabelRole>;
 ```
 
-`role_of` SHALL be the **one** site of the table above, and `label_of` SHALL classify a run it
-has recognised by calling it — `role_of(run).unwrap_or(LabelRole::Other)` — rather than by
-matching the tokens a second time. `spec-delta-badges` is the second consumer and the reason
-this requirement changed: a spec's `WHEN` and a task's `WHEN` are the same fact, and two
-implementations of one fact drift.
+`role_of` SHALL stay the **one** site of the table above — it already is, and `label_of`
+already reaches the table only through it — so this is a widening of an existing seam and not a
+new one. The two changes are that it becomes `pub`, and that its `_ => LabelRole::Other`
+fallback arm becomes `_ => None`; `label_of` then absorbs the fallback at its own call site as
+`role_of(run).unwrap_or(LabelRole::Other)`, which SHALL leave `label_of`'s observable behaviour
+byte-identical for every input.
+
+`spec-delta-badges` is the second consumer and the reason this requirement changed: a spec's
+`WHEN` and a task's `WHEN` are the same fact, and two implementations of one fact drift.
 
 `role_of` returns `Option` where `label_of` returns `Other`, and the difference is load-bearing.
 `label_of` has already decided the run *is* a label by the time it classifies, so an
