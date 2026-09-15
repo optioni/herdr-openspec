@@ -416,15 +416,15 @@ against the assembled change and would fail against any one group reverted.
 
 <!-- kind: operational -->
 
-- [ ] 11.1 CHECK: Inspect the intended verification commands and affected tiers — `make check`
+- [x] 11.1 CHECK: Inspect the intended verification commands and affected tiers — `make check`
       is the single gate and runs format, lint, gates, test, and coverage.
-- [ ] 11.2 VERIFY: `cargo fmt --all -- --check` — clean.
-- [ ] 11.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors. This
+- [x] 11.2 VERIFY: `cargo fmt --all -- --check` — clean.
+- [x] 11.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors. This
       is the crate's type checker for this purpose; `cargo check` is subsumed by it.
-- [ ] 11.4 VERIFY: `make gates` — exits 0, every script included.
-- [ ] 11.5 VERIFY: `cargo test --all-features` — green.
-- [ ] 11.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` — passes, and the production-slice
+- [x] 11.4 VERIFY: `make gates` — exits 0, every script included.
+- [x] 11.5 VERIFY: `cargo test --all-features` — green.
+- [x] 11.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` — passes, and the production-slice
       floor from `scripts/coverage-prod.py` passes with it.
-- [ ] 11.7 VERIFY: `openspec validate tasks-emphasis --strict` — valid.
-- [ ] 11.8 VERIFY: `make check` — exits 0 as a whole. If it fails, name the failing
+- [x] 11.7 VERIFY: `openspec validate tasks-emphasis --strict` — valid.
+- [x] 11.8 VERIFY: `make check` — exits 0 as a whole. If it fails, name the failing
       sub-command here rather than the composite.
