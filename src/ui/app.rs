@@ -1246,7 +1246,18 @@ impl Dashboard {
     /// `Dashboard::apply` SHALL NOT recompute either, and design.md ->
     /// Decision 7 states that carrying `section` beside `line` is exactly why
     /// the variant has two fields.
+    ///
+    /// `text-selection`: a fold changes which rows `ui::detail::content_lines`
+    /// produces for this **same** `(dir, tab)` — a line index a standing
+    /// selection carries can point at different text the instant the fold
+    /// takes effect, with no reload to catch it: `sync_detail`'s cache key
+    /// does not see `detail.expanded` at all. `apply_click`'s
+    /// `Target::DetailHeader` arm already reaches this function through a
+    /// call site that clears first; clearing here too is what makes the
+    /// keyboard path (`Action::ToggleSection` at `Route::Detail`) agree
+    /// with it rather than relying on that caller to remember to.
     fn toggle_detail_section(&mut self, section: usize) {
+        self.selection = None;
         if !self.detail.expanded.remove(&section) {
             self.detail.expanded.insert(section);
         }

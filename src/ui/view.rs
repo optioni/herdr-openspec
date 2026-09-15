@@ -4629,6 +4629,41 @@ mod tests {
                 "width {width}: no cell is drawn selected after an adopted refresh"
             );
 
+            // `Space` (`Action::ToggleSection` at `Route::Detail`) folds an
+            // open section without ever changing the `(dir, tab)` cache key,
+            // so `sync_detail`'s reload-triggered clear never reaches it —
+            // the Change Review's third instance of a clearing trigger that
+            // is specified, unimplemented, and untested. `toggle_detail_section`
+            // now clears the selection itself, driven here the same way
+            // every other trigger above is: through `apply`, never
+            // hand-cleared.
+            let expanded = std::collections::BTreeSet::from([1]);
+            let mut folded = three_spec_dashboard(expanded, 1, Route::Detail);
+            folded.detail.drawn_width = Some(interior_width(width));
+            let fold_rows = crate::ui::detail::content_lines(
+                &folded.detail,
+                folded.selected_change(),
+                interior_width(width),
+            );
+            let fold_total = columns(&fold_rows[0].text()) as u16;
+            folded.selection = Some(Selection {
+                anchor: (0, 0),
+                focus: (0, fold_total),
+                granularity: Granularity::Span,
+                problem: None,
+            });
+            folded.apply(Action::ToggleSection);
+            assert_eq!(
+                folded.selection, None,
+                "width {width}: folding an open section must clear the selection"
+            );
+            let with_fold = render_at(width, 20, &folded);
+            assert_ne!(
+                cell(&with_fold, x0, y0).style(),
+                selected_style,
+                "width {width}: no cell is drawn selected after a fold"
+            );
+
             let cleared = base.clone();
             let with_cleared = render_at(width, 20, &cleared);
             assert_eq!(
