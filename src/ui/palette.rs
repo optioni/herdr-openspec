@@ -78,6 +78,9 @@ pub enum Role {
     TaskChange,
     TaskConfirm,
     TaskLabel,
+    DeltaAdded,
+    DeltaModified,
+    DeltaRemoved,
 }
 
 /// The role table, transcribed from `specs/view-palette/spec.md`'s modifier table
@@ -204,6 +207,20 @@ pub fn style(role: Role) -> Style {
         // This palette's one "no information" grey, used for exactly that: a
         // label the crate recognises as a label and classifies no further.
         Role::TaskLabel => Style::default().fg(Color::DarkGray),
+        // The three `spec-emphasis` delta roles take a colour on the same
+        // grounds and one stronger one: they colour a one-character marker —
+        // `+`, `~`, or `-` — which is distinguishable without colour, so
+        // colour here is redundancy rather than the only signal. No modifier:
+        // the badge's meaning is already in the glyph, so a modifier would add
+        // nothing a monochrome reader loses (design.md -> Decision 2).
+        //
+        // `LightRed`, not `Red`, for `TaskEvidence`'s reason: a reader scans
+        // the pane for exactly one red thing, and `Red` means `ListProblem`
+        // and nothing else. A removed requirement is ordinary delta content,
+        // not a problem.
+        Role::DeltaAdded => Style::default().fg(Color::Green),
+        Role::DeltaModified => Style::default().fg(Color::Yellow),
+        Role::DeltaRemoved => Style::default().fg(Color::LightRed),
     }
 }
 
@@ -322,6 +339,9 @@ mod tests {
             row(Role::TaskChange, NONE, Some(Color::Green), None),
             row(Role::TaskConfirm, NONE, Some(Color::Blue), None),
             row(Role::TaskLabel, NONE, Some(Color::DarkGray), None),
+            row(Role::DeltaAdded, NONE, Some(Color::Green), None),
+            row(Role::DeltaModified, NONE, Some(Color::Yellow), None),
+            row(Role::DeltaRemoved, NONE, Some(Color::LightRed), None),
         ]
     }
 
@@ -359,6 +379,9 @@ mod tests {
             Role::TaskChange => "TaskChange".to_string(),
             Role::TaskConfirm => "TaskConfirm".to_string(),
             Role::TaskLabel => "TaskLabel".to_string(),
+            Role::DeltaAdded => "DeltaAdded".to_string(),
+            Role::DeltaModified => "DeltaModified".to_string(),
+            Role::DeltaRemoved => "DeltaRemoved".to_string(),
         }
     }
 
@@ -511,9 +534,11 @@ mod tests {
             );
         }
 
-        // The eleven roles the spec names as carrying no modifier at all —
-        // `tasks-emphasis` moved the count from seven, `Muted` joining the
-        // modifier-carrying side and the four label roles the other.
+        // The fourteen roles the spec names as carrying no modifier at all —
+        // `tasks-emphasis` moved the count from seven to eleven, `Muted`
+        // joining the modifier-carrying side and the four label roles the
+        // other; `spec-emphasis` moves it again, to fourteen, with the three
+        // delta roles joining the label roles' side.
         for role in [
             Role::Footer,
             Role::ListRow,
@@ -526,6 +551,9 @@ mod tests {
             Role::TaskChange,
             Role::TaskConfirm,
             Role::TaskLabel,
+            Role::DeltaAdded,
+            Role::DeltaModified,
+            Role::DeltaRemoved,
         ] {
             assert_eq!(
                 style(role).add_modifier,
@@ -820,6 +848,9 @@ mod tests {
                 Role::TaskChange => "TaskChange",
                 Role::TaskConfirm => "TaskConfirm",
                 Role::TaskLabel => "TaskLabel",
+                Role::DeltaAdded => "DeltaAdded",
+                Role::DeltaModified => "DeltaModified",
+                Role::DeltaRemoved => "DeltaRemoved",
             }
         }
 
@@ -865,16 +896,23 @@ mod tests {
                 "TaskChange",
                 "TaskConfirm",
                 "TaskLabel",
+                "DeltaAdded",
+                "DeltaModified",
+                "DeltaRemoved",
             ]
         );
 
-        // The five this change adds are among them.
+        // The three this change adds are among them, as are the five
+        // `tasks-emphasis` added before them.
         for role in [
             Role::Muted,
             Role::TaskEvidence,
             Role::TaskChange,
             Role::TaskConfirm,
             Role::TaskLabel,
+            Role::DeltaAdded,
+            Role::DeltaModified,
+            Role::DeltaRemoved,
         ] {
             assert!(named.contains(&variant(role)), "{} is missing", label(role));
         }
