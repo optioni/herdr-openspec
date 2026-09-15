@@ -2196,6 +2196,7 @@ fn action_name(action: Action) -> &'static str {
         Action::ScrollDown => "ScrollDown",
         Action::ScrollUp => "ScrollUp",
         Action::Click(_) => "Click",
+        Action::Select(_) => "Select",
         Action::Ignore => "Ignore",
     }
 }
@@ -2300,6 +2301,14 @@ fn sweep_change(name: &str, origin: Origin, tabs: usize) -> Change {
 /// The fixture step 3 mandates: active changes, archived changes, a selected
 /// change with several artifact tabs, and a **foldable** artifact (more than one
 /// resolved section), so `Zone::DetailRow`'s fold path is reachable too.
+///
+/// `text-selection` widens it once more, per the same rule the `SelectTab`
+/// note below already states: `detail.expanded` holds section `0`, so that
+/// section's own body row is drawn and `Action::Select` is reachable at all.
+/// Both sections collapsed would let every drawn content row be a header,
+/// silently dropping the mouse's selection coverage from the whole sweep —
+/// the widen-the-fixture rule `the_sweep_covers_the_mouse_under_both_overlay_states`
+/// already states for the tab-switching case applies here identically.
 fn sweep_dashboard(route: Route, help_open: bool) -> Dashboard {
     Dashboard {
         selection: None,
@@ -2351,7 +2360,7 @@ fn sweep_dashboard(route: Route, help_open: bool) -> Dashboard {
             tab: 0,
             problems: Vec::new(),
             loaded: None,
-            expanded: BTreeSet::new(),
+            expanded: BTreeSet::from([0]),
             drawn_width: None,
         },
         refresh: Refresh {
@@ -2768,7 +2777,7 @@ fn a_binding_removed_from_the_driver_and_left_in_the_help_fails() {
 }
 
 #[test]
-fn sweep_finds_the_twenty_two_bound_actions_and_exactly_two_exemptions() {
+fn sweep_finds_the_bound_actions_and_exactly_two_exemptions() {
     // The substantive claim first, and deliberately: a planted defect in either
     // direction — a deleted `action_for` arm, a removed `Binding` — must report
     // the *action* that moved and which side moved it, not a count that happens
@@ -2788,10 +2797,10 @@ fn sweep_finds_the_twenty_two_bound_actions_and_exactly_two_exemptions() {
     }
     assert_eq!(
         union.len(),
-        24,
-        "the swept union is `Action`'s full membership after `ToggleHelp`: {union:?}"
+        25,
+        "the swept union is `Action`'s full membership after `Select`: {union:?}"
     );
-    assert_eq!(bound.len(), 22, "{bound:?}");
+    assert_eq!(bound.len(), 23, "{bound:?}");
 }
 
 #[test]
@@ -2833,6 +2842,7 @@ fn the_sweep_covers_the_mouse_under_both_overlay_states() {
         "ScrollUp",
         "SelectTab",
         "Click",
+        "Select",
         "Ignore",
     ]
     .into_iter()
