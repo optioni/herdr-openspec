@@ -157,11 +157,11 @@
 ## 8. The degraded-states row
 <!-- kind: operational -->
 
-- [ ] 8.1 CHECK: Read `SPEC.md` → Degraded states and pick the row's position among the
+- [x] 8.1 CHECK: Read `SPEC.md` → Degraded states and pick the row's position among the
       existing ones.
-- [ ] 8.2 CHANGE: Add the row for a failed clipboard write, and bind it in
+- [x] 8.2 CHANGE: Add the row for a failed clipboard write, and bind it in
       `tests/degraded-coverage.toml` to the test group 7 wrote.
-- [ ] 8.3 VERIFY: `cargo test --test degraded_coverage` green.
+- [x] 8.3 VERIFY: `cargo test --test degraded_coverage` green.
 
 ## 9. Documentation and the twelfth claim
 <!-- kind: operational -->
