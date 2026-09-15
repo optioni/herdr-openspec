@@ -15,6 +15,7 @@ pub mod open;
 pub mod refresh;
 pub mod resolve;
 pub mod schema;
+pub mod specs;
 pub mod state;
 pub mod tasks;
 pub mod ui;
