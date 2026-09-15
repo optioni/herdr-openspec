@@ -154,6 +154,7 @@ pub struct ArtifactSection {
     pub text: String,
     pub depth: usize,
     pub progress: Option<crate::tasks::Progress>,
+    pub operation: Option<crate::specs::DeltaOp>,
 }
 
 /// The label `artifact_section_label` derives for `path`, relative to
@@ -318,15 +319,21 @@ pub fn is_spec_shaped(text: &str) -> bool {
     has_requirement_heading(&split_headings(text))
 }
 
+/// A level-3 heading labelled `Requirement:` — the crate's one predicate for
+/// "this heading opens a requirement", shared by [`has_requirement_heading`]
+/// and, since `spec-emphasis`, `Dashboard::sync_detail`'s operation walk
+/// (design.md -> Decision 4). Written once so the two never drift apart.
+fn is_requirement_heading(section: &HeadingSection) -> bool {
+    section.level == 3 && section.label.starts_with("Requirement:")
+}
+
 /// The spec half of the split gate, over sections already derived.
 /// `Dashboard::sync_detail` asks this rather than [`is_spec_shaped`] because
 /// it holds the sections already and `artifact-content` allows it exactly one
 /// `split_headings` call per successfully read path; writing the predicate
 /// twice would be the drift `is_spec_shaped`'s own doc comment warns about.
 fn has_requirement_heading(sections: &[HeadingSection]) -> bool {
-    sections
-        .iter()
-        .any(|section| section.level == 3 && section.label.starts_with("Requirement:"))
+    sections.iter().any(is_requirement_heading)
 }
 
 /// The indices of `sections` a tracked-tasks tab opens with:
@@ -1547,6 +1554,7 @@ impl Dashboard {
                             text,
                             depth: 0,
                             progress: None,
+                            operation: None,
                         });
                         continue;
                     }
@@ -1556,6 +1564,7 @@ impl Dashboard {
                             text: String::new(),
                             depth: 0,
                             progress: None,
+                            operation: None,
                         });
                     }
                     let preamble = text.get(..preamble_end).unwrap_or_default();
@@ -1565,12 +1574,23 @@ impl Dashboard {
                             text: preamble.to_string(),
                             depth: base,
                             progress: None,
+                            operation: None,
                         });
                     }
                     // Normalised against this file's own shallowest heading,
                     // so a delta spec starting at `##` and an archived spec
                     // starting at `#` both open flush at the left.
                     let min_level = headings.iter().map(|h| h.level).min().unwrap_or(0);
+                    // `spec-emphasis`: the operation walk, a single forward
+                    // pass over this file's own headings, in the order
+                    // `heading-sections` produced them, holding the most
+                    // recent recognised operation and attributing it to the
+                    // requirement sections that follow — reset per file, and
+                    // computed beside `progress` above for the same reason
+                    // `tasks-emphasis` computed that field here: both are
+                    // derived once per key change over the section list
+                    // already in hand.
+                    let mut current_operation: Option<crate::specs::DeltaOp> = None;
                     for heading in headings {
                         // `tasks-emphasis`: a **heading section of a split
                         // tracked-tasks file** carries its own group's count,
@@ -1584,11 +1604,31 @@ impl Dashboard {
                         // summation property.
                         let progress =
                             tracks_tasks.then(|| crate::tasks::parse(&heading.body).progress());
+                        // A level-2 heading that classifies **resets** the
+                        // walk rather than nesting: the sections after a
+                        // later operation heading carry that heading's
+                        // operation even where an earlier one appeared in the
+                        // same file. The operation heading itself is
+                        // deliberately unbadged — attribution below asks
+                        // `is_requirement_heading`, the same predicate
+                        // `has_requirement_heading` applies, never restated —
+                        // and a
+                        // requirement under no operation heading yet carries
+                        // `None`.
+                        if let Some(op) =
+                            crate::specs::operation_of_heading(heading.level, &heading.label)
+                        {
+                            current_operation = Some(op);
+                        }
+                        let operation = is_requirement_heading(&heading)
+                            .then_some(current_operation)
+                            .flatten();
                         self.detail.sections.push(ArtifactSection {
                             label: Some(heading.label),
                             text: heading.body,
                             depth: base + usize::from(heading.level.saturating_sub(min_level)),
                             progress,
+                            operation,
                         });
                     }
                 }
@@ -2873,18 +2913,21 @@ mod tests {
                     text: "one\n".to_string(),
                     depth: 0,
                     progress: None,
+                    operation: None,
                 },
                 ArtifactSection {
                     label: Some("markdown-render".to_string()),
                     text: "two\n".to_string(),
                     depth: 0,
                     progress: None,
+                    operation: None,
                 },
                 ArtifactSection {
                     label: Some("tasks-checklist".to_string()),
                     text: "three\n".to_string(),
                     depth: 0,
                     progress: None,
+                    operation: None,
                 },
             ],
             scroll,
@@ -3059,6 +3102,7 @@ mod tests {
             text: long.to_string(),
             depth: 0,
             progress: None,
+            operation: None,
         };
         let mut d = dashboard_with_detail(Detail {
             sections: vec![section("first"), section("second"), section("third")],
@@ -3136,12 +3180,14 @@ mod tests {
                     text: "one\n".to_string(),
                     depth: 0,
                     progress: None,
+                    operation: None,
                 },
                 ArtifactSection {
                     label: Some("b".to_string()),
                     text: "two\n".to_string(),
                     depth: 0,
                     progress: None,
+                    operation: None,
                 },
             ],
             scroll: 0,
@@ -3178,6 +3224,7 @@ mod tests {
                 text: "one\n".to_string(),
                 depth: 0,
                 progress: None,
+                operation: None,
             }],
             scroll: 0,
             tab: 0,
@@ -3252,6 +3299,7 @@ mod tests {
                 text: "one\n".to_string(),
                 depth: 0,
                 progress: None,
+                operation: None,
             }],
             scroll: 0,
             tab: 0,
@@ -3437,7 +3485,9 @@ mod tests {
         const FIVE_HEADINGS: &str = "## ADDED Requirements\n\n### Requirement: A\nA text.\n\n#### Scenario: a1\n- **WHEN** a\n- **THEN** b\n\n## REMOVED Requirements\n\n### Requirement: B\nB text.\n";
         let recorder = crate::testutil::RecordingReader::new(
             vec![(
-                std::path::PathBuf::from("/repo/openspec/changes/c/specs/degraded-coverage/spec.md"),
+                std::path::PathBuf::from(
+                    "/repo/openspec/changes/c/specs/degraded-coverage/spec.md",
+                ),
                 Ok(FIVE_HEADINGS.to_string()),
             )],
             Ok("## MODIFIED Requirements\n".to_string()),
@@ -3574,12 +3624,8 @@ mod tests {
     /// so no badge is reachable.
     #[test]
     fn a_non_spec_artifact_is_attributed_nothing() {
-        let mut d = dashboard_over(
-            &[("design", &["/repo/openspec/changes/c/design.md"])],
-            None,
-        );
-        const DESIGN: &str =
-            "# Design\n\n## ADDED Requirements\n\nProse discussing what was added, not a heading structure.\n";
+        let mut d = dashboard_over(&[("design", &["/repo/openspec/changes/c/design.md"])], None);
+        const DESIGN: &str = "# Design\n\n## ADDED Requirements\n\nProse discussing what was added, not a heading structure.\n";
         let recorder = crate::testutil::RecordingReader::always(Ok(DESIGN.to_string()));
         let read = |p: &std::path::Path| recorder.read(p);
 
@@ -3690,6 +3736,7 @@ mod tests {
             text: "one\n".to_string(),
             depth,
             progress: None,
+            operation: None,
         };
         dashboard_with_detail(Detail {
             sections: vec![
@@ -4288,6 +4335,7 @@ mod tests {
                 text: lines(40),
                 depth: 0,
                 progress: None,
+                operation: None,
             }];
             let selected_before = d.selected;
 
@@ -4326,6 +4374,7 @@ mod tests {
                     text: lines(40),
                     depth: 0,
                     progress: None,
+                    operation: None,
                 }];
                 let before = d.clone();
                 d.apply(Action::ScrollUp);
@@ -4343,6 +4392,7 @@ mod tests {
                 text: lines(12),
                 depth: 0,
                 progress: None,
+                operation: None,
             }];
             for _ in 0..500 {
                 wheeled.apply(Action::ScrollDown);
@@ -4372,6 +4422,7 @@ mod tests {
                 text: lines(12),
                 depth: 0,
                 progress: None,
+                operation: None,
             }];
             held.route = Route::Detail;
             for _ in 0..500 {
@@ -4390,6 +4441,7 @@ mod tests {
                 text: lines(40),
                 depth: 0,
                 progress: None,
+                operation: None,
             }];
             let mut wheeled = keyed.clone();
             keyed.apply(Action::Next);
@@ -5070,6 +5122,7 @@ mod tests {
                         text: "## 1. Setup\n- [x] a\n- [ ] b\n".to_string(),
                         depth: 0,
                         progress: None,
+                        operation: None,
                     }],
                     scroll: 0,
                     tab: 0,
@@ -6539,6 +6592,7 @@ mod tests {
                     text: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
                     depth: 0,
                     progress: None,
+                    operation: None,
                 }],
                 scroll: 0,
                 tab: 0,
@@ -6575,15 +6629,15 @@ mod tests {
             assert_eq!(*drawn_width, None);
         }
 
-        /// `detail-scroll` :: "The `ArtifactSection` companion names the fourth
+        /// `detail-scroll` :: "The `ArtifactSection` companion names the fifth
         /// field".
         ///
         /// The compile-time half of `NODEFAULT-UI`'s textual scan: removing any
-        /// one of the four from this pattern fails to compile, which is what
+        /// one of the five from this pattern fails to compile, which is what
         /// makes the companion a check rather than a restatement. `progress` is
-        /// `tasks-emphasis`' addition.
+        /// `tasks-emphasis`' addition, `operation` `spec-emphasis`'s.
         #[test]
-        fn artifact_section_destructures_into_exactly_four_fields() {
+        fn artifact_section_destructures_into_exactly_five_fields() {
             let section = ArtifactSection {
                 label: Some("1. Setup".to_string()),
                 text: "- [x] 1.1 first\n".to_string(),
@@ -6592,12 +6646,14 @@ mod tests {
                     completed: 1,
                     total: 1,
                 }),
+                operation: Some(crate::specs::DeltaOp::Added),
             };
             let ArtifactSection {
                 label,
                 text,
                 depth,
                 progress,
+                operation,
             } = &section;
             assert_eq!(label.as_deref(), Some("1. Setup"));
             assert!(text.starts_with("- [x]"));
@@ -6609,17 +6665,22 @@ mod tests {
                     total: 1
                 })
             );
+            assert_eq!(*operation, Some(crate::specs::DeltaOp::Added));
 
-            // And the value with no default is really optional: a section that
-            // is not a task group carries `None`, which is not the same claim
-            // as a counted-and-empty `[-]`.
+            // And the two values with no default are really optional: a
+            // section that is not a task group carries `None` progress, which
+            // is not the same claim as a counted-and-empty `[-]`, and a
+            // section that is not a delta requirement carries `None`
+            // operation, which is not the same claim as an unbadged one.
             let plain = ArtifactSection {
                 label: Some("proposal.md".to_string()),
                 text: "# proposal\n".to_string(),
                 depth: 0,
                 progress: None,
+                operation: None,
             };
             assert_eq!(plain.progress, None);
+            assert_eq!(plain.operation, None);
         }
 
         #[test]
@@ -7431,6 +7492,7 @@ mod tests {
                             text: source,
                             depth: 0,
                             progress: None,
+                            operation: None,
                         }],
                         scroll: 99,
                         tab: 0,
@@ -7581,6 +7643,7 @@ mod tests {
                         text: "x".repeat(1092),
                         depth: 0,
                         progress: None,
+                        operation: None,
                     }],
                     scroll: 99,
                     tab: 0,
@@ -7721,6 +7784,7 @@ mod tests {
                         text: "stale".to_string(),
                         depth: 0,
                         progress: None,
+                        operation: None,
                     }],
                     scroll: 5,
                     tab: 2,
@@ -7808,6 +7872,7 @@ mod tests {
                         text: "stale".to_string(),
                         depth: 0,
                         progress: None,
+                        operation: None,
                     }],
                     scroll: 6,
                     tab: 2,
@@ -9190,6 +9255,7 @@ mod tests {
                         text: "stale".to_string(),
                         depth: 0,
                         progress: None,
+                        operation: None,
                     }],
                     scroll: 3,
                     tab: 2,

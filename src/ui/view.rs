@@ -3465,6 +3465,7 @@ mod tests {
             text: (0..30).map(|_| format!("{}\n", "x".repeat(200))).collect(),
             depth: 0,
             progress: None,
+            operation: None,
         }];
 
         // `pane-chrome`: there is no border any more. Columns 0 and 59 are the
@@ -3873,6 +3874,7 @@ mod tests {
                         text: source,
                         depth: 0,
                         progress: None,
+                        operation: None,
                     }]
                 },
                 scroll,
@@ -3967,18 +3969,21 @@ mod tests {
                     text: "one\n".to_string(),
                     depth: 0,
                     progress: None,
+                    operation: None,
                 },
                 ArtifactSection {
                     label: Some("markdown-render".to_string()),
                     text: "two\n".to_string(),
                     depth: 0,
                     progress: None,
+                    operation: None,
                 },
                 ArtifactSection {
                     label: Some("tasks-checklist".to_string()),
                     text: "three\n".to_string(),
                     depth: 0,
                     progress: None,
+                    operation: None,
                 },
             ],
             scroll,
@@ -4222,12 +4227,14 @@ mod tests {
                     text: "one\n".to_string(),
                     depth: 0,
                     progress: None,
+                    operation: None,
                 },
                 ArtifactSection {
                     label: Some("markdown-render".to_string()),
                     text: "two\n".to_string(),
                     depth: 0,
                     progress: None,
+                    operation: None,
                 },
             ],
             scroll: 0,
@@ -4287,6 +4294,7 @@ mod tests {
             text: text.to_string(),
             depth,
             progress: None,
+            operation: None,
         };
         let detail = Detail {
             sections: vec![
@@ -6140,6 +6148,7 @@ mod tests {
                     text: source.to_string(),
                     depth: 0,
                     progress: None,
+                    operation: None,
                 }]
             },
             scroll: 0,
@@ -8444,6 +8453,7 @@ mod tests {
                         .to_string(),
                     depth: 0,
                     progress: None,
+                    operation: None,
                 }],
                 scroll: 0,
                 tab: 0,
@@ -8485,18 +8495,21 @@ mod tests {
                         text: "one\n".to_string(),
                         depth: 0,
                         progress: None,
+                        operation: None,
                     },
                     ArtifactSection {
                         label: Some("markdown-render".to_string()),
                         text: "two\n".to_string(),
                         depth: 0,
                         progress: None,
+                        operation: None,
                     },
                     ArtifactSection {
                         label: Some("tasks-checklist".to_string()),
                         text: "three\n".to_string(),
                         depth: 0,
                         progress: None,
+                        operation: None,
                     },
                 ],
                 scroll: 0,
@@ -8985,6 +8998,7 @@ mod tests {
                         .collect::<String>(),
                     depth: 0,
                     progress: None,
+                    operation: None,
                 }],
                 scroll: 0,
                 tab: 0,
