@@ -602,7 +602,10 @@ mod tests {
     use super::style_for;
     use crate::changes::{Change, empty_set, fixture};
     use crate::testutil::{cell, render_at, row_text};
-    use crate::ui::app::{Action, ArtifactSection, Dashboard, Detail, Filter, Route, SectionKey};
+    use crate::ui::app::{
+        Action, ArtifactSection, Dashboard, Detail, Filter, Granularity, Route, SectionKey,
+        Selection,
+    };
     use crate::ui::layout::columns;
     use crate::ui::markdown::Face;
     use crate::ui::palette::{self, Role};
@@ -4254,6 +4257,190 @@ mod tests {
                 )),
                 "width {width}: no header is selected while the cursor addresses the problem \
                  row"
+            );
+        }
+    }
+
+    /// A single-section, non-foldable detail whose body renders as several
+    /// distinct rows: `text-selection`'s render tests need lines a selection
+    /// can span without a fold's header rows or scrolling getting in the
+    /// way (design.md -> Decision 8: selection works on non-foldable
+    /// artifacts too). Hard breaks (two trailing spaces) keep the four lines
+    /// inside one paragraph rather than four, so each renders as its own row
+    /// with none of a paragraph boundary's blank separator.
+    fn selection_dashboard(name: &str) -> Dashboard {
+        let detail = Detail {
+            sections: vec![ArtifactSection {
+                label: None,
+                text: "aaaa bbbb  \ncccc dddd  \neeee ffff  \ngggg hhhh\n".to_string(),
+                depth: 0,
+                progress: None,
+                operation: None,
+            }],
+            scroll: 0,
+            tab: 0,
+            problems: Vec::new(),
+            loaded: None,
+            expanded: std::collections::BTreeSet::new(),
+            drawn_width: None,
+        };
+        let change = fixture::active(name, 0, 1);
+        dashboard_with_detail(vec![change], Vec::new(), 1, Route::Detail, detail)
+    }
+
+    /// `specs/text-selection/spec.md` :: "The span is highlighted at both
+    /// mandated widths".
+    #[test]
+    fn the_span_is_highlighted_at_both_mandated_widths() {
+        let base = selection_dashboard("selection-span");
+        for width in [120, 60] {
+            let interior = interior_width(width);
+            let rows =
+                crate::ui::detail::content_lines(&base.detail, base.selected_change(), interior);
+            assert!(
+                rows.len() >= 3,
+                "width {width}: the fixture renders at least three lines"
+            );
+
+            let selection = Selection {
+                anchor: (1, 4),
+                focus: (2, 8),
+                granularity: Granularity::Span,
+                problem: None,
+            };
+            let mut selected = base.clone();
+            selected.selection = Some(selection);
+            let with = render_at(width, 20, &selected);
+            let without = render_at(width, 20, &base);
+
+            let x0 = content_origin(width);
+            let y0 = CONTENT_FIRST_ROW;
+            for (line, row) in rows.iter().enumerate().take(3) {
+                let total = columns(&row.text()) as u16;
+                let (from, to) = match line {
+                    1 => (4u16, total),
+                    2 => (0u16, 8u16.min(total)),
+                    _ => (0u16, 0u16),
+                };
+                let y = y0 + line as u16;
+                for col in 0..interior {
+                    let x = x0 + col;
+                    let inside_span = col >= from && col < to;
+                    let base_style = cell(&without, x, y).style();
+                    let got = cell(&with, x, y).style();
+                    if inside_span {
+                        assert_eq!(
+                            got,
+                            base_style.patch(palette::style(Role::Selected)),
+                            "width {width} line {line} col {col}: inside the span"
+                        );
+                    } else {
+                        assert_eq!(
+                            got, base_style,
+                            "width {width} line {line} col {col}: outside the span, unchanged"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// `specs/view-palette/spec.md` :: "A selected cell keeps its own role and
+    /// gains the reversal" — design.md -> Decision 7: the highlight patches the
+    /// cell's own role rather than replacing it, so a selected heading keeps
+    /// its heading colour and gains only `Modifier::REVERSED`.
+    #[test]
+    fn a_selected_cell_keeps_its_own_role_and_gains_the_reversal() {
+        let detail = Detail {
+            sections: vec![ArtifactSection {
+                label: None,
+                text: "# Heading text\n".to_string(),
+                depth: 0,
+                progress: None,
+                operation: None,
+            }],
+            scroll: 0,
+            tab: 0,
+            problems: Vec::new(),
+            loaded: None,
+            expanded: std::collections::BTreeSet::new(),
+            drawn_width: None,
+        };
+        let change = fixture::active("selection-heading", 0, 1);
+        let base = dashboard_with_detail(vec![change], Vec::new(), 1, Route::Detail, detail);
+
+        for width in [120, 60] {
+            let interior = interior_width(width);
+            let rows =
+                crate::ui::detail::content_lines(&base.detail, base.selected_change(), interior);
+            let total = columns(&rows[0].text()) as u16;
+            assert!(total > 0, "width {width}: the heading renders some text");
+
+            let selection = Selection {
+                anchor: (0, 0),
+                focus: (0, total),
+                granularity: Granularity::Span,
+                problem: None,
+            };
+            let mut selected = base.clone();
+            selected.selection = Some(selection);
+            let buf = render_at(width, 20, &selected);
+            let x0 = content_origin(width);
+            let y0 = CONTENT_FIRST_ROW;
+            let expected = uncoloured()
+                .patch(palette::style(Role::Heading(1)))
+                .patch(palette::style(Role::Selected));
+            for col in 0..total {
+                let got = cell(&buf, x0 + col, y0).style();
+                assert_eq!(
+                    got, expected,
+                    "width {width} col {col}: heading colour survives, reversal is added"
+                );
+            }
+        }
+    }
+
+    /// `specs/text-selection/spec.md` :: "The highlight persists after release
+    /// and clears on the next interaction". Group 7 is what actually clears
+    /// `Dashboard::selection` on a click, a scroll, a tab switch, or an
+    /// adopted refresh — this render layer's own share of the requirement is
+    /// that the highlight tracks `dashboard.selection` exactly: present after
+    /// a completed drag (`Granularity::Span`, no further input), and gone the
+    /// instant the field is `None`.
+    #[test]
+    fn the_highlight_persists_after_release_and_clears_on_the_next_interaction() {
+        let base = selection_dashboard("selection-persist");
+        for width in [120, 60] {
+            let interior = interior_width(width);
+            let rows =
+                crate::ui::detail::content_lines(&base.detail, base.selected_change(), interior);
+            let total = columns(&rows[0].text()) as u16;
+            assert!(total > 0, "width {width}: the first line renders some text");
+
+            let mut after_release = base.clone();
+            after_release.selection = Some(Selection {
+                anchor: (0, 0),
+                focus: (0, total),
+                granularity: Granularity::Span,
+                problem: None,
+            });
+            let x0 = content_origin(width);
+            let y0 = CONTENT_FIRST_ROW;
+
+            let with_release = render_at(width, 20, &after_release);
+            assert_eq!(
+                cell(&with_release, x0, y0).style(),
+                uncoloured().patch(palette::style(Role::Selected)),
+                "width {width}: the highlight is still drawn with no further input after \
+                 release"
+            );
+
+            let cleared = base.clone();
+            let with_cleared = render_at(width, 20, &cleared);
+            assert_eq!(
+                cell(&with_cleared, x0, y0).style(),
+                uncoloured(),
+                "width {width}: an empty selection draws no highlight"
             );
         }
     }
