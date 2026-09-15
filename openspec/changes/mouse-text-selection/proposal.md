@@ -102,12 +102,30 @@ measured. They are reversed deliberately, and they are the whole mechanism:
 - `help-overlay`: `apply_help_action` is an exhaustive match with no wildcard, and its
   requirement asserts "seventeen plus seven is the twenty-four `Action` carries". Both move.
   If `INVENTORY` grows, `content_rows` moves from **42** (`src/ui/help.rs:290`) with it.
-- `view-palette`: one new `Role` for the selection highlight (**30** today).
+- `view-palette`: **two** requirements — one new `Role` for the selection highlight
+  (**30** today), and the span-to-role mapping, which gains an entry. The highlight
+  **composes** with the underlying role rather than replacing it, so a selected heading
+  stays a heading.
 - `terminal-lifecycle`: `TerminalOps` gains a clipboard write (**six** methods today).
-- `artifact-content`: `ContentRow` is the source of the copied text.
-- `list-selection`: pins `Target::DetailLine`, the binding that gives way.
-- `doc-conformance`: a twelfth claim, and `AGENTS.md`'s "eleven further claims" with it.
-- `degraded-coverage`: a refused or unsupported clipboard write is a new degraded-states row.
+- `list-selection`: pins `Target::DetailLine`, the binding that gives way — the variant is
+  **removed**, taking `Target` from four members to three.
+- `doc-conformance`: a twelfth claim binding the OSC 52 confinement, and `AGENTS.md`'s
+  "eleven further claims" with it.
+
+### Capabilities deliberately **not** modified
+
+Named here so a reviewer can see they were considered rather than missed:
+
+- `artifact-content` — the copied text is read from `ContentRow`, but reading a value changes
+  nothing about the capability that produces it. Its own byte-identity scenarios still hold:
+  with no selection the content area renders exactly as before, and a highlight is a style
+  over existing cells rather than different content.
+- `responsive-layout` — `Zone` gains no variant and no region's geometry moves. The partition
+  this change relies on is `ui::layout::zone` used **as it already is**.
+- `degraded-coverage` — a failed clipboard write is a new degraded-states row needing a named
+  proving test, but that obligation is already this capability's standing requirement for
+  *any* new row, and `terminal-lifecycle` states it inline as the start-up capture refusal
+  does. A delta restating the general rule would add no constraint.
 
 ## Impact
 

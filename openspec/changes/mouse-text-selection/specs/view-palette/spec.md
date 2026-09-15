@@ -297,3 +297,206 @@ its merge key; its subject widens from one pure-view module to two.
   only the two are swapped
 - **AND** it is not equal to `palette::style(Role::SelectedRow)`, so a selected change row and
   a selected span never look alike
+
+### Requirement: `ui::view` takes every style it applies from the palette
+
+`ui::view` SHALL construct no `Style` of its own: every span it writes to the buffer SHALL be
+`palette::style(role)` for the role that span carries, or a fixed composition of such styles.
+The mapping from a drawn span to its role SHALL be:
+
+- a region's heading row → `RegionHeadingFocused` when that region is the routed one, else
+  `RegionHeading`. That covers the list region's repository name and the detail region's
+  change header alike;
+- the `file mode` badge → the heading row's own style patched with `FileMode`, so the badge is
+  dim and yellow whether or not the list region is the routed one;
+- the vertical divider and the detail region's horizontal rule → `RegionRule`;
+- the footer row, in all three of its forms → `Footer`. It is named rather than left as a
+  bare `Style::default()` so the requirement below — that `ui::view` constructs no `Style` of
+  its own — is true of the whole file rather than of the functions this change happened to
+  visit;
+- a list row → `ListRowSelected` when `Row::selected`, else `ListProblem`, `ListSeparator`,
+  or `ListMessage` by its `RowKind`, else `ListRow`;
+- a badged change row's badge cell → the row's own style patched with
+  `AgentBadge(status)`, so a badge on the selected row is coloured **and** bold;
+- an artifact tab chip → `TabActive` when `Tab::selected`, else `TabInactive`;
+- a detail content row whose `ContentKind` is `SectionHeader { selected: true }` →
+  `DetailSectionSelected`, and one whose kind is `SectionHeader { selected: false }` →
+  `DetailSection`, patched **over** the segment's own `style_for(&segment.face)` so a header
+  row's emphasis wins over the plain face its text carries;
+- every other rendered content segment — `ContentKind::Problem` and `ContentKind::Body` —
+  → `style_for(&segment.face)`, below, exactly as before this change.
+
+That penultimate clause is `foldable-spec-sections`' one addition to this mapping, and it is
+the reason this requirement is reproduced here. `ui::detail::content_lines` returns a
+`ContentKind` per row and names no `Role`, on exactly the terms `ui::list` returns a `RowKind`
+and names none: **`ui::view` alone decides what a row looks like.** A `markdown::Face` cannot
+carry this distinction — a section header is not a construct any segment's face describes, and
+it is a property of the **row**, not of a run within it — which is why the role is selected by
+kind here rather than folded into `style_for`.
+
+`tasks-emphasis` adds two face fields and therefore two composing roles, taking `style_for`
+from seven to **nine**. The test of where a distinction belongs is unchanged and is what
+decides both: a *row-wide* distinction the renderer knows and the text does not is a
+`ContentKind`, and a distinction about **a run of text** is a `Face`. A finished task item and
+a lifecycle label are both facts about runs of text — `muted` happens to cover every run on
+its row, but nothing about the rule turns on that — so both are faces.
+
+`ui::view::style_for(face: &markdown::Face) -> Style` SHALL compose the palette's face roles
+by folding them onto `Style::default()` with `Style::patch` in this fixed order:
+
+1. `Muted`, when `face.muted`;
+2. `Quoted`, when `face.quoted`;
+3. `Strikethrough`, when `face.strikethrough`;
+4. `Link`, when `face.link`;
+5. `Code`, when `face.code`;
+6. `Emphasis`, when `face.emphasis`;
+7. `Strong`, when `face.strong`;
+8. `Heading(level)`, when `face.heading` is `Some(level)`;
+9. `TaskEvidence`, `TaskChange`, `TaskConfirm`, or `TaskLabel`, when `face.label` is
+   `Some(role)`, selected by that `LabelRole`;
+10. `DeltaAdded`, `DeltaModified`, or `DeltaRemoved`, when `face.delta` is `Some(op)`,
+    selected by that `DeltaOp`.
+
+`spec-emphasis` adds step 10, taking `style_for` from nine to **ten**. It is placed last, after
+`face.label`, and the two are never both `Some` in production — a badge segment carries the
+marker and nothing else, a clause keyword carries no badge — so the order between them is a
+totality statement rather than a precedence decision. `style_for` SHALL answer the unreachable
+combination with the delta colour rather than `debug_assert`ing against a caller it does not
+control, on exactly the terms the paragraph below states for `muted` and `label`.
+
+A delta badge is a `Face` and not a `ContentKind` by the same test the paragraph above applies:
+the badge is a **run of text** within the header row — two columns of it — while the row's
+`SectionHeader` kind covers the whole row including its label. Making it a kind would have
+forced the row to be two rows or the kind to carry a sub-range, and the reason the badge can be
+a face at all is that `artifact-folds` splits a badged header row into four segments — the
+prefix, the badge, the label, and the plain-faced padding that fills the row.
+
+`Strikethrough` is inserted at position 3 — `markdown-constructs`' only edit to the order —
+precisely because it carries **no** foreground: wherever it sits it cannot take a colour away
+from a role that has one, so it is placed early, beside the other uncoloured,
+always-composing faces.
+
+`Muted` is placed **first** for the same reason and one more: it carries no foreground either,
+so it takes no colour from anything, and putting it first means every later role's colour wins
+over it rather than being suppressed by position. `face.label` is placed **last** so that a
+label's colour is the one a reader sees, ahead of every markdown face a label segment could in
+principle also carry.
+
+The two new steps SHALL NOT be assumed mutually exclusive by the implementation even though
+`tasks-checklist` never emits both: a checked item's segment carries `label: None` and a label
+segment carries `muted: false`, so the combination is unreachable in production, and
+`style_for` SHALL nonetheless answer it — `DIM` plus the label's foreground — rather than
+`debug_assert`ing against a caller it does not control. Totality is the contract, not the
+absence of a caller.
+
+Because `patch` lets the later value win, modifiers accumulate — a bold link's cells carry
+`BOLD` and `UNDERLINED` together, and a struck bold link's carry `CROSSED_OUT` as well —
+while the **foreground** of a span carrying several coloured faces is decided by the last one
+in that order. The precedence is therefore heading over code over link, stated here rather
+than left to be discovered: a heading line reads as one colour even where it contains a code
+span or a link, which is the point of colouring the heading at all.
+
+`style_for` SHALL be total: no `Face` value panics, and `Face::plain()` SHALL map to
+`Style::default()` — which SHALL stay true with the two new fields at their `false`/`None`
+zero, so every existing rendering is byte-identical unless a new field is set.
+
+#### Scenario: Faces reach the buffer as coloured styles at both mandated widths
+
+- **WHEN** a `Dashboard` at `Route::Detail` whose selected change carries one artifact not
+  marked `tracks_tasks`, resolving to a single section holding
+  `# Title\n\n## Heading\n\n**bold** and *italic* and `code` and [link](u) and ~~struck~~\n`,
+  is rendered at 120x20 and at 60x20
+- **THEN** in each buffer the cells of `# Title` report `BOLD` set and the foreground
+  `Role::Heading(1)` carries (`Magenta`), and the cells of `## Heading` report `BOLD` set and
+  the foreground `Role::Heading(2)` carries (`Cyan`)
+- **AND** the cells of `code` report `DIM` and the foreground `Role::Code` carries (`Yellow`),
+  and the cells of `link` report `UNDERLINED` and the foreground `Role::Link` carries
+  (`Blue`)
+- **AND** the cells of `bold` report `BOLD` with no foreground, of `italic` `ITALIC` with
+  no foreground, and of `struck` `CROSSED_OUT` with no foreground, so the uncoloured roles are
+  discriminated from the coloured ones
+- **AND** no cell in either buffer reports `REVERSED`, because a single-section artifact draws
+  no header row
+
+#### Scenario: A section header's role is selected by its kind, not by its face
+
+- **WHEN** the same dashboard's artifact resolves to three spec files, the cursor is on the
+  second, and it is rendered at 120x20 and at 60x20
+- **THEN** in each buffer the second header row's cells equal
+  `palette::style(Role::DetailSectionSelected)` and are the only cells reporting `REVERSED`
+- **AND** the first and third header rows' cells equal `palette::style(Role::DetailSection)`,
+  and `content_lines` reports `SectionHeader { selected: false }` for both — the assertion
+  that can fail, since `DetailSection`'s plain `BOLD` is indistinguishable from `Role::Strong`'s
+  by cell comparison alone
+- **AND** every segment of every body row still equals `style_for(&segment.face)` with no role
+  patched over it, so the header mapping reaches header rows and nothing else
+- **AND** `grep -n 'Role::' src/ui/detail.rs` returns nothing, so the role selection lives in
+  `ui::view` and the kind alone crosses the boundary
+
+#### Scenario: Heading foreground wins over a code span inside it
+
+- **WHEN** `style_for` is called on a `Face` with `heading: Some(2)` and `code: true`, on
+  one with `code: true` and `link: true`, and on one with `strikethrough: true`,
+  `strong: true`, and `link: true`
+- **THEN** the first reports the foreground `Role::Heading(2)` carries — the heading's — with
+  `BOLD` and `DIM` both set, so no modifier was lost to the precedence rule
+- **AND** the second reports the foreground `Role::Code` carries — which follows the link in
+  the fold order — with `DIM` and `UNDERLINED` both set
+- **AND** the third reports `CROSSED_OUT`, `BOLD`, and `UNDERLINED` all set and the foreground
+  `Role::Link` carries, so an uncoloured strikethrough neither loses its own modifier nor
+  displaces the link's colour
+- **AND** no assertion names a `Color` literal: all compare against `palette::style`,
+  because `style_for` lives in `src/ui/view.rs`, which the confinement gate searches
+
+#### Scenario: A plain face is the default style
+
+- **WHEN** `style_for(&Face::plain())` is called
+- **THEN** it returns `Style::default()`, with no modifier, no foreground, and no background
+- **AND** `Face::plain()`'s `strikethrough` is `false`, so the new field does not change what
+  a plain face maps to
+- **AND** rendering a plain-text document at 120x20 and 60x20 leaves every content cell's
+  style equal to `ratatui::buffer::Cell::default().style()`
+
+#### Scenario: The two new face fields compose in their stated positions
+
+- **WHEN** `ui::view::style_for` is called on `Face { muted: true, ..Face::plain() }`, on
+  `Face { label: Some(LabelRole::Evidence), ..Face::plain() }`, on
+  `Face { label: Some(LabelRole::Other), ..Face::plain() }`, and on
+  `Face { muted: true, label: Some(LabelRole::Confirm), ..Face::plain() }`
+- **THEN** the first equals `palette::style(Role::Muted)`, the second
+  `palette::style(Role::TaskEvidence)`, and the third `palette::style(Role::TaskLabel)`
+- **AND** the fourth carries `DIM` **and** `palette::style(Role::TaskConfirm)`'s foreground,
+  the unreachable combination answered rather than refused
+- **AND** `style_for(&Face::plain())` is still `Style::default()`, so the zero value did not
+  move
+
+#### Scenario: A checklist row reaches the buffer with its label coloured
+
+- **WHEN** a `Dashboard` at `Route::Detail` whose selected artifact carries
+  `tracks_tasks == true` and whose file reads
+  `## 1. Setup\n\n- [ ] 1.1 RED: write it\n- [x] 1.2 VERIFY: it passes\n` is rendered at
+  120x20 and at 60x20
+- **THEN** at each width the `RED:` cells carry `palette::style(Role::TaskEvidence)`'s
+  foreground and no `DIM`
+- **AND** every cell of the `[✓] 1.2 VERIFY: it passes` row carries `DIM`, and no cell of it
+  carries `palette::style(Role::TaskConfirm)`'s foreground — the completed row's label is
+  de-emphasised rather than dimmed-but-coloured
+- **AND** no assertion in this scenario names a colour literal: each compares against
+  `palette::style(role)`
+
+**`text-selection` adds one entry to that mapping, and it composes rather than replaces.** A
+cell inside the selected span SHALL be drawn as its own role's style **patched** with
+`palette::style(Role::Selected)` — the "fixed composition of such styles" this requirement
+already permits — never as `Role::Selected` alone. A selected heading stays a heading and a
+selected code span stays code; only the foreground and background swap. Replacing the style
+would erase every distinction the content area exists to draw.
+
+#### Scenario: A selected cell keeps its own role and gains the reversal
+
+- **WHEN** a dashboard whose selection covers part of a level-2 heading row and part of an
+  inline code span is rendered at 120x20
+- **THEN** each selected cell's style equals its unselected style patched with
+  `palette::style(Role::Selected)`
+- **AND** the heading cells still carry the heading role's modifiers and the code cells the
+  code role's, so neither was flattened
+- **AND** every unselected cell is byte-identical to the same frame with no selection
