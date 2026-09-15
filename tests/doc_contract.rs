@@ -3014,3 +3014,91 @@ fn an_unparseable_spelling_fails_rather_than_skipping() {
     assert!(parse_input("Wheel ↓").is_err());
     assert!(parse_input("Click").is_err());
 }
+
+/// The names `specs/doc-conformance/spec.md`'s Requirement forbids anywhere in
+/// `src/specs.rs`'s production slice: filesystem, process, environment, network, and
+/// standard-I/O names, plus every schema-reading name.
+const SPECS_RS_FORBIDDEN_NEEDLES: [&str; 12] = [
+    "std::fs",
+    "std::io",
+    "std::env",
+    "std::process",
+    "std::net",
+    "File::",
+    "read_to_string",
+    "Command",
+    "schema::",
+    "Schema",
+    "config.yaml",
+    ".openspec.yaml",
+];
+
+/// Whether `src`'s production slice — the text above its first line-anchored
+/// `#[cfg(test)]`, exactly as [`production_slice`] cuts it — names any of
+/// [`SPECS_RS_FORBIDDEN_NEEDLES`]. `Err` names the first needle found and its 1-based
+/// line number. The slice is asserted non-empty before it is searched, so the check
+/// cannot pass vacuously against a file it failed to read or cut at the wrong place.
+fn specs_rs_production_slice_is_io_free(src: &str) -> Result<(), String> {
+    let prod = production_slice(src);
+    if prod.is_empty() {
+        return Err(
+            "src/specs.rs's production slice is empty — cut at the wrong place, or the \
+             file itself has none"
+                .to_string(),
+        );
+    }
+    for (idx, line) in prod.lines().enumerate() {
+        for needle in SPECS_RS_FORBIDDEN_NEEDLES {
+            if line.contains(needle) {
+                return Err(format!(
+                    "src/specs.rs's production slice names {needle:?} at line {}: {line}",
+                    idx + 1
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn specs_rs_production_slice_check_passes_on_a_clean_slice() {
+    let src =
+        "//! docs\npub fn a() -> u8 { 1 }\n\n#[cfg(test)]\nmod tests {\n    use std::fs;\n}\n";
+    specs_rs_production_slice_is_io_free(src).expect("no needle above the cut");
+}
+
+#[test]
+fn specs_rs_production_slice_check_fails_naming_needle_and_line() {
+    let src = "pub fn a() {}\nuse std::fs;\n\n#[cfg(test)]\nmod tests {}\n";
+    let err = specs_rs_production_slice_is_io_free(src).expect_err("std::fs above the cut fails");
+    assert!(err.contains("std::fs"), "{err}");
+    assert!(err.contains("line 2"), "{err}");
+}
+
+#[test]
+fn specs_rs_production_slice_check_ignores_a_needle_below_the_cut() {
+    // The complement: an I/O name in the test module alone, with none above the cut,
+    // must not fail the claim — the slice boundary is load-bearing, not an exemption.
+    let src = "pub fn a() {}\n\n#[cfg(test)]\nmod tests {\n    use std::fs;\n    fn t() {\n        \
+               let _ = std::fs::read_to_string(\"x\");\n    }\n}\n";
+    specs_rs_production_slice_is_io_free(src).expect("a needle only below the cut must not fail");
+}
+
+#[test]
+fn specs_rs_production_slice_check_rejects_an_empty_slice() {
+    let err = specs_rs_production_slice_is_io_free("#[cfg(test)]\nmod tests {}\n")
+        .expect_err("an empty production slice must fail rather than pass vacuously");
+    assert!(err.contains("empty"), "{err}");
+}
+
+/// `specs-emphasis` :: "The production slice of `src/specs.rs` carries no I/O or
+/// schema name" (`specs/doc-conformance/spec.md:39`) — the eleventh
+/// `tests/doc_contract.rs` claim. Decision 1 in `design.md` puts `src/specs.rs` outside
+/// `src/ui/`, where no `scripts/gates/` script sweeps it; this claim is the check the
+/// property it rests on would otherwise have gone without.
+#[test]
+fn the_production_slice_of_src_specs_rs_carries_no_io_or_schema_name() {
+    let src = read_doc(&manifest_dir().join("src/specs.rs")).expect("read src/specs.rs");
+    specs_rs_production_slice_is_io_free(&src)
+        .expect("src/specs.rs's production slice names no I/O or schema-reading API");
+}
