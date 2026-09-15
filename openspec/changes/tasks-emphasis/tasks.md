@@ -389,6 +389,25 @@ against the assembled change and would fail against any one group reverted.
       byte-identical comparisons in 4.5, 7.7 and 8.4 must compare against recorded literals,
       and every scenario must have a production path that reaches it. Planning review found
       five segmentation scenarios that would have passed against a build rendering none.
+      **Answered, and the reviewer checked it rather than taking the claim.**
+      On the recorded literals: `notes/head-output.md` landed in `278873f`, the
+      change's first commit, before any source edit, and the faces it records
+      print **seven** fields — the pre-change `Face` — which is itself evidence
+      it came from running the old binary rather than being reconstructed once
+      `muted` and `label` existed. 4.5's three fixtures, 7.7's two
+      already-literal-carrying gauge tests, and 3.1's 28-row segment table all
+      compare against literals written into the test; none calls the function
+      under test twice and compares the results. 8.4's tests are untouched in
+      the diff apart from signature updates. The reviewer re-derived the
+      width-16 `CHARACTERIZE` wrap independently through the unchanged
+      `wrap_plain` and got the recorded table.
+      On the production path: `a_real_tasks_tab_renders_a_segmented_gauge_into_the_frame`
+      builds its dashboard through `sync_detail` with a closure reader, so the
+      sections and their `progress` values are produced by production code
+      rather than by the test, and a build passing `&[]` from `content_lines`
+      fails its first assertion outright. Three further view fixtures compare
+      the drawn bar against a test-written slice and redden on the same defect.
+      No second instance of the class was found.
 - [x] 9.3 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
       one-line reason, note SUGGESTIONs, and re-run affected tests.
       **No CRITICAL. Three WARNINGs, all fixed; two SUGGESTIONs, one fixed and
