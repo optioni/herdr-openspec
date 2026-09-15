@@ -86,6 +86,16 @@ Error surface: none of the new functions can fail. Both return `Option`, and `No
 ordinary answer for "not a delta heading" / "not a clause keyword", never an error. There is no
 pagination and no streaming.
 
+## Concurrency
+
+**None added, and nothing here runs off the render path.** Both new functions are pure and
+synchronous; `operation` is derived inside `sync_detail`, which already runs on the render
+thread on a key change and is bounded by `artifact-content`'s cache. The crate's three worker
+threads (`src/refresh.rs`, `src/agents.rs`, `src/launch.rs`) are untouched, and this change adds
+no fourth — `tests/doc_contract.rs`'s worker-thread claim therefore stays at three. The one
+ordering interaction is that an adopted refresh re-runs `sync_detail` and re-derives `operation`
+from the newly read text, which is the same path `progress` already takes.
+
 ## Persistence and Rollout
 
 - **Migration:** none. Nothing is persisted.
@@ -111,6 +121,8 @@ pagination and no streaming.
 | Herdr socket (`HerdrCli`, agent poller, launcher) | replaced — stub trait impls, unchanged from today | not reached |
 | Terminal (crossterm raw mode, alternate screen) | **never real** — `ratatui::backend::TestBackend` only; `src/ui/terminal.rs` is untouched and no test may enter raw mode, because `cargo test` spawns this binary | not reached |
 | Clock / `Instant::now()` | not reached — this change reads no clock and adds no timing | not reached |
+| `FsEvents` (the `notify` watch, `src/watch.rs`) | replaced — a stub trait object, unchanged from today; this change adds no watch path | not reached |
+| `Refresher` (the worker thread, `src/refresh.rs`) | replaced — a stub trait object; an adopted refresh re-runs `sync_detail` and so re-derives `operation`, which is the only interaction | not reached |
 | Process spawn | **not reached anywhere**; asserted by `NOSPAWN-GREP` over the whole tree | not reached |
 | `pulldown_cmark` | real, inside `src/ui/markdown.rs` only | real, same file |
 | `ratatui` buffer | real `TestBackend` at 60 and 120 columns | real `Buffer` where a view test asserts cells; `crate::specs` and `crate::tasks` tests use none |
@@ -159,11 +171,11 @@ that is why the classifier does not live under `src/ui/`.
 | The three measured keywords classify as specified | `specs::tests::the_three_measured_keywords_classify_as_specified` | Unit — pure parse | `tasks::role_of` real | `cargo test specs::` |
 | The wider testing vocabulary classifies through the same table | `specs::tests::the_wider_testing_vocabulary_classifies_through_the_same_table` | Unit — pure parse | `tasks::role_of` real | `cargo test specs::` |
 | A run outside the table is not a clause | `specs::tests::a_run_outside_the_table_is_not_a_clause` | Unit — pure parse | `tasks::role_of` real | `cargo test specs::` |
-| The classification reads nothing outside its argument | `specs::tests::the_classification_reads_nothing_outside_its_argument` + `NOSCHEMA` leg of `make gates` | Unit + Gates | none | `cargo test specs:: && make gates` |
+| The classification reads nothing outside its argument | `doc_contract`'s eleventh claim over the production slice, with its planted-defect control | Contract | none | `cargo test --test doc_contract` |
 | Every token in the table classifies to its own role | existing `tasks::tests::every_token_in_the_table_classifies_to_its_own_role`, unchanged | Unit — pure parse | none | `cargo test tasks::` |
 | An unrecognised run is a generic label, not a miss | existing `tasks::tests::an_unrecognised_run_is_a_generic_label_not_a_miss`, unchanged | Unit — pure parse | none | `cargo test tasks::` |
 | Matching is case-sensitive and whole-run | existing `tasks::tests::matching_is_case_sensitive_and_whole_run`, unchanged | Unit — pure parse | none | `cargo test tasks::` |
-| The classification reads nothing outside its argument | existing `tasks::tests::the_classification_the_classification_reads_nothing_outside_its_argument_outside_its_argument`, unchanged | Unit — pure parse | none | `cargo test tasks::` |
+| The classification reads nothing outside its argument | existing `tasks::tests::the_classification_reads_nothing_outside_its_argument`, unchanged | Unit — pure parse | none | `cargo test tasks::` |
 | The table is reachable on its own and `label_of` agrees with it | `tasks::tests::the_table_is_reachable_on_its_own_and_label_of_agrees_with_it` | Unit — pure parse | none | `cargo test tasks::` |
 | An unrecognised run is `None` to the table and `Other` to the label | `tasks::tests::an_unrecognised_run_is_none_to_the_table_and_other_to_the_label` | Unit — pure parse | none | `cargo test tasks::` |
 | The three spec files of a change become three labelled sections | existing `ui::app` test, re-run with the new field | Unit — pure view | reader replaced | `cargo test ui::app::` |
@@ -194,15 +206,15 @@ that is why the classifier does not live under `src/ui/`.
 | An empty source and a zero width each produce no lines | existing test, unchanged | Unit — pure view | `pulldown_cmark` real | `cargo test ui::markdown::` |
 | No line exceeds the width it was given | existing test, unchanged | Unit — pure view | `pulldown_cmark` real | `cargo test ui::markdown::` |
 | A wide-character document wraps by columns at both mandated widths | existing test, unchanged | Unit — pure view | `pulldown_cmark` real | `cargo test ui::markdown::` |
-| Rendering is total over arbitrary input | existing test, extended to assert no panic with clause input | Unit — pure view | `pulldown_cmark` real | `cargo test ui::markdown::` |
+| Rendering is total over arbitrary input | existing test, unchanged | Unit — pure view | `pulldown_cmark` real | `cargo test ui::markdown::` |
 | The markdown path sets neither new face field | existing test, extended to assert `delta: None` | Unit — pure view | `pulldown_cmark` real | `cargo test ui::markdown::` |
 | A scenario's three clauses are coloured by position | `ui::markdown::tests::a_scenarios_three_clauses_are_coloured_by_position` | Unit — pure view | `pulldown_cmark`, `specs::clause_of` real | `cargo test ui::markdown::` |
 | `AND` inherits the clause above it and resets at a heading | `ui::markdown::tests::and_inherits_the_clause_above_it_and_resets_at_a_heading` | Unit — pure view | `pulldown_cmark`, `specs::clause_of` real | `cargo test ui::markdown::` |
 | Only a run opening a list item is a keyword | `ui::markdown::tests::only_a_run_opening_a_list_item_is_a_keyword` | Unit — pure view | `pulldown_cmark` real | `cargo test ui::markdown::` |
 | Every segment `lines` returns carries no delta | `ui::markdown::tests::every_segment_lines_returns_carries_no_delta` | Unit — pure view | `pulldown_cmark` real | `cargo test ui::markdown::` |
-| The narrowed seam holds | `MDSEAM` + `NOCRATETASKS` legs of `make gates` | Gates | none | `make gates` |
+| The narrowed seam holds | `MDSEAM` (`pulldown_cmark` confinement) plus task 7.4's two `grep -n` sweeps over the production slice | Gates + task check | none | `make gates`; `grep -n` per task 7.4 |
 | Each role's modifier set is exactly the table above | `ui::palette::tests::each_role_s_modifier_set_is_exactly_the_table_above`, extended by three rows | Unit — pure view | none | `cargo test ui::palette::` |
-| A monochrome reading of the frame is unchanged | existing `ui::view` test, extended with a badged section | View render | `TestBackend` real | `cargo test ui::view::` |
+| A monochrome reading of the frame is unchanged | existing `ui::view` test, extended with a `Some(Removed)` section asserting `CROSSED_OUT` on its heading label only (task 6.1a) | View render | `TestBackend` real | `cargo test ui::view::` |
 | The five new roles leave every existing cell's modifier where it was | existing test, unchanged | View render | `TestBackend` real | `cargo test ui::view::` |
 | The coloured set is exactly the table above | `ui::palette::tests::the_coloured_set_is_exactly_the_table_and_every_colour_is_a_named_ansi_index`, extended by three rows | Unit — pure view | none | `cargo test ui::palette::` |
 | An out-of-range heading level does not panic | existing test, unchanged | Unit — pure view | none | `cargo test ui::palette::` |
@@ -216,13 +228,23 @@ that is why the classifier does not live under `src/ui/`.
 | A checklist row reaches the buffer with its label coloured | existing test, unchanged | View render | `TestBackend` real | `cargo test ui::view::` |
 | The palette answers every role with a `Style` | existing exhaustive-`match` test, forced to grow by the three variants | Unit — pure view | none | `cargo test ui::palette::` |
 | The confinement gate catches a `Color` named outside the palette | `PALETTE` gate + its planted defect in `tests/gate-controls.toml` | Gates + Contract | none | `make gates && cargo test --test gate_controls` |
-| The palette module reaches no I/O and measures no width | `NOIO-VIEW` and `COLWIDTH` legs, counts unchanged at ten and nine | Gates | none | `make gates` |
-| The enum's membership is exactly this list | existing exhaustive-`match` test, extended to name the three new variants | Unit — pure view | none | `cargo test ui::palette::` |
+| The palette module reaches no I/O and measures no width | `NOIO-VIEW` and `COLWIDTH` legs, counts unchanged at ten and nine | Gates + task check | none | `make gates`; `grep -n` per task 7.4 |
+| The enum's membership is exactly this list | `the_enums_membership_is_exactly_this_list` — its transcribed `vec!` and among-them loop both extended (task 3.3); only `variant()`'s match is compile-forced | Unit — pure view | none | `cargo test ui::palette::` |
 | The three delta roles carry their colour and no modifier | `ui::palette::tests::the_three_delta_roles_carry_their_colour_and_no_modifier` | Unit — pure view | none | `cargo test ui::palette::` |
 | The full set of shared coloured styles is still exactly five groups | `ui::palette::tests::every_shared_style_is_licensed_and_the_unshared_roles_stay_unshared` (pairwise, same test as above) | Unit — pure view | none | `cargo test ui::palette::` |
 | A badged header row's colours survive the row's own role | `ui::view::tests::a_badged_header_rows_colours_survive_the_rows_own_role` | View render | `TestBackend` real, reader replaced | `cargo test ui::view::` |
+| The clause recognition is total over degenerate input | `specs::tests::the_clause_recognition_is_total_over_degenerate_input` | Unit — pure parse | none | `cargo test specs::` |
+| A delta badge and a clause keyword are the same style in one frame | `ui::view::tests::a_delta_badge_and_a_clause_keyword_are_the_same_style_in_one_frame` — asserts the two styles are **equal**, documenting licence 3's accepted collision | View render | `TestBackend` real, reader replaced | `cargo test ui::view::` |
+| `style_for` maps each `DeltaOp` to its own role | `ui::view::tests::style_for_maps_each_deltaop_to_its_own_role` (task 4.1a) | Unit — pure view | none | `cargo test ui::view::` |
+| The production slice of `src/specs.rs` carries no I/O or schema name | `doc_contract`'s eleventh claim (task 8.1) | Contract | none | `cargo test --test doc_contract` |
+| An I/O name planted in the production slice fails the claim | the planted-defect control, both halves recorded (task 8.3) | Contract | none | `cargo test --test doc_contract` |
+| An I/O name in the test module alone does not fail the claim | same claim, asserting the slice boundary is load-bearing | Contract | none | `cargo test --test doc_contract` |
 
-**75 rows, one per scenario in the five delta specs.** 32 are inherited scenarios whose tests this change does not touch, re-run unchanged; the rest are new or extended.
+**80 rows, one per scenario across the six delta specs.** Counted by
+`grep -c '^#### Scenario:' specs/*/spec.md` (28 + 22 + 11 + 10 + 6 + 3) and diffed against this
+table by title, so a scenario without a row and a row without a scenario are both caught.
+Planning review added the last six: three for `doc-conformance`'s new claim, one for
+`clause_of`'s totality, and two for `view-palette`'s collision and dispatch scenarios.
 
 ## Visual Design
 
@@ -251,8 +273,17 @@ would make the module's name a lie for the sake of avoiding one new file. `src/t
 holds `tasks::read`, the filesystem edge `NOIO-VIEW` names — and `ui::markdown` must call into
 this new module, which is exactly why it must not be that one (Decision 3).
 
-Cost, accepted: adding a module moves `SPEC.md`'s module map, which `tests/doc_contract.rs`
-binds. That is one known site with a failing test that names both sides of the disagreement.
+Cost, accepted: adding a module moves **two** `SPEC.md` sites, each bound by its own test in
+`tests/doc_contract.rs` — the Module map (`module_map_matches_lib_rs`) and the
+`### Unit-tested modules` list (`tested_modules_names_every_module`). Both fail loudly and name
+both sides of the disagreement.
+
+Second cost, and the one that nearly went unnoticed: outside `src/ui/`, the module is swept by
+**no** gate — `NOIO-VIEW`'s `PURE` list is the render seam's. The property Decision 3 leans on
+(that `crate::specs` has no I/O, so a pure view file may call into it) would therefore have been
+asserted and unchecked. It is checked instead as an eleventh `tests/doc_contract.rs` claim over
+the production slice; `specs/doc-conformance` states why that tier rather than a 32nd gate
+script or an entry in `PURE`.
 
 ### Decision 2: the badge is a glyph carrying a colour, not a colour alone
 
@@ -434,6 +465,21 @@ allowed, not that it is free for the reader.
   exposure. Worth stating because the obvious cheap alternative (`▲`/`△`/`▽`) would have.
 - **Two more columns of indent on requirement rows at the 58-column interior** → bounded: the
   badge is on header rows only, never on body rows, and is dropped whole before the glyph.
+
+- **`src/specs.rs` is a new production file and the production-slice coverage floor is 96%**
+  (`scripts/coverage-prod.py:84`), well above the 80% total → every arm of both functions needs
+  a test; the eleven scenarios in `spec-delta-badges` supply them, and task 11.5a checks it
+  before `make check` does.
+- **`SPEC.md` § Colour and style reproduces the role table and `style_for`'s fold order, and no
+  test binds it** → it is already stale from `pane-chrome` and `tasks-emphasis` (it still lists
+  `HeaderTitle`, `RegionBorder`, `DetailHeader`, and omits all four `Task*` roles), and this
+  change would deepen the drift by three roles and a tenth step. Deliberately left alone:
+  repairing it means binding it to a test, which is a `doc-conformance` change of its own rather
+  than a hitch-hiker on this one. Recorded so the next reader knows it was seen, not missed.
+- **`doc-conformance`'s own prose counts go stale** — it says "thirteen public modules" and
+  "four of the thirteen", and `AGENTS.md` says "ten further claims". Neither is machine-bound,
+  so nothing goes red. Task 10.5 fixes the claim count; the module counts are left to the
+  `doc-conformance` change that would bind them.
 
 ## Migration Plan
 

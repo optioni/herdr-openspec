@@ -78,9 +78,10 @@ group has an honest RED state rather than a manufactured one.
       `operation_of_heading(level, label)`, `Clause`, and `clause_of(run)`, with `clause_of`
       calling `crate::tasks::role_of` and never restating the token table.
       RED check at HEAD: `grep -rq "DeltaOp" src/` → exit **1**.
-- [ ] 2.3 CHECK: The token table must not be copied. Scope the sweep to the **production
+- [ ] 2.3 REFACTOR: Clean up while green, or state that none was needed.
+- [ ] 2.4 CHECK: The token table must not be copied. Scope the sweep to the **production
       slice** — everything above `mod tests` — exactly as `src/tasks.rs`'s own
-      `the_classification_the_classification_reads_nothing_outside_its_argument_outside_its_argument` already does:
+      `the_classification_reads_nothing_outside_its_argument` already does:
       `awk '/^mod tests/{exit} {print}' src/specs.rs | grep -nE '"(RED|GREEN|VERIFY|CHARACTERIZE|ARRANGE|ACT|ASSERT)"'`
       must print nothing, and `grep -q "crate::tasks::role_of" src/specs.rs` must exit 0.
       Unscoped, this check is guaranteed to fail on a correct implementation: 2.1's
@@ -88,7 +89,6 @@ group has an honest RED state rather than a manufactured one.
       `GIVEN`, `ARRANGE`, `ACT`, `ASSERT`, and `RED`, so those literals must appear in the test
       module. Measured on the established analogue:
       `grep -cE '"(RED|GREEN|VERIFY|CHARACTERIZE|ARRANGE|ACT|ASSERT)"' src/tasks.rs` → **6**.
-- [ ] 2.4 REFACTOR: Clean up while green, or state that none was needed.
 - [ ] 2.5 Run the group tests — `cargo test specs:: && cargo test tasks::`, both green, and
       confirm the run reports a non-zero test count for `specs::` rather than the
       `running 0 tests` HEAD result recorded above.
@@ -106,14 +106,17 @@ group has an honest RED state rather than a manufactured one.
 - [ ] 3.2 GREEN: Add `DeltaAdded`, `DeltaModified`, `DeltaRemoved` to `Role` after `TaskLabel`,
       and answer them in `style` with `Green`, `Yellow`, and `LightRed`, no modifier. The
       exhaustive `match` makes this a compile error until done.
-- [ ] 3.3 GREEN: Extend the modifier-table and colour-table tests to the three new rows, and
-      update the modifier scenario's count from eleven to **fourteen** uncoloured-modifier roles
-      per specs/view-palette.
+- [ ] 3.3 GREEN: Extend the modifier-table and colour-table tests to the three new rows, update
+      the modifier scenario's count from eleven to **fourteen**, and add the three variant names
+      to `the_enums_membership_is_exactly_this_list` — both its transcribed `vec!` of names
+      (`src/ui/palette.rs:798-825`) and its among-them loop (`:830-838`). Only `variant()`'s
+      match is compile-forced; the `vec!` fails at runtime and is easy to miss.
 - [ ] 3.4 CHECK: `/bin/sh scripts/gates/palette.sh` → exit 0, with the colour literals confined
       to `src/ui/palette.rs`'s own tests. Negative control run at planning time: appending
       `fn _p() { let _ = ratatui::style::Color::Red; }` to `src/ui/list.rs` made it exit **1**,
       and removing the plant returned it to exit **0**.
-- [ ] 3.5 Run the group tests — `cargo test ui::palette::` green, no regressions.
+- [ ] 3.5 Run the group tests — `cargo test ui::palette::` green, no regressions; state
+      whether a refactor was needed.
 
 ## 4. `Face::delta` and `style_for` step 10
 
@@ -123,7 +126,16 @@ Depends on 2 (for `DeltaOp`) and 3 (for the roles).
 
 - [ ] 4.1 RED: Write failing tests `every_segment_lines_returns_carries_no_delta` in `ui::markdown` and an extension of
       `a plain face is the default style` in `ui::view`, from the same-named specs/markdown-render
-      and specs/view-palette scenarios. Both name widths 58 and 78 per `DETAILWIDTHS`.
+      and specs/view-palette scenarios. Each answers to its **own** width gate:
+      `every_segment_lines_returns_carries_no_delta` is in `src/ui/markdown.rs` and names 58 and
+      78 (`MDWIDTHS`); the `ui::view` extension keeps the 60 and 120 it already has (`WIDTHS`).
+      `DETAILWIDTHS` sweeps only `src/ui/detail.rs` and neither of these — rewriting the
+      `ui::view` test to 58/78 would redden `make gates`.
+- [ ] 4.1a RED: In the same step assert `style_for` over all three operations —
+      `the_three_delta_roles_carry_their_colour_and_no_modifier`'s sibling in `ui::view`, from
+      specs/view-palette → "`style_for` maps each `DeltaOp` to its own role". Without it group 4
+      has no test that step 10 exists at all, and a slip mapping `Modified` to `DeltaAdded`
+      passes every other check in this plan.
 - [ ] 4.2 GREEN: Add `delta: Option<crate::specs::DeltaOp>` to `Face`, keeping its `Default`
       derive, and name the new field at `src/ui/tasks.rs`'s `heading_line` — the crate's one
       site that spells every field out (`grep -n "heading_line" src/ui/tasks.rs` → `286`).
@@ -153,7 +165,8 @@ Depends on 2 (for `DeltaOp`).
       added to shortcut this.
 - [ ] 5.4 CHECK: `/bin/sh scripts/gates/nodefault-ui.sh` with `ArtifactSection`'s own `SCAN_MIN`
       as the Makefile passes it → exit 0, confirming the type still carries no `Default`.
-- [ ] 5.5 Run the group tests — `cargo test ui::app::` green, `cargo test` green overall.
+- [ ] 5.5 Run the group tests — `cargo test ui::app::` green, `cargo test` green overall;
+      state whether a refactor was needed.
 
 ## 6. The badge on a section header row
 
@@ -162,20 +175,31 @@ Depends on 2 (for `DeltaOp`).
 Depends on 4 (for `Face::delta`) and 5 (for `operation`).
 
 - [ ] 6.1 RED: Write failing tests `the_three_operations_draw_three_different_markers`,
-      `an_unbadged_header_row_is_unchanged_in_every_column`, `a_removed_requirements_heading_is_struck_and_its_body_is_not`,
-      `the_label_truncates_before_the_badge_is_dropped`, `the_badge_is_dropped_whole_at_a_width_that_cannot_hold_it`, and
-      `a_badged_header_row_is_still_addressed_by_its_own_section_index` in `ui::detail`, from the same-named specs/artifact-folds
-      scenarios. Every one must name both `58` and `78` or `DETAILWIDTHS` fails.
+      `an_unbadged_header_row_is_unchanged_in_every_column`,
+      `a_removed_requirements_heading_is_struck_and_its_body_is_not`,
+      `the_label_truncates_before_the_badge_is_dropped`,
+      `the_badge_is_dropped_whole_at_a_width_that_cannot_hold_it`, and
+      `a_badged_header_row_is_still_addressed_by_its_own_section_index` in `ui::detail`, from the
+      same-named specs/artifact-folds scenarios. Every one must name both `58` and `78`
+      (`DETAILWIDTHS`).
+- [ ] 6.1a RED: In the same step write the two **render** tests in `ui::view` —
+      `a_selected_badged_header_keeps_its_badge_colour` and
+      `a_badged_header_rows_colours_survive_the_rows_own_role` — naming `60` and `120`
+      (`WIDTHS`, which sweeps `src/ui/view.rs` and requires those two widths, not 58/78). They
+      belong in this group's RED because the badge does not exist until 6.2/6.3: run after them
+      they could not fail, which is a characterization test wearing a `behavior` marker.
 - [ ] 6.2 GREEN: Emit the badge in `ui::detail::header` as `<indent><glyph> <badge><label>`,
       two columns, with the badge in the survives-truncation prefix and dropped whole below the
       width that holds prefix plus one column of label — per design.md → Decision 5.
 - [ ] 6.3 GREEN: Split a badged header row into three segments and set
       `Face { delta: Some(op) }` on the badge and `Face { strikethrough: true }` on a
       `Removed` row's label. An unbadged row keeps its single segment.
-- [ ] 6.4 CHECK: `/bin/sh scripts/gates/detailwidths.sh` and `/bin/sh scripts/gates/widths.sh`
+- [ ] 6.4 REFACTOR: `header` goes from a one-segment row to three with a drop-whole prefix
+      rule; clean that up while green, or state that none was needed.
+- [ ] 6.5 CHECK: `/bin/sh scripts/gates/detailwidths.sh` and `/bin/sh scripts/gates/widths.sh`
       → exit 0. At HEAD `widths.sh` reports `all 149 view tests name both 60 and 120`; the
       count rises and must not regress to a test naming one width.
-- [ ] 6.5 Run the group tests — `cargo test ui::detail::` green, no regressions.
+- [ ] 6.6 Run the group tests — `cargo test ui::detail:: ui::view::` green, no regressions.
 
 ## 7. Clause keywords on the markdown path
 
@@ -193,27 +217,41 @@ Depends on 4 (for `Face::delta`) and 5 (for `operation`).
 - [ ] 7.4 CHECK: `/bin/sh scripts/gates/mdseam.sh` and `/bin/sh scripts/gates/mdwidths.sh`
       → exit 0 (at HEAD:
       `MDSEAM OK: 26 files searched (>= 25), pulldown_cmark only in src/ui/markdown.rs`), and
-      `grep -n "crate::tasks::" src/ui/markdown.rs` finds no function call — only the
-      `LabelRole` type — and `grep -n "crate::specs::" src/ui/markdown.rs` prints only lines
+      `grep -n "crate::tasks::" src/ui/markdown.rs` finds no function **call**. It does return
+      four hits the implementer should expect: `LabelRole` as a field type, two doc-comment
+      mentions, and `crate::tasks::Progress` at `:2400` inside the test module — none is a call,
+      and the production slice ends at `:1270`. And `grep -n "crate::specs::" src/ui/markdown.rs` prints only lines
       naming `clause_of`. Both are `grep -n`, not `grep -c`: a count names nothing, and the
       check's whole content is *which* symbols appear.
-- [ ] 7.5 Run the group tests — `cargo test ui::markdown::` green.
+- [ ] 7.5 Run the group tests — `cargo test ui::markdown::` green; state whether a refactor
+      was needed.
 
-## 8. The badge reaches the buffer
+## 8. The new module's purity, checked inside `cargo test`
 
 <!-- kind: behavior -->
 
-Depends on 6. This is the outermost evidence this change has — see design.md → Test Strategy.
+Depends on 2. Per specs/doc-conformance → "A non-view pure module's freedom from I/O is checked
+inside `cargo test`", and design.md → Decision 1: outside `src/ui/`, `src/specs.rs` is swept by
+no gate, so the property Decision 3 rests on has no check without this group.
 
-- [ ] 8.1 RED: Write failing tests `a_selected_badged_header_keeps_its_badge_colour` and
-      `a_badged_header_rows_colours_survive_the_rows_own_role` in `ui::view`, rendering into `TestBackend` at 60 and 120
-      columns, from the same-named specs/artifact-folds and specs/view-palette scenarios.
-- [ ] 8.2 GREEN: Confirm no `ui::view` change is needed beyond step 10 from 4.3 — the existing
-      loop already patches the row's kind role over each segment's `style_for`. If a change is
-      needed, that is a finding: record it, because design.md → Decision 8 claims it is not.
-- [ ] 8.3 CHECK: Assert the badge cell's foreground against `palette::style(Role::DeltaAdded)`
-      and never against a `Color` literal; `/bin/sh scripts/gates/palette.sh` → exit 0 proves it.
-- [ ] 8.4 Run the group tests — `cargo test ui::view::` green.
+- [ ] 8.1 RED: Write the eleventh claim in `tests/doc_contract.rs` —
+      `the_production_slice_of_src_specs_rs_carries_no_io_or_schema_name` — reading the slice
+      above `src/specs.rs`'s first line-anchored `#[cfg(test)]` through the existing helper
+      (`production_slice_cuts_before_cfg_test`) and failing on any of `std::fs`, `std::io`,
+      `std::env`, `std::process`, `std::net`, `File::`, `read_to_string`, `Command`, `schema::`,
+      `Schema`, `config.yaml`, `.openspec.yaml`. RED check at HEAD: `test -f src/specs.rs` →
+      exit **1**, so the claim cannot yet read its subject.
+- [ ] 8.2 GREEN: Assert the slice is non-empty before searching it, so the claim cannot pass
+      vacuously against a file it failed to read or cut at the wrong place.
+- [ ] 8.3 CHECK: Run the negative control and record both halves. Insert `use std::fs;` above
+      `src/specs.rs`'s `#[cfg(test)]` line → `cargo test --test doc_contract` must FAIL naming
+      the needle and the line; remove the plant → must pass. A green-at-HEAD check without this
+      is an unfalsifiable guard, which is worse than no guard.
+- [ ] 8.4 CHECK: Confirm no gate moved — `ls scripts/gates/ | wc -l` still **31**, and
+      `make gates` still reports `NOIO-VIEW OK: 10 pure files`. This claim exists in the test
+      tier precisely so neither count moves.
+- [ ] 8.5 Run the group tests — `cargo test --test doc_contract` green; state whether a refactor
+      was needed.
 
 ## 9. Change Review
 
@@ -227,17 +265,25 @@ Depends on 6. This is the outermost evidence this change has — see design.md �
 
 <!-- kind: operational -->
 
-- [ ] 10.1 CHECK: `cargo test --test doc_contract module_map_matches_lib_rs` → must be RED once
-      `pub mod specs;` exists and `SPEC.md`'s Module map has no row for it. That test reads
-      `src/lib.rs`'s `pub mod` set against the table at `SPEC.md:81`.
+- [ ] 10.1 CHECK: `cargo test --test doc_contract` → must be RED on **two** counts once
+      `pub mod specs;` exists: `module_map_matches_lib_rs` (the table at `SPEC.md:81`) and
+      `tested_modules_names_every_module` (the `### Unit-tested modules` list at `SPEC.md:1098`).
+      Both read `src/lib.rs`'s `pub mod` set; naming only the first understates what is red.
 - [ ] 10.2 CHANGE: Add the `specs` row to `SPEC.md`'s Module map (audience: anyone tracing where
       a classifier lives) — "Recognise a delta spec's operation headings and a scenario clause's
       keyword". It replaces nothing; it is the row a new module owes that table.
-- [ ] 10.3 CHANGE: Update `AGENTS.md` → Architecture rules (audience: agents editing this crate)
+- [ ] 10.3 CHANGE: Add `specs::operation_of_heading` and `specs::clause_of` to `SPEC.md`'s
+      `### Unit-tested modules` list (`SPEC.md:1098`) — delta-operation headings and scenario
+      clause keywords, classified from `&str` with no filesystem edge. The check requires a
+      bounded `specs::` token, so the module name alone is not enough.
+- [ ] 10.4 CHANGE: Update `AGENTS.md` → Architecture rules (audience: agents editing this crate)
       to name `src/specs.rs` beside `src/tasks.rs` as pure classification outside `src/ui/`, and
       record that `ui::markdown` may call `specs::clause_of` and no other function of that
       module. This corrects the current text's implication that no pure view file calls out.
-- [ ] 10.4 VERIFY: `cargo test --test doc_contract` green.
+- [ ] 10.5 CHANGE: Update `AGENTS.md`'s contract-tier sentence from "ten further claims" to
+      **eleven**, naming the `src/specs.rs` purity claim. The count is prose and nothing binds
+      it, which is exactly how `quality-gates`' script count drifted three behind unnoticed.
+- [ ] 10.6 VERIFY: `cargo test --test doc_contract` green.
 
 ## 11. Lint & Verify
 
@@ -252,5 +298,10 @@ Depends on 6. This is the outermost evidence this change has — see design.md �
       `COLWIDTH` still **nine** pure view files. Both counts must be unchanged: `src/specs.rs`
       is outside `src/ui/` precisely so they do not move (design.md → Decision 1).
 - [ ] 11.5 VERIFY: `cargo test --all-features` — green, contract tier included.
+- [ ] 11.5a VERIFY: `make coverage` — both floors hold. `src/specs.rs` is a new **production**
+      file and the production-slice floor is **96%** (`scripts/coverage-prod.py:84`), well above
+      the 80% total, so every arm of `operation_of_heading` and `clause_of` needs a test. The
+      eleven scenarios in specs/spec-delta-badges supply them; this task is the forewarning, so
+      a shortfall surfaces here rather than as an unexplained red at `make check`.
 - [ ] 11.6 VERIFY: `make check` as the single gate; if it fails, name the failing sub-command.
 - [ ] 11.7 VERIFY: `openspec validate spec-emphasis --strict` — valid.
