@@ -125,25 +125,25 @@ group has an honest RED state rather than a manufactured one.
 
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: Write failing tests `the_three_delta_roles_carry_their_colour_and_no_modifier` and an extension of the existing
+- [x] 3.1 RED: Write failing tests `the_three_delta_roles_carry_their_colour_and_no_modifier` and an extension of the existing
       `every_shared_style_is_licensed_and_the_unshared_roles_stay_unshared` pairwise test, from
       the specs/view-palette scenarios "The three delta
       roles carry their colour and no modifier" and "The full set of shared coloured styles is
       still exactly five groups". RED check at HEAD: `grep -rq "DeltaAdded" src/ui/palette.rs`
       → exit **1**.
-- [ ] 3.2 GREEN: Add `DeltaAdded`, `DeltaModified`, `DeltaRemoved` to `Role` after `TaskLabel`,
+- [x] 3.2 GREEN: Add `DeltaAdded`, `DeltaModified`, `DeltaRemoved` to `Role` after `TaskLabel`,
       and answer them in `style` with `Green`, `Yellow`, and `LightRed`, no modifier. The
       exhaustive `match` makes this a compile error until done.
-- [ ] 3.3 GREEN: Extend the modifier-table and colour-table tests to the three new rows, update
+- [x] 3.3 GREEN: Extend the modifier-table and colour-table tests to the three new rows, update
       the modifier scenario's count from eleven to **fourteen**, and add the three variant names
       to `the_enums_membership_is_exactly_this_list` — both its transcribed `vec!` of names
       (`src/ui/palette.rs:798-825`) and its among-them loop (`:830-838`). Only `variant()`'s
       match is compile-forced; the `vec!` fails at runtime and is easy to miss.
-- [ ] 3.4 CHECK: `/bin/sh scripts/gates/palette.sh` → exit 0, with the colour literals confined
+- [x] 3.4 CHECK: `/bin/sh scripts/gates/palette.sh` → exit 0, with the colour literals confined
       to `src/ui/palette.rs`'s own tests. Negative control run at planning time: appending
       `fn _p() { let _ = ratatui::style::Color::Red; }` to `src/ui/list.rs` made it exit **1**,
       and removing the plant returned it to exit **0**.
-- [ ] 3.5 Run the group tests — `cargo test ui::palette::` green, no regressions; state
+- [x] 3.5 Run the group tests — `cargo test ui::palette::` green, no regressions; state
       whether a refactor was needed.
 
 ## 4. `Face::delta` and `style_for` step 10
