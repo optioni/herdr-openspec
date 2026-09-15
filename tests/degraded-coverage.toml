@@ -113,7 +113,7 @@ tier = "view"
 proof = ["missing_tasks_artifact_no_content_yet"]
 verdict = "confirmed"
 why = "the header's counted pair beside the tab's own No content yet, rendered through render_at"
-covers = ["src/ui/detail.rs:378-388", "src/ui/detail.rs:391-401"]
+covers = ["src/ui/detail.rs:488-498", "src/ui/detail.rs:501-511"]
 
 [[row]]
 condition = "`openspec/changes/` or its `archive/` exists and cannot be read"

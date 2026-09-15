@@ -234,7 +234,7 @@ Depends on 2 (for `DeltaOp`).
 
 Depends on 4 (for `Face::delta`) and 5 (for `operation`).
 
-- [ ] 6.1 RED: Write failing tests `the_three_operations_draw_three_different_markers`,
+- [x] 6.1 RED: Write failing tests `the_three_operations_draw_three_different_markers`,
       `an_unbadged_header_row_is_unchanged_in_every_column`,
       `a_removed_requirements_heading_is_struck_and_its_body_is_not`,
       `the_label_truncates_before_the_badge_is_dropped`,
@@ -242,24 +242,47 @@ Depends on 4 (for `Face::delta`) and 5 (for `operation`).
       `a_badged_header_row_is_still_addressed_by_its_own_section_index` in `ui::detail`, from the
       same-named specs/artifact-folds scenarios. Every one must name both `58` and `78`
       (`DETAILWIDTHS`).
-- [ ] 6.1a RED: In the same step write the two **render** tests in `ui::view` —
+- [x] 6.1a RED: In the same step write the two **render** tests in `ui::view` —
       `a_selected_badged_header_keeps_its_badge_colour` and
       `a_badged_header_rows_colours_survive_the_rows_own_role` — naming `60` and `120`
       (`WIDTHS`, which sweeps `src/ui/view.rs` and requires those two widths, not 58/78). They
       belong in this group's RED because the badge does not exist until 6.2/6.3: run after them
       they could not fail, which is a characterization test wearing a `behavior` marker.
-- [ ] 6.2 GREEN: Emit the badge in `ui::detail::header` as `<indent><glyph> <badge><label>`,
+- [x] 6.2 GREEN: Emit the badge in `ui::detail::header` as `<indent><glyph> <badge><label>`,
       two columns, with the badge in the survives-truncation prefix and dropped whole below the
       width that holds prefix plus one column of label — per design.md → Decision 5.
-- [ ] 6.3 GREEN: Split a badged header row into three segments and set
+- [x] 6.3 GREEN: Split a badged header row into three segments and set
       `Face { delta: Some(op) }` on the badge and `Face { strikethrough: true }` on a
       `Removed` row's label. An unbadged row keeps its single segment.
-- [ ] 6.4 REFACTOR: `header` goes from a one-segment row to three with a drop-whole prefix
+- [x] 6.4 REFACTOR: `header` goes from a one-segment row to three with a drop-whole prefix
       rule; clean that up while green, or state that none was needed.
-- [ ] 6.5 CHECK: `/bin/sh scripts/gates/detailwidths.sh` and `/bin/sh scripts/gates/widths.sh`
+- [x] 6.5 CHECK: `/bin/sh scripts/gates/detailwidths.sh` and `/bin/sh scripts/gates/widths.sh`
       → exit 0. At HEAD `widths.sh` reports `all 149 view tests name both 60 and 120`; the
       count rises and must not regress to a test naming one width.
-- [ ] 6.6 Run the group tests — `cargo test ui::detail:: ui::view::` green, no regressions.
+- [x] 6.6 Run the group tests — `cargo test ui::detail:: ui::view::` green, no regressions.
+- [ ] 6.7 GREEN (added during implementation): Extend the **existing**
+      `a_monochrome_reading_of_the_frame_is_unchanged` in `ui::view` with the fifth bullet
+      specs/view-palette:131 gained in this change — a `specs` tab whose sections carry
+      `operation: Some(Removed)` renders `CROSSED_OUT` on exactly that requirement's heading
+      label cells **and on no other cell in the frame**. `design.md`'s matrix attributes this to
+      6.1a; 6.1a's own text never mentioned it and the test did not assert it, so the bullet was
+      unproven. Extend in place rather than adding a second test: it is one scenario whose other
+      four bullets already live there. Keep both `60` and `120` (`WIDTHS`).
+      This is the review's own WARNING repair — "the monochrome scenario extended with a clause
+      pinning `CROSSED_OUT` to exactly that label and no other cell" — landing in the spec and
+      in no task, the **third** time that has happened in this package.
+- [x] 6.8 CHECK (added during implementation): every `covers` anchor into `src/ui/detail.rs`
+      re-pointed, not just the first. Task 4.6 warned that insertions shift absolute line
+      numbers; this group shifted them far enough that **three** rows moved, and the two obvious
+      ones were repaired while a third — the `missing_tasks_artifact_no_content_yet` row, which
+      carries both ranges in **one** `covers` array — was left pointing at
+      `src/ui/detail.rs:378-388`/`391-401`. It did not fail: both ranges had landed on this
+      change's own new `label_area` tail and `badged_pieces`, so the row went on proving a
+      degraded state against code that has nothing to do with it. **`every_table_row_has_a_proof`
+      checks only that a range is in-bounds and not blank or comment-only — it cannot see that an
+      anchor now covers the wrong function.** Re-pointed to `488-498`/`501-511`
+      (`no_content_yet_row`, `problem_row`). When repairing anchors, grep every occurrence of the
+      old range, not the first.
 
 ## 7. Clause keywords on the markdown path
 
@@ -283,6 +306,15 @@ Depends on 4 (for `Face::delta`) and 5 (for `operation`).
       and the production slice ends at `:1270`. And `grep -n "crate::specs::" src/ui/markdown.rs` prints only lines
       naming `clause_of`. Both are `grep -n`, not `grep -c`: a count names nothing, and the
       check's whole content is *which* symbols appear.
+- [ ] 7.4a GREEN (added during implementation): Write
+      `a_delta_badge_and_a_clause_keyword_are_the_same_style_in_one_frame` in `ui::view`, from
+      specs/view-palette:871, naming both `60` and `120` (`WIDTHS`). It is **cross-cutting** —
+      it needs group 6's badge and this group's clause keyword in one frame — which is why it
+      could belong to neither group's file list and ended up in `design.md`'s matrix and in no
+      task at all. Both halves exist once 7.2 lands, so it belongs here, last.
+      This scenario is the review's own CRITICAL repair for licence 3: it asserts the two cells
+      are **equal**, documenting the collision rather than a distinction that does not exist. An
+      assertion that they *differ* would invert the finding the scenario was written to record.
 - [ ] 7.5 Run the group tests — `cargo test ui::markdown::` green; state whether a refactor
       was needed.
 
@@ -307,6 +339,13 @@ no gate, so the property Decision 3 rests on has no check without this group.
       `src/specs.rs`'s `#[cfg(test)]` line → `cargo test --test doc_contract` must FAIL naming
       the needle and the line; remove the plant → must pass. A green-at-HEAD check without this
       is an unfalsifiable guard, which is worse than no guard.
+- [ ] 8.3a CHECK (added during implementation): Run the **complement** control, from
+      specs/doc-conformance:54 — "An I/O name in the test module alone does not fail the claim".
+      Plant an I/O name **below** `src/specs.rs`'s `#[cfg(test)]` line and confirm
+      `cargo test --test doc_contract` still **passes**; remove it. 8.3 plants above the cut and
+      requires a failure; without its complement, a claim that read the whole file rather than
+      the production slice would satisfy 8.3 and be wrong. The scenario exists and no task named
+      it — the same omission this package has now produced four times.
 - [ ] 8.4 CHECK: Confirm no gate moved — `ls scripts/gates/ | wc -l` still **31**, and
       `make gates` still reports `NOIO-VIEW OK: 10 pure files`. This claim exists in the test
       tier precisely so neither count moves.

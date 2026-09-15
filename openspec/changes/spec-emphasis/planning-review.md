@@ -105,6 +105,9 @@ affected group was marked complete. Listed in the same form as the table above.
 | NIT | `tasks.md` | The 75-site count is correct but incomplete in two ways the compiler finds and the grep cannot: one of `app.rs`'s spans is a **destructuring pattern**, not a construction, where `operation: None` makes the binding refutable (`E0005`); and two further sites live in `tests/doc_contract.rs`, outside the count's own `src/` scope but required for `cargo test` to compile. | Both recorded in 5.3. The count stays 75 — it is right about what it measures. | `tasks.md` 5.3 |
 | WARNING | `tasks.md` | Nothing in the package predicted that `tests/degraded-coverage.toml` anchors rows to **absolute line numbers**: adding a field to `Face` moved `src/ui/markdown.rs` six lines and carried a row's anchor onto a comment, failing `every_table_row_has_a_proof` with a message naming a footnote and no connection to the group that caused it. | Anchor re-pointed to the same line of code; task 4.6 added, naming every anchor the remaining groups can disturb. | `tasks.md` 4.6 |
 
+| CRITICAL | `tasks.md`, `design.md` | Three scenarios **this change adds** are named by no task: `view-palette:131`'s fifth bullet (`CROSSED_OUT` on a `Removed` heading label and no other cell), `view-palette:871` (a delta badge and a clause keyword are the same style in one frame), and `doc-conformance:54` (an I/O name in the test module alone does not fail the claim). The first is attributed by the matrix to task 6.1a, whose text never mentions it; the second is cross-cutting between groups 6 and 7 and landed in neither; the third is the complement control to 8.3, without which a claim reading the whole file rather than the production slice would satisfy 8.3 and be wrong. | Tasks 6.7, 7.4a and 8.3a added, each recording why it was missed. | `tasks.md` 6.7, 7.4a, 8.3a |
+| WARNING | `tasks.md` | `every_table_row_has_a_proof` checks only that a `covers` range is in-bounds and **not blank or comment-only**. It cannot see that an anchor now covers the wrong function. Group 6's insertions carried the `missing_tasks_artifact_no_content_yet` row's two ranges onto this change's own new `label_area` tail and `badged_pieces`, where it passed while proving nothing. | Re-pointed; task 6.8 records that the check is weaker than it looks and that repairing anchors means grepping every occurrence of a range, not the first. | `tasks.md` 6.8 |
+
 **What let these through — one cause, three defects.** The review recorded "80 scenarios across
 six delta specs, 80 matrix rows, diffed by title" as a passing structural check. It was not one.
 Re-measured, the true figures are 79 and 80: the counts were never equal, and the diff was not
@@ -117,8 +120,21 @@ did).
 The generalisable rule: **titles must be diffed three ways — scenarios, matrix rows, task names —
 and a structural check is only evidence when its numbers are printed rather than asserted.** Two
 equal counts read as agreement and stopped the check; two *unequal* counts would have named the
-orphan immediately. All three defects were found by implementers refusing to write a test for a
-scenario they could not find, which is a slower and more expensive place to find them.
+orphan immediately. Every one of these defects was found by an implementer refusing to write a
+test for a scenario it could not find, which is a slower and more expensive place to find them.
+
+**The sharper pattern, visible only once five groups had run.** Run properly at group 6, the
+scenario-to-task diff found three more scenarios with no task — and *every one of them was added
+by this review's own repairs*: the clause-totality scenario (NIT), the monochrome `CROSSED_OUT`
+clause (WARNING), the badge/keyword collision scenario (CRITICAL, licence 3), and the
+doc-conformance complement control. Four repairs, four scenarios written into a spec, zero tasks
+written to implement them. The review repaired the specs and left `tasks.md` describing the
+package as it was before the repairs.
+
+So the rule above is not quite enough. **A review that adds a scenario has not finished until it
+has added the task that implements it**, and the diff that proves it must be re-run *after* the
+last repair rather than before. Recorded here rather than in a row because it is a property of
+how this review was conducted, not of any one artifact it produced.
 
 ## Deferred Non-Blocking Notes
 
