@@ -133,9 +133,13 @@ a colour.
   problem row, three active changes one of which is badged `Working`, and a selected change
   whose single-section content is `## Heading\n\n**bold** and *italic* and `code` and
   [link](u)\n` — is rendered at 120x20 and at 60x20
-- **THEN** every cell's modifier is byte-for-byte what the same dashboard produced before
-  `tasks-emphasis`, because that fixture's selected artifact does not track tasks and so no
-  cell carries any of the five new roles
+- **THEN** no cell of the detail region's content area carries `DIM` except the `code` span's,
+  which `Role::Code` has always carried — that fixture's selected artifact does not track
+  tasks, so no cell carries any of the five new roles. The **byte-for-byte** half of this
+  claim is carried by "A monochrome reading of the frame is unchanged", whose per-cell
+  modifier assertions across both regions at both widths this change leaves **unmodified**;
+  that is what makes it falsifiable, and it is stated here rather than promised as a
+  comparison against a pre-change buffer, which this repository has no mechanism to record
 - **AND** the same dashboard whose selected artifact tracks tasks and whose file holds one
   checked and one unchecked item renders `DIM` on exactly the checked item's own rows, and on
   no cell anywhere else that did not already carry it

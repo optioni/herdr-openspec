@@ -265,6 +265,11 @@ fixtures with their shared helper.
       `a_mostly_finished_task_file_opens_at_its_first_unfinished_group` (`:4659`) — and give
       their shared helper `expected_header_at` (`:3974`) a progress argument. These go red the
       moment 6.5 lands; without this task the group reports green on a red tree.
+      **The figure is three and the tree held four.**
+      `tasks_tab_shows_checkboxes` asserts a tracked-tasks fold-header row too,
+      through the same helper, and went red with the other three. All four are
+      amended. Recorded here rather than only in the commit message, because the
+      task is what a resuming session reads.
 - [x] 6.7 CHECK: Assert the drawn cell is byte-identical to `ui::list::progress_cell` called on
       the same value, so the row provably does not format its own.
 - [x] 6.8 REFACTOR: Extract the right-align arithmetic if `header` grew a second copy of
@@ -411,6 +416,21 @@ against the assembled change and would fail against any one group reverted.
       S2 — fixed: `specs/detail-scroll/spec.md` stated **78** sites "measured
       with" a command that returns **81** after the change. Restated as the
       before-and-after pair it is, with the 74-of-78 compiler-forced split.
+      S3 — fixed: `specs/artifact-folds`' "Every other artifact's section
+      headers carry no progress cell" claims a split tracked-tasks file's
+      **file section** carries `None`, but the test's fixture resolved to one
+      path, so no file section was ever constructed and that half of the bullet
+      had nothing behind it. A two-path tracked-tasks fixture now builds two
+      file sections, asserts `progress: None` on both, and asserts their header
+      rows draw no cell — with the heading sections beside them still counted,
+      so the assertion is about the file section rather than about the tab.
+      S4 — fixed: the same delta's "The five new roles leave every existing
+      cell's modifier where it was" promised a byte-for-byte comparison against
+      a pre-change buffer, which this repository has no mechanism to record.
+      The scenario now states what its own test asserts and names
+      `a_monochrome_reading_of_the_frame_is_unchanged`, left unmodified, as
+      what carries the byte-for-byte half — which is 8.4's own argument.
+      S5 — fixed: task 6.6 above, whose three-fixture figure was four.
 - [x] 9.4 CHECK: Before archiving, re-extract the `markdown-render`, `detail-scroll`, and four
       `view-palette` requirement blocks from `openspec/specs/<capability>/spec.md` and compare
       by **phrase** against this change's deltas. `spec-emphasis` modifies `markdown-render`

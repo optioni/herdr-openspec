@@ -4825,8 +4825,7 @@ mod tests {
             }
         }
 
-        // The file section and the preamble of a **split tracked-tasks** file
-        // carry `None` too, so only heading sections gain a cell.
+        // The **preamble** of a split tracked-tasks file carries `None` too.
         let tasks = synced_task_dashboard(
             "Intro prose.\n\n## 1. Setup\n\n- [x] a\n\n## 2. Build\n\n- [ ] b\n",
             crate::tasks::Progress {
@@ -4840,6 +4839,83 @@ mod tests {
             "the preamble is not a task group"
         );
         assert!(tasks.detail.sections[0].label.is_none());
+
+        // And so does the **file section**, which is only constructed when the
+        // artifact resolves to more than one path — the half of this scenario's
+        // third bullet a single-path fixture cannot reach at all.
+        let change = fixture::track_tasks_at(
+            fixture::with_artifacts(
+                fixture::active("detail-view", 1, 2),
+                &[(
+                    "tasks",
+                    &[
+                        "/repo/openspec/changes/detail-view/tasks.md",
+                        "/repo/openspec/changes/detail-view/more-tasks.md",
+                    ],
+                )],
+            ),
+            0,
+        );
+        let mut two_path = dashboard_with_detail(
+            vec![change],
+            Vec::new(),
+            1,
+            Route::Detail,
+            Detail {
+                sections: Vec::new(),
+                scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
+                expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
+            },
+        );
+        let recorder = crate::testutil::RecordingReader::always(Ok(
+            "## 1. Setup\n\n- [x] a\n\n## 2. Build\n\n- [ ] b\n".to_string(),
+        ));
+        let read = |p: &std::path::Path| recorder.read(p);
+        two_path.sync_detail(&read);
+
+        let file_sections: Vec<&ArtifactSection> = two_path
+            .detail
+            .sections
+            .iter()
+            .filter(|s| s.depth == 0 && s.text.is_empty())
+            .collect();
+        assert_eq!(
+            file_sections.len(),
+            2,
+            "two paths contribute two file sections, or this leg proves nothing"
+        );
+        for section in file_sections {
+            assert_eq!(
+                section.progress, None,
+                "a file section is not a task group: {:?}",
+                section.label
+            );
+        }
+        // The heading sections beneath them still carry their own counts, so
+        // the assertion above is about the file section and not about the tab.
+        assert!(
+            two_path
+                .detail
+                .sections
+                .iter()
+                .any(|s| s.progress.is_some()),
+            "the tracked-tasks tab still counts its groups"
+        );
+        for width in [120, 60] {
+            let rows = drawn_content_rows(&render_at(width, 20, &two_path), interior_width(width));
+            let header = rows
+                .iter()
+                .find(|r| r.contains("tasks.md"))
+                .expect("a file section draws a header row");
+            assert!(
+                !header.contains('['),
+                "width {width}: a file section's header draws no cell: {header:?}"
+            );
+        }
     }
 
     /// `artifact-content` :: "The progress bar leads the folded task groups" —
