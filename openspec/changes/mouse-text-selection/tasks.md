@@ -50,13 +50,13 @@
 ## 3. Word bounds and span-to-text
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: Write failing tests for "A click selects the whole token, not a fragment", "A
+- [x] 3.1 RED: Write failing tests for "A click selects the whole token, not a fragment", "A
       single-line selection copies exactly the selected columns", and "A multi-line selection
       joins with newlines and drops padding".
-- [ ] 3.2 GREEN: Add pure helpers in `src/ui/detail.rs` over `Vec<ContentRow>`: the word run
+- [x] 3.2 GREEN: Add pure helpers in `src/ui/detail.rs` over `Vec<ContentRow>`: the word run
       at a cell, and the text of a span. A word is a maximal run of non-whitespace **display
       columns**, measured by `ui::layout::columns`, never `.chars()`.
-- [ ] 3.3 VERIFY: `cargo test ui::detail` green, and `make gates` — `COLWIDTH` sweeps this
+- [x] 3.3 VERIFY: `cargo test ui::detail` green, and `make gates` — `COLWIDTH` sweeps this
       file and will fail a `.chars().count()`.
 
 ## 4. `Selection` and the `Dashboard` field
