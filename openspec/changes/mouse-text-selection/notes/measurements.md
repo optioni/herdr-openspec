@@ -384,3 +384,69 @@ than `Option`, and the comparison program does not do what it was reported to do
 | `copilot-set` | no | ? | ? | yes |
 | `cop-all` | no | ? | ? | yes |
 | `alt-full` | no | ? | ? | yes |
+
+## SOLVED: Copilot does not use native selection at all — it implements its own
+
+Captured with `capture-input.py`, which logs what the **terminal sends the program**. During
+a drag that the user reports selects text normally, Copilot received:
+
+```
+index 34: btn=0   col=26 row=10  M   left            <- press
+index 35: btn=32  col=27 row=10  M   left+motion     }
+...       18 consecutive left+motion reports         }  the drag itself
+index 52: btn=32  col=43 row=14  M   left+motion     }
+index 53: btn=0   col=43 row=14  m   left            <- release
+```
+
+**Shift bit set on 0 of 79 reports.** The terminal delivered the complete drag — press, 18
+motion events, release — to the application. A terminal doing native selection would have
+kept that gesture for itself and sent nothing.
+
+Corroborated from the output side, in the same session's log:
+
+- **`ESC]52;` — OSC 52 clipboard writes: 2.** Copilot puts the selection on the system
+  clipboard itself.
+- **`SGR 7` — reverse video: 65.** Copilot paints the selection highlight itself.
+- `copilot --help` carries `--mouse` / `--no-mouse`, "Enable mouse support in alt screen
+  mode" — mouse handling is a feature it owns outright.
+
+So Copilot CLI **implements text selection inside the application**: it holds `?1003 ?1006`
+for the whole session, consumes the drag, renders its own highlight in reverse video, and
+copies through OSC 52. What looks like native selection is a reimplementation of it.
+
+**Every measurement in this file was correct.** Native drag-selection and mouse reporting
+really are mutually exclusive — `?1000` alone suppresses selection, and no mode set escapes
+it. The founding report was wrong about the *mechanism*, not about the observation: Copilot
+does have both, and gets them by not using the terminal's selection at all.
+
+### What this costs, and which non-goals it reverses
+
+The approach is available to this pane, and the raw material is **already arriving**:
+`EnableMouseCapture` includes `?1003`, so drag-motion events reach `ui::driver::mouse_action`
+today and are discarded — `mouse-input` specifies that a pointer motion costs no frame. The
+work is to stop discarding them.
+
+It requires reversing **two** explicit non-goals in this change's own proposal:
+
+1. *"Implementing selection, a clipboard, or a copy buffer inside the TUI. Rendering a
+   selection overlay and owning copy is a large feature and the wrong one."*
+2. *"OSC 52 clipboard writes, or any escape sequence that reaches outside the pane."*
+
+Both were written before any of this was measured. They are now the only thing standing
+between the pane and the behaviour asked for, and reversing them is a decision for the
+repository's owner, not an inference from this file.
+
+Scope, stated honestly, against this repository's own architecture rules:
+
+- **Drag state** — anchor and focus cell on `Dashboard`, moved by press/motion/release in
+  `ui::driver`. Pure, testable, and it is where the discarded events already land.
+- **Selection rendering** — a reverse-video overlay over a cell range. `ui::view` is a pure
+  function of `Dashboard`, so this is a render concern like any other, but it is the first
+  thing the pane draws that is not derived from the change set.
+- **Text extraction** — reading the selected span back out of the rendered `Buffer`.
+- **OSC 52** — a write to stdout. Views do no I/O and `src/ui/terminal.rs` is the only file
+  permitted to name a terminal escape, so it needs a seam and a gate exemption argument.
+- **The conflict with existing bindings** — a click currently selects a row, opens a change,
+  folds a section, and switches a tab. A press that begins a text selection is the same
+  press. That interaction needs deciding, and it is the hardest part of the design, not the
+  clipboard.
