@@ -3999,6 +3999,43 @@ mod tests {
         dashboard_with_detail(vec![change], Vec::new(), 1, route, detail)
     }
 
+    /// A two-section `Dashboard` — a file section and one requirement
+    /// section carrying `Some(DeltaOp::Added)` — for `spec-emphasis`'s
+    /// badge render scenarios. The file section is kept open (`expanded`
+    /// holds `0`) so the requirement stays visible while itself collapsed,
+    /// matching every other badge fixture in this package. `scroll`
+    /// addresses the requirement's own header row, so the cursor is on the
+    /// one badged row this dashboard draws.
+    fn delta_badged_dashboard(scroll: usize, route: Route) -> Dashboard {
+        let change =
+            fixture::with_artifacts(fixture::active("spec-emphasis", 1, 3), &[("specs", &[])]);
+        let detail = Detail {
+            sections: vec![
+                ArtifactSection {
+                    label: Some("degraded-coverage".to_string()),
+                    text: String::new(),
+                    depth: 0,
+                    progress: None,
+                    operation: None,
+                },
+                ArtifactSection {
+                    label: Some("Requirement: Alpha".to_string()),
+                    text: "Alpha text.\n".to_string(),
+                    depth: 1,
+                    progress: None,
+                    operation: Some(crate::specs::DeltaOp::Added),
+                },
+            ],
+            scroll,
+            tab: 0,
+            problems: Vec::new(),
+            loaded: None,
+            expanded: std::collections::BTreeSet::from([0]),
+            drawn_width: Some(78),
+        };
+        dashboard_with_detail(vec![change], Vec::new(), 1, route, detail)
+    }
+
     /// The header row text `ui::detail::header` would emit — `<glyph> <label>` padded
     /// to `width` — built the same way this group's own production code will, from
     /// `ui::list::fold_glyph` and `ui::list::pad_or_truncate_right`, so a test never
@@ -7751,6 +7788,91 @@ mod tests {
         // `grep -n 'Role::' src/ui/detail.rs` must return nothing: the role selection
         // lives in `ui::view` alone, and the kind is the only thing that crosses the
         // boundary — checked by `scripts/gates/notabseam.sh`, not re-derived here.
+    }
+
+    /// `spec-emphasis` -> specs/artifact-folds :: "A selected badged header
+    /// keeps its badge colour".
+    #[test]
+    fn a_selected_badged_header_keeps_its_badge_colour() {
+        for width in [120u16, 60] {
+            let d = delta_badged_dashboard(1, Route::Detail);
+            let interior = interior_width(width);
+            let rows = crate::ui::detail::content_lines(&d.detail, d.selected_change(), interior);
+            assert!(
+                matches!(
+                    rows[1].kind,
+                    crate::ui::detail::ContentKind::SectionHeader { selected: true, .. }
+                ),
+                "width {width}: the requirement's header is the cursor's own"
+            );
+
+            let buf = render_at(width, 20, &d);
+            let offset = if width == 60 { 1u16 } else { 42 };
+            let text = detail_interior_cols(&buf, 6, interior as usize);
+            let badge_index = text
+                .find('+')
+                .unwrap_or_else(|| panic!("width {width}: the badge marker is drawn: {text:?}"));
+            let x = offset + badge_index as u16;
+
+            assert!(
+                cell(&buf, x, 6)
+                    .style()
+                    .add_modifier
+                    .contains(Modifier::REVERSED),
+                "width {width}: the selected header row reports REVERSED"
+            );
+            assert_eq!(
+                cell(&buf, x, 6).style().fg,
+                palette::style(Role::DeltaAdded).fg,
+                "width {width}: the badge cell's foreground is DeltaAdded's, undisplaced by \
+                 DetailSectionSelected"
+            );
+        }
+    }
+
+    /// `spec-emphasis` -> specs/view-palette :: "A badged header row's
+    /// colours survive the row's own role".
+    #[test]
+    fn a_badged_header_rows_colours_survive_the_rows_own_role() {
+        for width in [120u16, 60] {
+            let d = delta_badged_dashboard(1, Route::Detail);
+            let interior = interior_width(width);
+            let buf = render_at(width, 20, &d);
+            let offset = if width == 60 { 1u16 } else { 42 };
+            let text = detail_interior_cols(&buf, 6, interior as usize);
+            let badge_index = text
+                .find('+')
+                .unwrap_or_else(|| panic!("width {width}: the badge marker is drawn: {text:?}"));
+            let x = offset + badge_index as u16;
+
+            let badge_style = cell(&buf, x, 6).style();
+            assert_eq!(
+                badge_style.fg,
+                palette::style(Role::DeltaAdded).fg,
+                "width {width}: the badge cell's foreground survives at both widths"
+            );
+            assert!(
+                badge_style.add_modifier.contains(Modifier::REVERSED),
+                "width {width}: that cell also carries REVERSED, from DetailSectionSelected, \
+                 which carries no foreground of its own to displace the badge's"
+            );
+
+            // No colour literal is named anywhere in this test — both
+            // comparisons above are against `palette::style`, and the
+            // unselected file header row alongside it carries neither the
+            // badge's colour nor REVERSED, so the row's role — not the
+            // badge — is what governs every other cell.
+            let file_style = uniform_row_style(&buf, 5, interior);
+            assert!(
+                !file_style.add_modifier.contains(Modifier::REVERSED),
+                "width {width}: the unselected file header is not reversed"
+            );
+            assert_ne!(
+                file_style.fg,
+                palette::style(Role::DeltaAdded).fg,
+                "width {width}: the unbadged row carries no delta colour"
+            );
+        }
     }
 
     /// `view-palette` :: "Heading foreground wins over a code span inside it".

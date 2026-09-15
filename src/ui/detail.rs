@@ -1208,6 +1208,449 @@ mod tests {
         }
     }
 
+    /// `spec-emphasis` :: "The three operations draw three different
+    /// markers".
+    #[test]
+    fn the_three_operations_draw_three_different_markers() {
+        use crate::specs::DeltaOp;
+        for width in [78u16, 58] {
+            let detail = Detail {
+                sections: vec![
+                    ArtifactSection {
+                        label: Some("specs".to_string()),
+                        text: String::new(),
+                        depth: 0,
+                        progress: None,
+                        operation: None,
+                    },
+                    ArtifactSection {
+                        label: Some("Requirement: Alpha".to_string()),
+                        text: "Alpha text.\n".to_string(),
+                        depth: 1,
+                        progress: None,
+                        operation: Some(DeltaOp::Added),
+                    },
+                    ArtifactSection {
+                        label: Some("Requirement: Beta".to_string()),
+                        text: "Beta text.\n".to_string(),
+                        depth: 1,
+                        progress: None,
+                        operation: Some(DeltaOp::Modified),
+                    },
+                    ArtifactSection {
+                        label: Some("Requirement: Gamma".to_string()),
+                        text: "Gamma text.\n".to_string(),
+                        depth: 1,
+                        progress: None,
+                        operation: Some(DeltaOp::Removed),
+                    },
+                ],
+                scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
+                // The file section (0) must be open for its depth-1
+                // children to be visible at all; the three requirement
+                // headers stay collapsed themselves, matching the
+                // scenario's "three collapsed requirement headers".
+                expanded: std::collections::BTreeSet::from([0]),
+                drawn_width: Some(width),
+            };
+            let rows = content_lines(&detail, None, width);
+            assert_eq!(rows.len(), 4, "width {width}");
+
+            let glyph = crate::ui::list::fold_glyph(true);
+            assert_eq!(
+                rows[0].text(),
+                crate::ui::list::pad_or_truncate_right(
+                    &format!("{glyph} specs"),
+                    width as usize
+                ),
+                "width {width}"
+            );
+            assert_eq!(
+                rows[1].text(),
+                crate::ui::list::pad_or_truncate_right(
+                    &format!("  {glyph} + Requirement: Alpha"),
+                    width as usize
+                ),
+                "width {width}"
+            );
+            assert_eq!(
+                rows[2].text(),
+                crate::ui::list::pad_or_truncate_right(
+                    &format!("  {glyph} ~ Requirement: Beta"),
+                    width as usize
+                ),
+                "width {width}"
+            );
+            assert_eq!(
+                rows[3].text(),
+                crate::ui::list::pad_or_truncate_right(
+                    &format!("  {glyph} - Requirement: Gamma"),
+                    width as usize
+                ),
+                "width {width}"
+            );
+
+            for row in &rows[1..4] {
+                assert_eq!(row.line.segments.len(), 3, "width {width}: {row:?}");
+            }
+            let added = rows[1].line.segments[1].face;
+            let modified = rows[2].line.segments[1].face;
+            let removed = rows[3].line.segments[1].face;
+            assert_eq!(
+                added,
+                crate::ui::markdown::Face {
+                    delta: Some(DeltaOp::Added),
+                    ..crate::ui::markdown::Face::plain()
+                },
+                "width {width}"
+            );
+            assert_eq!(
+                modified,
+                crate::ui::markdown::Face {
+                    delta: Some(DeltaOp::Modified),
+                    ..crate::ui::markdown::Face::plain()
+                },
+                "width {width}"
+            );
+            assert_eq!(
+                removed,
+                crate::ui::markdown::Face {
+                    delta: Some(DeltaOp::Removed),
+                    ..crate::ui::markdown::Face::plain()
+                },
+                "width {width}"
+            );
+            assert_ne!(added, modified, "width {width}");
+            assert_ne!(modified, removed, "width {width}");
+            assert_ne!(added, removed, "width {width}");
+        }
+    }
+
+    /// `spec-emphasis` :: "An unbadged header row is unchanged in every
+    /// column".
+    #[test]
+    fn an_unbadged_header_row_is_unchanged_in_every_column() {
+        for width in [78u16, 58] {
+            let detail = three_spec_detail(std::collections::BTreeSet::new());
+            let rows = content_lines(&detail, None, width);
+            assert_eq!(rows.len(), 3, "width {width}");
+            for row in &rows {
+                assert_eq!(row.line.segments.len(), 1, "width {width}: {row:?}");
+                assert_eq!(
+                    row.line.segments[0].face,
+                    crate::ui::markdown::Face::plain(),
+                    "width {width}"
+                );
+            }
+            let glyph = crate::ui::list::fold_glyph(true);
+            assert_eq!(
+                rows[0].text(),
+                crate::ui::list::pad_or_truncate_right(
+                    &format!("{glyph} degraded-coverage"),
+                    width as usize
+                ),
+                "width {width}"
+            );
+            assert_eq!(
+                rows[1].text(),
+                crate::ui::list::pad_or_truncate_right(
+                    &format!("{glyph} markdown-render"),
+                    width as usize
+                ),
+                "width {width}"
+            );
+            assert_eq!(
+                rows[2].text(),
+                crate::ui::list::pad_or_truncate_right(
+                    &format!("{glyph} tasks-checklist"),
+                    width as usize
+                ),
+                "width {width}"
+            );
+        }
+    }
+
+    /// `spec-emphasis` :: "A removed requirement's heading is struck and its
+    /// body is not".
+    #[test]
+    fn a_removed_requirements_heading_is_struck_and_its_body_is_not() {
+        use crate::specs::DeltaOp;
+        for width in [78u16, 58] {
+            let make = |op: DeltaOp| Detail {
+                sections: vec![
+                    ArtifactSection {
+                        label: Some("specs".to_string()),
+                        text: String::new(),
+                        depth: 0,
+                        progress: None,
+                        operation: None,
+                    },
+                    ArtifactSection {
+                        label: Some("Requirement: Alpha".to_string()),
+                        text: "Alpha text.\n\n- **WHEN** a\n- **THEN** b\n".to_string(),
+                        depth: 1,
+                        progress: None,
+                        operation: Some(op),
+                    },
+                ],
+                scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
+                expanded: std::collections::BTreeSet::from([0, 1]),
+                drawn_width: Some(width),
+            };
+
+            let removed = make(DeltaOp::Removed);
+            let rows = content_lines(&removed, None, width);
+            let header_row = rows
+                .iter()
+                .find(|r| matches!(r.kind, ContentKind::SectionHeader { section: 1, .. }))
+                .expect("the requirement's header row is drawn");
+            assert_eq!(header_row.line.segments.len(), 3, "width {width}");
+            assert_eq!(header_row.line.segments[1].text, "- ", "width {width}");
+            assert!(
+                header_row.line.segments[2].face.strikethrough,
+                "width {width}"
+            );
+
+            for row in &rows {
+                if matches!(row.kind, ContentKind::SectionHeader { .. }) {
+                    continue;
+                }
+                for segment in &row.line.segments {
+                    assert!(
+                        !segment.face.strikethrough,
+                        "width {width}: a body row was struck: {row:?}"
+                    );
+                }
+            }
+
+            let added = make(DeltaOp::Added);
+            let rows = content_lines(&added, None, width);
+            let header_row = rows
+                .iter()
+                .find(|r| matches!(r.kind, ContentKind::SectionHeader { section: 1, .. }))
+                .expect("the requirement's header row is drawn");
+            assert!(
+                !header_row.line.segments[2].face.strikethrough,
+                "width {width}"
+            );
+        }
+    }
+
+    /// `spec-emphasis` :: "The label truncates before the badge is
+    /// dropped".
+    #[test]
+    fn the_label_truncates_before_the_badge_is_dropped() {
+        use crate::specs::DeltaOp;
+        let label = "a".repeat(200);
+        for width in [78u16, 58] {
+            let detail = Detail {
+                sections: vec![
+                    ArtifactSection {
+                        label: Some("specs".to_string()),
+                        text: String::new(),
+                        depth: 0,
+                        progress: None,
+                        operation: None,
+                    },
+                    ArtifactSection {
+                        label: Some(label.clone()),
+                        text: String::new(),
+                        depth: 1,
+                        progress: None,
+                        operation: Some(DeltaOp::Modified),
+                    },
+                ],
+                scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
+                expanded: std::collections::BTreeSet::from([0]),
+                drawn_width: Some(width),
+            };
+            let rows = content_lines(&detail, None, width);
+            let header_row = rows
+                .iter()
+                .find(|r| matches!(r.kind, ContentKind::SectionHeader { section: 1, .. }))
+                .expect("the requirement's header row is drawn");
+            assert_eq!(
+                columns(&header_row.text()),
+                width as usize,
+                "width {width}"
+            );
+            assert_eq!(
+                header_row.line.segments.len(),
+                3,
+                "width {width}: {header_row:?}"
+            );
+            assert_eq!(header_row.line.segments[1].text, "~ ", "width {width}");
+            assert!(
+                header_row.line.segments[2].text.ends_with('…'),
+                "width {width}: {header_row:?}"
+            );
+            let glyph = crate::ui::list::fold_glyph(true);
+            assert!(
+                header_row.text().starts_with(&format!("  {glyph} ")),
+                "width {width}: {:?}",
+                header_row.text()
+            );
+        }
+    }
+
+    /// `spec-emphasis` :: "The badge is dropped whole at a width that
+    /// cannot hold it".
+    #[test]
+    fn the_badge_is_dropped_whole_at_a_width_that_cannot_hold_it() {
+        use crate::specs::DeltaOp;
+        let label = "a".repeat(200);
+        let mut present = 0usize;
+        let mut absent = 0usize;
+        for width in 0u16..=20 {
+            let detail = Detail {
+                sections: vec![
+                    ArtifactSection {
+                        label: Some("specs".to_string()),
+                        text: String::new(),
+                        depth: 0,
+                        progress: None,
+                        operation: None,
+                    },
+                    ArtifactSection {
+                        label: Some(label.clone()),
+                        text: String::new(),
+                        depth: 1,
+                        progress: None,
+                        operation: Some(DeltaOp::Modified),
+                    },
+                ],
+                scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
+                expanded: std::collections::BTreeSet::from([0]),
+                drawn_width: Some(width),
+            };
+            let rows = content_lines(&detail, None, width);
+            let header_row = rows
+                .iter()
+                .find(|r| matches!(r.kind, ContentKind::SectionHeader { section: 1, .. }))
+                .expect("the requirement's header row is drawn");
+            assert!(
+                columns(&header_row.text()) <= width as usize,
+                "width {width}: {:?}",
+                header_row.text()
+            );
+            match header_row.line.segments.len() {
+                1 => {
+                    absent += 1;
+                    assert!(
+                        !header_row.text().contains('~'),
+                        "width {width}: a stray marker: {:?}",
+                        header_row.text()
+                    );
+                }
+                3 => {
+                    present += 1;
+                    assert_eq!(header_row.line.segments[1].text, "~ ", "width {width}");
+                }
+                n => panic!("width {width}: unexpected segment count {n}: {header_row:?}"),
+            }
+        }
+        assert!(
+            present > 0 && absent > 0,
+            "the sweep must cross the drop, not sit on one side of it \
+             (present {present}, absent {absent})"
+        );
+    }
+
+    /// `spec-emphasis` :: "A badged header row is still addressed by its
+    /// own section index".
+    #[test]
+    fn a_badged_header_row_is_still_addressed_by_its_own_section_index() {
+        use crate::specs::DeltaOp;
+        for width in [78u16, 58] {
+            let make = |expanded: std::collections::BTreeSet<usize>| Detail {
+                sections: vec![
+                    ArtifactSection {
+                        label: Some("specs".to_string()),
+                        text: String::new(),
+                        depth: 0,
+                        progress: None,
+                        operation: None,
+                    },
+                    ArtifactSection {
+                        label: Some("Requirement: Alpha".to_string()),
+                        text: "Alpha text.\n".to_string(),
+                        depth: 1,
+                        progress: None,
+                        operation: Some(DeltaOp::Added),
+                    },
+                    ArtifactSection {
+                        label: Some("Requirement: Beta".to_string()),
+                        text: "Beta text.\n".to_string(),
+                        depth: 1,
+                        progress: None,
+                        operation: Some(DeltaOp::Modified),
+                    },
+                    ArtifactSection {
+                        label: Some("Requirement: Gamma".to_string()),
+                        text: "Gamma text.\n".to_string(),
+                        depth: 1,
+                        progress: None,
+                        operation: Some(DeltaOp::Removed),
+                    },
+                ],
+                // The cursor sits on row 2 — the second requirement's own
+                // header.
+                scroll: 2,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
+                expanded,
+                drawn_width: Some(width),
+            };
+
+            let collapsed = make(std::collections::BTreeSet::from([0]));
+            let rows = content_lines(&collapsed, None, width);
+            assert_eq!(rows.len(), 4, "width {width}");
+            assert_eq!(section_at(&rows, 0, 2), Some(2), "width {width}");
+            assert!(
+                matches!(
+                    rows[2].kind,
+                    ContentKind::SectionHeader { section: 2, .. }
+                ),
+                "width {width}: {:?}",
+                rows[2].kind
+            );
+
+            // Toggling that same index into `expanded` — the effect a
+            // `Space` press has — opens section 2's own body and no other
+            // section's; the badge changes nothing about which section a
+            // fold reaches.
+            let mut opened_set = std::collections::BTreeSet::from([0]);
+            opened_set.insert(2);
+            let opened = make(opened_set);
+            let rows2 = content_lines(&opened, None, width);
+            assert!(
+                rows2.iter().any(|r| r.text() == "Beta text."),
+                "width {width}: section 2's body did not open"
+            );
+            assert!(
+                !rows2.iter().any(|r| r.text() == "Alpha text."),
+                "width {width}: section 1 opened when it should not have"
+            );
+            assert!(
+                !rows2.iter().any(|r| r.text() == "Gamma text."),
+                "width {width}: section 3 opened when it should not have"
+            );
+        }
+    }
+
     /// A `Dashboard` at `Route::Detail` with exactly one active change
     /// selected — the shape every full-frame render test in this module's
     /// "measuring in columns" section needs. Mirrors `ui::view`'s own
