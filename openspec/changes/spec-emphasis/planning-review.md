@@ -136,6 +136,48 @@ has added the task that implements it**, and the diff that proves it must be re-
 last repair rather than before. Recorded here rather than in a row because it is a property of
 how this review was conducted, not of any one artifact it produced.
 
+## Change Review Findings
+
+The independent reviewer (task 9.1) read the finished change against the package and verified
+claims against the repository rather than the artifacts, running the code in a scratch copy.
+**Three CRITICALs, five WARNINGs, two NITs, two SUGGESTIONs.** Nothing blocks `openspec archive`.
+
+The three CRITICALs and the WARNINGs are recorded in `tasks.md` 9.2 and repaired in `09ffbd5`
+and `b5e6a59`. The finding that matters most is the first: **a behavioural bug none of the
+thirty-one gates, the contract tier, or the between-group gate could see.** `label_area` did not
+reserve the badge's columns, so a row carrying both `operation` and `progress` drew the badge at
+5–8 columns, dropped it at 9–10, and drew it again at 11 — at every depth, the hole always two
+columns wide at `indent + 9`. `header_is_total_from_zero_through_twenty_columns` passed
+throughout, because every row still measured exactly its own width. **The broken invariant was
+ordering, and nothing in the crate asserted ordering for the both-fields row.** The combination
+was specified in prose by this review's own WARNING repair, which added neither scenario nor
+task — the fifth instance of that pattern and the one that reached running code.
+
+Two reviewer results are worth recording as evidence rather than as findings:
+
+- **The scenario-to-task diff is clean in both directions.** 38 new scenarios across the six
+  deltas, every one named by a task; 47 test-like identifiers in `tasks.md`, every one defined
+  except `requirements_are_attributed_to_the_operation_heading_above_them`, which survives only
+  inside task 5.1's record of its own deletion. Run independently, by a different method, after
+  the repairs. No sixth orphan.
+- **No existing test depended on the broken band.** With the `label_area` patch applied in the
+  reviewer's scratch copy, the full suite was green.
+
+### Accepted, not repaired
+
+- **`src/ui/markdown.rs:376` (`group_break`)** — a hard break inside a list item empties `group`
+  while `category` stays `Item`, so the next line's leading `Strong` becomes a clause candidate,
+  which rule 2's "nothing but the item's marker and its hanging indent before it" does not
+  intend. Accepted: a hard break inside a scenario bullet does not occur in any OpenSpec
+  artifact, and gating on `groups.is_empty()` too would add a branch no fixture reaches. The
+  reviewer rated it NIT on the same ground. Resolution point: any change that makes hard breaks
+  inside list items reachable.
+- **`specs/view-palette/spec.md:159` — "The five new roles…" is now eight.** A carried-forward
+  `tasks-emphasis` scenario title, whose test carries the same name. Correcting the count means
+  renaming a test in the main tree for arithmetic, which is the same trade the `Task*` role
+  rename is already deferred on above. Left with the other palette-naming debt, to the change
+  that rewrites those requirements.
+
 ## Deferred Non-Blocking Notes
 
 - **The `Task*` palette role rename.** `TaskEvidence`/`TaskChange`/`TaskConfirm`/`TaskLabel` are
@@ -155,6 +197,21 @@ how this review was conducted, not of any one artifact it produced.
   requirement fixes `▸`/`▾`. Pre-existing in the main spec; this change introduces the
   inconsistency only by being correct where its neighbours are not. Resolution point: whichever
   change next rewrites that requirement in full.
+- **`markdown-render:300` has no standing runner.** "The narrowed seam holds" is checked once,
+  by task 7.4's greps, and by nothing afterwards: no `scripts/gates/` script sweeps
+  `src/ui/markdown.rs` for `crate::tasks::` or `crate::specs::`, and `doc_contract` does not
+  claim it. The reviewer confirmed this against all 31 scripts. The scenario now says so in its
+  own text rather than reading as a standing property, which is the honest form of the limit.
+  Resolution point: a twelfth `doc_contract` claim, on the model of the eleventh this change
+  adds for `src/specs.rs`. Not done here because it widens this change's contract-tier surface
+  past what its proposal argues for.
+- **The coverage-map anchors are absolute line numbers.** They drifted six times during this
+  change — four from implementation, two from repairs that were themselves wrong — and
+  `every_table_row_has_a_proof` cannot catch a drifted-but-valid anchor, because it tests only
+  in-bounds and not-blank. Two rows were passing while covering code their `why` does not
+  describe, one of them pre-existing. All are re-pointed and verified against the function
+  bodies. Whether the map should anchor by symbol rather than by line is a real question and a
+  different change's.
 - **New test names break no convention, but old ones did.** The seven fictional names this
   review found were cited, not written, so nothing in the crate needs renaming. Recorded because
   the next planning session will cite test names again, and the convention — snake_case of the

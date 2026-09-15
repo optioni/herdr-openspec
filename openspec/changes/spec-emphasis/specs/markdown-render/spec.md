@@ -232,7 +232,10 @@ A run SHALL be a clause keyword when **all** of:
    its hanging indent before it. A bold run later in the clause SHALL NOT be a keyword, which
    is what keeps `- **WHEN** the **schema** declares four artifacts` styling one run and not
    two.
-3. `crate::specs::clause_of` on the run's **trimmed** text returns `Some`.
+3. `crate::specs::clause_of` on the run's text — collected **verbatim**, never trimmed —
+   returns `Some`. An earlier wording said "trimmed"; `end_strong` joins the span as it
+   stands, and no `Strong` event pulldown-cmark emits carries edge whitespace, so trimming
+   would be a step that never fires pretending to be part of the rule.
 
 The role SHALL then be:
 
@@ -258,9 +261,17 @@ This SHALL apply to **every** markdown source the renderer is given, with no spe
 `lines` is parameterised by text and width and knows nothing about which artifact it is
 drawing; adding that knowledge would mean threading the tab's identity through a pure
 function for no gain. The vocabulary is narrow enough that this is safe: a bold run opening a
-list item that is exactly a lifecycle token is a scenario clause wherever it appears, and
-`markdown-legibility`'s task-list items carry their marker before any strong run and so are
-untouched.
+list item that is exactly a lifecycle token is a scenario clause wherever it appears.
+
+A `markdown-legibility` task-list item is **not** an exception to that, and an earlier wording
+of this paragraph claimed it was — "task-list items carry their marker before any strong run and
+so are untouched". They are not untouched: `set_task_marker` rebuilds the checkbox into the
+row's **prefix** rather than pushing a run into `group`, so `- [ ] **WHEN** x` leaves `group`
+empty when the `Strong` opens and the run does classify. The outcome is harmless — a checklist
+item whose text is exactly a lifecycle token is the same thing a scenario bullet is — but the
+mechanism stated was wrong, and it was doing the work of justifying why the rule may be applied
+to every source rather than only a spec tab. The real justification is the narrowness of the
+vocabulary, above.
 
 #### Scenario: A scenario's three clauses are coloured by position
 
@@ -304,7 +315,17 @@ untouched.
 - **THEN** no **call** to any function of `crate::tasks` occurs in that slice. The names it
   does carry are `crate::tasks::LabelRole` as a field type and `crate::tasks::label_of` inside
   a doc comment explaining why it is *not* called, neither of which is a call
-- **AND** the only function of `crate::specs` called anywhere in the file is `clause_of`
+- **AND** the only function of `crate::specs` called anywhere in the file is `clause_of` — a
+  *call*, not a mention: the file also names `crate::specs::DeltaOp` as a `Face` field type,
+  which this clause permits and an earlier wording of task 7.4 did not
+- **AND** this scenario is checked **once, at implementation time**, by the greps task 7.4
+  records — not by a standing gate. No `scripts/gates/` script sweeps `src/ui/markdown.rs` for
+  either name, and `tests/doc_contract.rs` does not claim it. That is a real limit and it is
+  stated here rather than left for a reader to discover: the property can rot after this change
+  archives without anything going red. Making it standing — a twelfth `doc_contract` claim, on
+  the model of the eleventh this change adds for `src/specs.rs` — is deliberately left to a
+  later change, because adding it here would widen this one's contract-tier surface past what
+  its proposal argues for
 - **AND** `pulldown_cmark` is still named only in this file, and this file still names no
   `ratatui` type, so neither `MDSEAM` nor the view-type rule was widened
 - **AND** the slice boundary is load-bearing rather than an exemption: the file's **test**

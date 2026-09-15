@@ -397,7 +397,12 @@ returns nothing). It is specified for the reason `view-palette` gives for the un
 `muted` + `label` pair: totality is the contract, not the absence of a caller.
 
 A `Removed` section's **label** segment SHALL additionally carry `Face { strikethrough: true,
-.. }`, and its body SHALL NOT. Striking the heading is what marks the requirement as deleted;
+.. }`, and its body SHALL NOT. The strike goes **with** the badge when the badge is dropped:
+below the width that holds one, the row falls back to the pre-change single segment, which
+carries no strike either. That is deliberate and follows from what the fallback means — the row
+reverts to what it drew before this capability existed, face included, rather than keeping half
+of a grammar whose marker is gone. A strike with no `-` beside it would say "deleted" with
+nothing to say it about. Striking the heading is what marks the requirement as deleted;
 striking hundreds of lines of body beneath it would make unreadable exactly the text a reader
 opened the section to read. The strikethrough SHALL be the existing `Face` field and
 `Role::Strikethrough` the existing role — this change adds neither — so a struck heading and a
