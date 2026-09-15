@@ -359,8 +359,8 @@ fn header(
 /// The width left for the badge/label portion of a header row once a
 /// progress cell has claimed its own, plus the cell's own text when it is
 /// drawn — `None` when `progress` is absent or the row cannot hold the
-/// cell. `header`'s own drop-whole rule, shared with `header` so the
-/// two agree about how much of the row the cell claims.
+/// cell. Factored out of `header` so its cell arithmetic answers this
+/// question exactly once, whether or not a badge is also drawn.
 fn label_area(
     depth: usize,
     progress: Option<&crate::tasks::Progress>,
