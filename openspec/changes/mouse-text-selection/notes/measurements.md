@@ -51,6 +51,40 @@ and a live log of every byte the *application* received. An empty log during a d
 means the terminal kept the gesture for itself, which is the whole question. Answers
 append below. Run it once per terminal, and once inside Herdr.
 
+## Correction: the first probe had the wrong screen
+
+`probe.sh` ran on the **primary screen**. The dashboard runs on the **alternate
+screen**, and the difference is load-bearing, so the `off` control row does not mean what
+it appears to.
+
+On the primary screen the wheel scrolls the terminal's own scrollback, so an application
+with no mouse reporting receives nothing — which is exactly what the `off` row recorded.
+On the alternate screen, terminals conventionally translate the wheel into **arrow keys**
+instead, so that pagers and TUIs scroll without asking for mouse reporting at all.
+
+If that holds here, then "mouse controls **and** native dragging" is not a contradiction
+and needs no toggle: an application that enables **no reporting** keeps the terminal's own
+drag-selection and still gets wheel scrolling, for free, as arrow keys. What it gives up is
+everything that needs a button — click-to-select-row, second-click-to-open, click-to-fold,
+and click-to-switch-tab, all four of which `mouse-input` shipped.
+
+`probe-altscreen.sh` measures exactly this. Until it has run, the conclusion recorded
+above — "the shipped answer is a key that releases capture" — is **not established**, and
+the artifacts written on top of it are provisional.
+
+### Measuring another TUI directly
+
+The proposal also asked for a measurement of what Copilot CLI actually emits, which has not
+been done: the binary is not installed on this machine. For any TUI, on macOS:
+
+```sh
+script -q /dev/null <the-tui> 2>&1 | LC_ALL=C grep -ao $'\033\[?1[0-9]*[hl]' | sort -u
+```
+
+That lists every DEC private mode the program turns on or off. `?1049h` is the alternate
+screen; `?1000`/`?1002`/`?1003`/`?1006`/`?1015` are the mouse modes. A program that shows
+`?1049h` and **no** `?100Xh` is using the arrow-key translation above.
+
 ## Results
 
 <!-- probe.sh appends one section per run below this line. -->
