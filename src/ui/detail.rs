@@ -767,13 +767,32 @@ pub fn section_at(rows: &[ContentRow], offset: usize, row: u16) -> Option<usize>
 #[cfg(test)]
 mod tests {
     use super::{
-        ContentKind, ContentRow, Tab, content_lines, header, header_row, section_at, tab_bar,
+        ContentKind, ContentRow, Tab, content_lines, header, header_row, section_at, span_text,
+        tab_bar, word_at,
     };
     use crate::changes::fixture;
     use crate::tasks::Progress;
     use crate::testutil::{cell, render_at, row_text};
     use crate::ui::app::{ArtifactSection, Dashboard, Detail, Filter, Route};
     use crate::ui::layout::columns;
+    use crate::ui::list::pad_or_truncate_right;
+
+    /// A bare single-segment body row over `text`, unpadded and untruncated
+    /// — the same shape [`body_row`] wraps a rendered [`crate::ui::markdown::Line`]
+    /// in, but built directly so a `word_at`/`span_text` test can name its
+    /// own row content byte for byte rather than reasoning about
+    /// `ui::markdown`'s wrapping.
+    fn plain_row(text: &str) -> ContentRow {
+        ContentRow {
+            line: crate::ui::markdown::Line {
+                segments: vec![crate::ui::markdown::Segment {
+                    text: text.to_string(),
+                    face: crate::ui::markdown::Face::plain(),
+                }],
+            },
+            kind: ContentKind::Body,
+        }
+    }
 
     /// Three sections with short, single-line bodies, so a scenario about
     /// header rows and folding does not also have to reason about
@@ -4014,6 +4033,88 @@ mod tests {
             let lines = content_lines(&empty, None, width);
             for line in &lines {
                 assert!(columns(&line.text()) <= width as usize, "width {width}");
+            }
+        }
+    }
+
+    /// `text-selection` :: "A click selects the whole token, not a
+    /// fragment". `ui::layout::zone` is one word, not three: the `::`
+    /// atoms are non-whitespace and belong to the same run as the
+    /// identifiers either side of them. Run at both mandated widths — the
+    /// row itself carries no width, but the fixture it is drawn from does,
+    /// so this stays a `src/ui/detail.rs` test in `DETAILWIDTHS`' sense.
+    #[test]
+    fn a_click_selects_the_whole_token_not_a_fragment() {
+        for width in [78u16, 58] {
+            let d = detail("the `ui::layout::zone` call\n", Vec::new());
+            let rows = content_lines(&d, None, width);
+            assert_eq!(rows.len(), 1, "width {width}");
+            assert_eq!(rows[0].text(), "the ui::layout::zone call", "width {width}");
+
+            // "ui::layout::zone" starts at column 4 (after "the ") and ends
+            // at column 20 (4 + 16), a half-open range.
+            for column in 4..20u16 {
+                assert_eq!(
+                    word_at(&rows, 0, column),
+                    Some((4, 20)),
+                    "width {width}, column {column}"
+                );
+            }
+            // The whitespace either side of the token is not part of it,
+            // and belongs to no run at all.
+            assert_eq!(word_at(&rows, 0, 3), None, "width {width}");
+            assert_eq!(word_at(&rows, 0, 20), None, "width {width}");
+            // The leading word "the" is its own, shorter run.
+            assert_eq!(word_at(&rows, 0, 0), Some((0, 3)), "width {width}");
+            // A line index past the end of the row list resolves to nothing.
+            assert_eq!(word_at(&rows, rows.len(), 0), None, "width {width}");
+        }
+    }
+
+    /// `text-selection` :: "A single-line selection copies exactly the
+    /// selected columns". The row is built directly rather than through
+    /// `ui::markdown`, so the columns named here are the row's own text
+    /// verbatim — a selection stopping well short of a row's end never
+    /// touches whatever padding a real rendered row would carry, at either
+    /// mandated width.
+    #[test]
+    fn a_single_line_selection_copies_exactly_the_selected_columns() {
+        for width in [78u16, 58] {
+            let text = "  - **WHEN** the reader presses q";
+            let rows = vec![plain_row(&pad_or_truncate_right(text, width as usize))];
+            // Columns 4 through 12 of the unpadded text are "**WHEN**".
+            assert_eq!(
+                span_text(&rows, (0, 4), (0, 12)),
+                "**WHEN**",
+                "width {width}"
+            );
+            // The pair is accepted in either order.
+            assert_eq!(
+                span_text(&rows, (0, 12), (0, 4)),
+                "**WHEN**",
+                "width {width}"
+            );
+        }
+    }
+
+    /// `text-selection` :: "A multi-line selection joins with newlines and
+    /// drops padding". The middle row is padded to the full interior width
+    /// at both 78 and 58, exactly as `problem_row`/`separator_row`/`header`
+    /// pad a real rendered row — and the selection spans clean through it,
+    /// which is what proves the padding is dropped rather than copied.
+    #[test]
+    fn a_multi_line_selection_joins_with_newlines_and_drops_padding() {
+        for width in [78u16, 58] {
+            let rows = vec![
+                plain_row("alpha bravo"),
+                plain_row(&pad_or_truncate_right("charlie", width as usize)),
+                plain_row("delta"),
+            ];
+            let joined = span_text(&rows, (0, 0), (2, 5));
+            assert_eq!(joined, "alpha bravo\ncharlie\ndelta", "width {width}");
+            assert_eq!(joined.matches('\n').count(), 2, "width {width}");
+            for line in joined.split('\n') {
+                assert_eq!(line, line.trim_end(), "width {width}: {line:?} has trailing padding");
             }
         }
     }
