@@ -592,8 +592,20 @@ pub(crate) mod testutil {
     }
 
     impl<'a> UntilReady<'a> {
-        const SETTLE: std::time::Duration = std::time::Duration::from_millis(50);
-        const DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
+        /// The window the predicate must hold for before `q` is pressed.
+        ///
+        /// It has to cover a whole background round trip, not a hand-off: the
+        /// scratch `herdr` and `openspec` scripts log their arguments *before*
+        /// emitting stdout, so a log-line predicate goes true while the child
+        /// process is still running. 50ms did not cover that under a loaded
+        /// parallel suite and made every `ui::tests::wiring` test intermittently
+        /// red — the assertion fired before the worker had answered, which looks
+        /// exactly like a wiring regression and is not one.
+        const SETTLE: std::time::Duration = std::time::Duration::from_millis(300);
+        /// The backstop for a predicate that never becomes true. Only a genuinely
+        /// broken wiring pays it, so it is sized for a loaded machine rather than
+        /// for a fast failure.
+        const DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
 
         pub(crate) fn new(predicate: &'a dyn Fn() -> bool) -> Self {
             Self {
@@ -667,8 +679,14 @@ pub(crate) mod testutil {
     }
 
     impl<'a> Stages<'a> {
-        const SETTLE: std::time::Duration = std::time::Duration::from_millis(50);
-        const DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
+        /// Per stage, on [`UntilReady::SETTLE`]'s terms and for its reason.
+        const SETTLE: std::time::Duration = std::time::Duration::from_millis(300);
+        /// Shared across *every* stage, which is why it is not the one-stage
+        /// figure: a launch scenario spends a process round trip per stage, and
+        /// 5s across four of them truncated the run mid-sequence under load —
+        /// the launch's three calls arriving as three, with the fourth still in
+        /// flight when the deadline pressed `q`.
+        const DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
 
         /// `stages` is a non-empty ordered list of `(predicate, key to press)` pairs. The last
         /// pair's key is expected to end the run (`q`, on every scenario this change writes).
@@ -972,7 +990,18 @@ pub(crate) mod testutil {
             );
 
             ready.set(true);
-            // Poll until it presses q, bounded by its own 5s deadline so a
+            // Arm the settle window, then rewind it rather than spinning for
+            // its whole duration — the same private-field trick the deadline
+            // half of this test uses below, and what keeps this test's runtime
+            // independent of `SETTLE`'s value.
+            assert_eq!(
+                source
+                    .next_event(std::time::Duration::from_millis(1))
+                    .expect("ready, but not yet settled"),
+                None
+            );
+            source.settle_since = Some(std::time::Instant::now() - super::UntilReady::SETTLE);
+            // Poll until it presses q, bounded by its own deadline so a
             // regression here fails this test rather than hanging it.
             let mut pressed = false;
             for _ in 0..1_000_000 {
