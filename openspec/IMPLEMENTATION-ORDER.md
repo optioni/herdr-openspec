@@ -295,7 +295,31 @@ anything, and each will be written against the synced spec. `git log` over
 `MODIFIED` block was compared scenario by scenario against the file the sync actually wrote:
 none dropped a scenario the live spec carried.
 
-**The direction that is still open**: `spec-emphasis`' proposal names `markdown-render` and
+**The same hazard, 2026-09-15: absent at `spec-emphasis`'s archive, checked before the sync
+wrote anything rather than after.** It modified `artifact-folds`, `markdown-render`,
+`task-labels` and `view-palette`, and added `doc-conformance`'s eleventh requirement and the new
+`spec-delta-badges` capability. Three changes were active in this checkout when it archived
+(`agent-client-choice`, `settings-window`, `mouse-text-selection`) and all three are
+**proposal-only** — each holds `proposal.md` and nothing else, so none had a block extracted
+from anything, and each will be written against the synced spec.
+
+The hazard direction the paragraph below left open is now closed, and closed the right way:
+`a534dfa` (`tasks-emphasis`' sync) is an **ancestor** of `spec-emphasis`' first planning commit,
+so its `markdown-render` and `view-palette` blocks were extracted after that rewrite, not
+before. Verified rather than assumed, by comparing scenario titles block by block before the
+merge: across all eight `MODIFIED` requirements, **zero** scenarios the live specs carried were
+dropped, and 21 were added. The check is worth keeping in this form — it is cheap, it runs
+before anything is written, and a full-content replacement is silent when it is wrong.
+
+One further note for whoever writes the next delta against these capabilities.
+`spec-emphasis` amended `artifact-folds` **during** implementation, from a badged header row
+carrying three segments to four, because at three the padding sat inside the label's segment and
+a `Removed` requirement's strike ran to the region's edge — which `view-palette`'s own
+monochrome scenario forbids. The two specs contradicted each other and the contradiction was
+only findable by writing the assertion. A delta that quotes either block should quote the
+post-archive text.
+
+**The direction that was still open**: `spec-emphasis`' proposal names `markdown-render` and
 `view-palette`, both of which `tasks-emphasis` has now rewritten. Whoever writes its deltas
 must extract those two requirement blocks from `openspec/specs/<capability>/spec.md` as they
 read **after** this archive — `markdown-render`'s "Markdown source becomes plain-data lines"
