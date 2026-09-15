@@ -36,6 +36,9 @@ set_modes() {
     press-sgr)   echo "1000 1006" ;;
     copilot-set) echo "1003 1006" ;;
     motion-only) echo "1003" ;;
+    cop-all)     echo "2004 1004 1003 1006" ;;
+    cop-nofocus) echo "2004 1003 1006" ;;
+    cop-nopaste) echo "1004 1003 1006" ;;
   esac
 }
 
@@ -48,11 +51,24 @@ set_label() {
     press-sgr)   echo "?1000 + ?1006 — same, with extended coords. PLAIN DRAG?" ;;
     copilot-set) echo "?1003 + ?1006 — EXACTLY what Copilot CLI sets. PLAIN DRAG?" ;;
     motion-only) echo "?1003 alone — any-event tracking, no ?1000. PLAIN DRAG?" ;;
+    cop-all)     echo "EVERYTHING Copilot sets, modifyOtherKeys included. PLAIN DRAG?" ;;
+    cop-nofocus) echo "Copilot's set less ?1004 (focus events). PLAIN DRAG?" ;;
+    cop-nopaste) echo "Copilot's set less ?2004 (bracketed paste). PLAIN DRAG?" ;;
   esac
 }
 
-enable_modes()  { local m; for m in $(set_modes "$1"); do printf '%s?%sh' "$CSI" "$m"; done; }
-disable_modes() { local m; for m in $(set_modes "$1"); do printf '%s?%sl' "$CSI" "$m"; done; }
+enable_modes() {
+  local m
+  for m in $(set_modes "$1"); do printf '%s?%sh' "$CSI" "$m"; done
+  # Copilot's non-mode sequences, captured from a real session: xterm
+  # modifyOtherKeys level 2, and the kitty-keyboard query it sends alongside.
+  case "$1" in cop-*) printf '%s>4;2m%s?u' "$CSI" "$CSI" ;; esac
+}
+disable_modes() {
+  local m
+  case "$1" in cop-*) printf '%s>4;0m' "$CSI" ;; esac
+  for m in $(set_modes "$1"); do printf '%s?%sl' "$CSI" "$m"; done
+}
 
 STTY_SAVED=$(stty -g 2>/dev/null || true)
 

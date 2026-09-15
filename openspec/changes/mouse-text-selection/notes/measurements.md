@@ -343,3 +343,22 @@ not reproducible as described, and no arrangement of modes in this crate would r
 **This closes the investigation.** All three measurements the proposal asked for are done,
 and they agree: there is no mode set that gives both, the modifier bypass is `Shift` rather
 than `Option`, and the comparison program does not do what it was reported to do.
+
+## 2026-09-15 — ALTERNATE SCREEN — ghostty, TERM=xterm-256color, herdr=yes, tmux=no
+
+| mode set | plain drag selects | wheel arrives as ARROW KEYS | app saw click | Shift+drag selects |
+|---|---|---|---|---|
+| `copilot-set` | no | no | yes | yes |
+| `motion-only` | no | no | yes | yes |
+
+### Interactive capture of `copilot` — 2026-09-15
+
+```
+@20        ESC[?1049h
+@44        ESC[?1003h
+@52        ESC[?1006h
+@25660     ESC[?1006l
+@25668     ESC[?1003l
+@25676     ESC[?1002l
+@25714     ESC[?1049l
+```
