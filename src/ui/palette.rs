@@ -710,11 +710,25 @@ mod tests {
             vec![
                 vec!["FileMode", "Code"],
                 vec!["ListSeparator", "AgentBadge(Unknown)", "TaskLabel"],
-                vec!["AgentBadge(Working)", "TaskChange"],
-                vec!["AgentBadge(Blocked)", "TaskEvidence"],
+                vec!["AgentBadge(Working)", "TaskChange", "DeltaAdded"],
+                vec!["AgentBadge(Blocked)", "TaskEvidence", "DeltaRemoved"],
                 vec!["AgentBadge(Done)", "TaskConfirm"],
             ],
-            "the shared coloured groups are exactly the five the spec licenses"
+            "the shared coloured groups are exactly the five the spec licenses, \
+             spec-emphasis widening the Green and LightRed groups by one member each"
+        );
+
+        // `spec-emphasis`: `DeltaModified`'s `Yellow` is a style no other role
+        // carries, so it joins no group — a colour reuse against `FileMode`,
+        // `Code`, and `Heading(5)`, each of which differs from it by a modifier.
+        assert!(
+            groups
+                .iter()
+                .find(|(s, _)| *s == style(Role::DeltaModified))
+                .map(|(_, m)| m.len())
+                .unwrap_or(1)
+                == 1,
+            "DeltaModified must be alone in its group"
         );
 
         // `Heading(3)` and `Heading(4)` are each alone in their group, because
@@ -739,6 +753,31 @@ mod tests {
             style(Role::AgentBadge(AgentStatus::Blocked))
         );
         assert_ne!(style(Role::TaskEvidence), style(Role::ListProblem));
+    }
+
+    /// `view-palette` :: "The three delta roles carry their colour and no
+    /// modifier".
+    #[test]
+    fn the_three_delta_roles_carry_their_colour_and_no_modifier() {
+        assert_eq!(style(Role::DeltaAdded).fg, Some(Color::Green));
+        assert_eq!(style(Role::DeltaModified).fg, Some(Color::Yellow));
+        assert_eq!(style(Role::DeltaRemoved).fg, Some(Color::LightRed));
+
+        for role in [Role::DeltaAdded, Role::DeltaModified, Role::DeltaRemoved] {
+            assert_eq!(
+                style(role).add_modifier,
+                NONE,
+                "{} must carry no modifier",
+                label(role)
+            );
+        }
+
+        // The assertion discriminates: a table collapsing two operations onto
+        // one colour could not pass.
+        assert_ne!(style(Role::DeltaAdded).fg, Some(Color::LightRed));
+
+        // `ListProblem`'s red stays the pane's one problem colour.
+        assert_ne!(style(Role::DeltaRemoved).fg, Some(Color::Red));
     }
 
     /// `view-palette` :: "The enum's membership is exactly this list".
