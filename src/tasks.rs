@@ -1328,7 +1328,7 @@ mod tests {
     // under test is pure and total — there is no schema, no filesystem, and
     // no `Schema` value anywhere in scope.
 
-    use super::{Label, LabelRole, label_of};
+    use super::{Label, LabelRole, label_of, role_of};
 
     /// `task-labels` :: "The plain and compound label forms are both recognised".
     #[test]
@@ -1593,5 +1593,45 @@ mod tests {
         let first = label_of("GREEN: implement it");
         assert_eq!(label_of("RED: write it").unwrap().role, LabelRole::Evidence);
         assert_eq!(label_of("GREEN: implement it"), first);
+    }
+
+    /// `task-labels` :: "The table is reachable on its own and `label_of`
+    /// agrees with it".
+    #[test]
+    fn the_table_is_reachable_on_its_own_and_label_of_agrees_with_it() {
+        let evidence = ["RED", "CHARACTERIZE", "CHECK", "GIVEN", "ARRANGE"];
+        let change = ["GREEN", "REFACTOR", "CHANGE", "WHEN", "ACT"];
+        let confirm = ["VERIFY", "THEN", "ASSERT"];
+        for (tokens, role) in [
+            (&evidence[..], LabelRole::Evidence),
+            (&change[..], LabelRole::Change),
+            (&confirm[..], LabelRole::Confirm),
+        ] {
+            for token in tokens {
+                assert_eq!(role_of(token), Some(role), "{token:?}");
+                // The two cannot disagree without failing: the same run,
+                // followed by a colon and text, must classify identically
+                // through `label_of`.
+                let text = format!("{token}: do the thing");
+                assert_eq!(
+                    label_of(&text).unwrap().role,
+                    role,
+                    "{token:?} disagreed between role_of and label_of"
+                );
+            }
+        }
+    }
+
+    /// `task-labels` :: "An unrecognised run is `None` to the table and
+    /// `Other` to the label".
+    #[test]
+    fn an_unrecognised_run_is_none_to_the_table_and_other_to_the_label() {
+        for run in ["NOTE", "TODO", "HANDOFF", "REDGREEN", ""] {
+            assert_eq!(role_of(run), None, "{run:?}");
+        }
+        assert_eq!(
+            label_of("NOTE: see design.md").unwrap().role,
+            LabelRole::Other
+        );
     }
 }
