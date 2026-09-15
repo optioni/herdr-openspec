@@ -412,8 +412,9 @@ pub fn mouse_action(dashboard: &Dashboard, area: Rect, mouse: &MouseEvent) -> Ac
         },
         // `text-selection`: a left drag begins only on a non-header
         // `Zone::DetailRow` (design.md -> Decision 1); every other zone
-        // produces `Action::Ignore`, so no existing binding's dispatch
-        // timing changes and folding a section can never begin a selection.
+        // produces `Action::Ignore` when nothing is in progress, so no
+        // existing binding's dispatch timing changes and folding a section
+        // can never begin a selection.
         MouseEventKind::Drag(MouseButton::Left) => match zone {
             Zone::DetailRow { content, row } => {
                 match detail_cell(dashboard, content, row, mouse.column) {
@@ -423,11 +424,33 @@ pub fn mouse_action(dashboard: &Dashboard, area: Rect, mouse: &MouseEvent) -> Ac
                     Some((_, _, Some(_))) | None => Action::Ignore,
                 }
             }
+            // `text-selection`'s clamp: a drag that is extending a
+            // selection already in progress and has left the content area
+            // — vertically or horizontally — follows the pointer to that
+            // area's nearest edge rather than freezing at its last
+            // in-area position (`specs/text-selection/spec.md` -> "A drag
+            // past the edge clamps and does not scroll"). `dashboard-loop`'s
+            // "a drag outside the selectable region... costs no frame" is
+            // about a drag with **no** selection in progress, and stays
+            // `Action::Ignore` here on exactly that condition: a header
+            // row inside the content area is excluded above and never
+            // reaches this arm at all, since it is never "outside" the
+            // area in the sense this clamp means.
             Zone::ListRow { .. }
             | Zone::DetailTab { .. }
             | Zone::List
             | Zone::Detail
-            | Zone::Outside => Action::Ignore,
+            | Zone::Outside => {
+                if dashboard.selection.is_some()
+                    && let Some(content) = content_area(dashboard, area)
+                {
+                    let (line, column) =
+                        clamp_to_content(dashboard, content, mouse.column, mouse.row);
+                    Action::Select(SelectPhase::Extend { line, column })
+                } else {
+                    Action::Ignore
+                }
+            }
         },
         // Right and middle presses, every release, and both horizontal wheel
         // directions: there is no context menu and the pane scrolls in one
@@ -473,6 +496,54 @@ fn detail_cell(
         column,
         crate::ui::detail::section_at(&rows, offset, row),
     ))
+}
+
+/// The detail region's content area for `area` at `dashboard.route`, or
+/// `None` when no detail region is drawn at all — the narrow layout's
+/// `Route::List`. `zone` already derives this same `Rect` for a point that
+/// falls inside it (`Zone::DetailRow`'s own `content` field); `text-selection`'s
+/// clamp needs it for a point that has left it, where `zone` returns no
+/// `Rect` at all. Mirrors `zone`'s own derivation through `split_frame`,
+/// `split_body`, `interior`, and `split_detail` exactly, holding no
+/// arithmetic of its own.
+fn content_area(dashboard: &Dashboard, area: Rect) -> Option<Rect> {
+    let (body, _) = crate::ui::layout::split_frame(area);
+    let (_, divider, detail) = crate::ui::layout::split_body(body, dashboard.route);
+    let inner = crate::ui::layout::interior(detail?, crate::ui::layout::detail_gutters(divider));
+    let (_, _, content) = crate::ui::layout::split_detail(inner);
+    Some(content)
+}
+
+/// Clamp a point that has left `content` to its nearest edge and resolve it
+/// to a content-line index and display column, on exactly [`detail_cell`]'s
+/// terms — `specs/text-selection/spec.md` -> "A drag past the edge clamps
+/// and does not scroll": the focus follows the pointer to the content
+/// area's own edge and no further, and `detail.scroll` is never consulted
+/// to move toward it, only to locate what is already drawn.
+///
+/// The vertical bound is the **lesser** of the content area's own last row
+/// and the document's own last drawn line — a document shorter than the
+/// area clamps to its own last line, never to an empty row the area's
+/// height would otherwise offer, which is what keeps this agree with
+/// `detail_cell` returning `None` for exactly that row when a press or a
+/// drag lands on it directly.
+fn clamp_to_content(dashboard: &Dashboard, content: Rect, column: u16, row: u16) -> (usize, u16) {
+    let rows = crate::ui::detail::content_lines(
+        &dashboard.detail,
+        dashboard.selected_change(),
+        content.width,
+    );
+    let offset = crate::ui::layout::viewport(rows.len(), dashboard.detail.scroll, content.height);
+    let visible = rows
+        .len()
+        .saturating_sub(offset)
+        .min(content.height as usize);
+    let max_row_offset = visible.saturating_sub(1) as u16;
+    let row_offset = row.saturating_sub(content.y).min(max_row_offset);
+    let line = offset + row_offset as usize;
+    let max_column = content.width.saturating_sub(1);
+    let column = column.saturating_sub(content.x).min(max_column);
+    (line, column)
 }
 
 /// The live tier's four one-shot steps — see `run_loop`'s doc comment for
@@ -5420,6 +5491,113 @@ mod tests {
             dragged,
             Action::Ignore,
             "folding a section can never begin a selection"
+        );
+    }
+
+    #[test]
+    fn a_drag_past_the_edge_clamps_and_does_not_scroll() {
+        // `text-selection`: "A drag past the edge clamps and does not
+        // scroll" — a drag that is extending a selection already in
+        // progress and leaves the content area, vertically or
+        // horizontally, follows the pointer to that area's nearest edge
+        // rather than freezing at its last in-area position or being
+        // dropped. Driven as a **coarse jump** straight to a point well
+        // outside the frame, deliberately — the freeze this fix corrects
+        // is invisible under a per-cell walk, since a one-cell step across
+        // the boundary looks the same clamped or frozen.
+        let dashboard_with_selection = |anchor_line: usize| {
+            let mut d = foldable_dashboard(
+                three_spec_sections(),
+                std::collections::BTreeSet::from([1]),
+                0,
+            );
+            d.selection = Some(crate::ui::app::Selection {
+                anchor: (anchor_line, 0),
+                focus: (anchor_line, 0),
+                granularity: Granularity::Span,
+                problem: None,
+            });
+            d
+        };
+        let area = WIDE;
+        let content = detail_content_area(area, Route::Detail);
+
+        // Above the area's first row: a coarse jump to the frame's own
+        // top-left corner, well above `content.y`.
+        let above = dashboard_with_selection(2);
+        let action = mouse_action(&above, area, &drag(content.x, 0));
+        assert_eq!(
+            action,
+            Action::Select(SelectPhase::Extend { line: 0, column: 0 }),
+            "clamps to the content area's own first drawn line"
+        );
+        let mut applied = above.clone();
+        applied.apply(action);
+        assert_eq!(
+            applied.detail.scroll, above.detail.scroll,
+            "clamping never scrolls — the content did not move"
+        );
+        assert_eq!(
+            applied.selection.map(|s| s.focus),
+            Some((0, 0)),
+            "the focus itself is the clamped cell, not a frozen last-in-area one"
+        );
+
+        // Below the area's last row: a coarse jump far past the bottom of
+        // the frame entirely — `three_spec_sections()` with section 1 open
+        // draws five rows (indices 0-4: its header, section 1's header and
+        // open body, the blank separator before the next header, and
+        // section 2's header), far short of the content area's own height
+        // at 120x40, so the clamp lands on the document's own last drawn
+        // line, not on the content rectangle's geometric last row.
+        let below = dashboard_with_selection(0);
+        let action = mouse_action(&below, area, &drag(content.x, 1000));
+        assert_eq!(
+            action,
+            Action::Select(SelectPhase::Extend { line: 4, column: 0 }),
+            "clamps to the content area's own last drawn line"
+        );
+        let mut applied = below.clone();
+        applied.apply(action);
+        assert_eq!(
+            applied.detail.scroll, below.detail.scroll,
+            "clamping never scrolls — the content did not move"
+        );
+
+        // Past the right edge: a coarse jump far past the frame's own
+        // width, at a row that is otherwise a valid content row.
+        let right = dashboard_with_selection(1);
+        let action = mouse_action(&right, area, &drag(1000, content.y + 1));
+        assert_eq!(
+            action,
+            Action::Select(SelectPhase::Extend {
+                line: 1,
+                column: content.width - 1
+            }),
+            "clamps to the content area's own rightmost column"
+        );
+
+        // A drag that never began a selection is untouched: the same
+        // out-of-area points still resolve to `Action::Ignore` when
+        // nothing is in progress, exactly as
+        // `a_drag_begins_only_in_the_detail_content_area` already
+        // requires — named here again because it is this fix's own
+        // boundary, not only that scenario's.
+        let mut untouched = foldable_dashboard(
+            three_spec_sections(),
+            std::collections::BTreeSet::from([1]),
+            0,
+        );
+        untouched.selection = None;
+        assert_eq!(
+            mouse_action(&untouched, area, &drag(content.x, 0)),
+            Action::Ignore,
+            "no selection in progress: the edge clamp does not apply"
+        );
+        assert_eq!(
+            mouse_action(&untouched, area, &drag(content.x, 1000)),
+            Action::Ignore,
+            "no selection in progress: the edge clamp does not apply"
         );
     }
 
