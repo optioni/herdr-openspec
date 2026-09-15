@@ -101,12 +101,16 @@ fails `cargo test`.
 
 **What that test's subject actually is, stated because it is narrower than it reads:** the
 leg extracts the backticked `Action::<Variant>` names from the table and compares that set
-against `mouse_action`'s body. This change's two new gestures resolve to `Action::Click` and
-`Action::Ignore`, both already named, so the leg is green before and after and **cannot fail
-for the two new rows**. The rows are still required above; what verifies them is the
-resolver's own scenarios, and the leg's own falsifiability SHALL be re-established by a
-recorded negative control — delete one documented row, confirm the leg fires, restore it —
-rather than inferred from its passing.
+against `mouse_action`'s body, as a **set equality**.
+
+**This change inverts the note that stood here.** `foldable-spec-sections` recorded that its
+two new gestures resolved to `Action::Click` and `Action::Ignore`, both already named, so the
+leg was green before and after and could not fail for its new rows. That is **not** true here:
+`text-selection`'s gesture resolves to `Action::Select`, a name the table does not carry, so
+the leg goes **red** the moment `mouse_action` can produce it and stays red until
+`SPEC.md` → Keys' `| Gesture | Action |` table names it. The leg is therefore this change's
+own proof rather than something needing a separate negative control — though the control
+`foldable-spec-sections` recorded still stands for the rows it added.
 
 #### Scenario: The documented bindings match the resolver
 
