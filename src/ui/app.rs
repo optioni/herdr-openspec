@@ -1079,8 +1079,14 @@ impl Dashboard {
     /// `render_detail` and the per-frame `normalise_scroll` — not here, so a
     /// wheel held down cannot run the stored offset arbitrarily far ahead any
     /// more than a held `j` can. The one implementation `Next`/`Prev` at
-    /// `Route::Detail` and `ScrollDown`/`ScrollUp` at either route share.
+    /// `Route::Detail` and `ScrollDown`/`ScrollUp` at either route share —
+    /// and therefore the one site that clears a standing selection on a
+    /// scroll (`specs/text-selection/spec.md` -> "The highlight persists
+    /// after release and clears on the next interaction"): a scroll moves
+    /// what is drawn under the span without changing `sync_detail`'s `(dir,
+    /// tab)` key, so nothing else would clear it.
     fn scroll_by(&mut self, step: i8) {
+        self.selection = None;
         self.detail.scroll = if step > 0 {
             self.detail.scroll.saturating_add(1)
         } else {
@@ -1112,6 +1118,13 @@ impl Dashboard {
     /// it for a non-foldable artifact and `apply` checks anyway rather than
     /// trusting it.
     fn apply_click(&mut self, target: Target) {
+        // `text-selection`: every click clears a standing selection, whichever
+        // of the three `Target` forms it addresses and whether or not the
+        // membership guard below finds it — a click that lands on nothing is
+        // still a click, and a stale target does not make the click not have
+        // happened. See `specs/text-selection/spec.md` -> "The highlight
+        // persists after release and clears on the next interaction".
+        self.selection = None;
         match target {
             Target::Section(_) => {
                 let Some(index) = self.targets().iter().position(|t| *t == target) else {
