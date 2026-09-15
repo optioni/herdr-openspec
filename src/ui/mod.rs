@@ -2286,6 +2286,11 @@ apply:
                 self.calls.borrow_mut().push("disable_raw");
                 Ok(())
             }
+            fn write_clipboard(&self, text: &str) -> Result<(), TerminalError> {
+                let _ = text;
+                self.calls.borrow_mut().push("write_clipboard");
+                Ok(())
+            }
         }
 
         #[test]

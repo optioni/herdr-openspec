@@ -21,10 +21,13 @@ impl fmt::Display for TerminalError {
     }
 }
 
-/// The six fallible terminal-mode operations — `mouse-input` added the
-/// capture pair, which the guard enters last and leaves first.
-/// `CrosstermOps` is the one implementation that touches a real terminal;
-/// every test uses a double.
+/// The seven fallible terminal-mode operations — `mouse-input` added the
+/// capture pair, which the guard enters last and leaves first, and
+/// `mouse-text-selection` added `write_clipboard`, which touches no mode at
+/// all: it is the one method whose body is an escape sequence written
+/// directly to stdout rather than a `ratatui::crossterm` call, because
+/// crossterm models no clipboard command. `CrosstermOps` is the one
+/// implementation that touches a real terminal; every test uses a double.
 pub trait TerminalOps {
     fn enable_raw(&self) -> Result<(), TerminalError>;
     fn enter_alternate(&self) -> Result<(), TerminalError>;
@@ -32,6 +35,11 @@ pub trait TerminalOps {
     fn disable_mouse(&self) -> Result<(), TerminalError>;
     fn leave_alternate(&self) -> Result<(), TerminalError>;
     fn disable_raw(&self) -> Result<(), TerminalError>;
+    /// Write `text` to the system clipboard via an OSC 52 escape sequence.
+    /// The write cannot be acknowledged by the terminal, so success here
+    /// means only that the local write did not fail — see design.md ->
+    /// Decision 6.
+    fn write_clipboard(&self, text: &str) -> Result<(), TerminalError>;
 }
 
 /// Enters `enable_raw`, `enter_alternate`, then `enable_mouse` on
@@ -175,6 +183,47 @@ impl TerminalOps for CrosstermOps {
             detail: e.to_string(),
         })
     }
+
+    fn write_clipboard(&self, text: &str) -> Result<(), TerminalError> {
+        use std::io::Write;
+        let mut stdout = std::io::stdout();
+        write!(stdout, "\x1b]52;c;{}\x07", base64_encode(text.as_bytes()))
+            .and_then(|()| stdout.flush())
+            .map_err(|e| TerminalError {
+                op: "write_clipboard",
+                detail: e.to_string(),
+            })
+    }
+}
+
+/// The standard base64 alphabet (RFC 4648), inlined because the crate takes
+/// no dependency for one OSC 52 payload — see `AGENTS.md` -> "Dependencies".
+const BASE64_ALPHABET: &[u8; 64] =
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/// Base64-encode `data` with `=` padding, the encoding OSC 52 requires for
+/// its clipboard payload.
+fn base64_encode(data: &[u8]) -> String {
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(BASE64_ALPHABET[((n >> 18) & 0x3f) as usize] as char);
+        out.push(BASE64_ALPHABET[((n >> 12) & 0x3f) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            BASE64_ALPHABET[((n >> 6) & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            BASE64_ALPHABET[(n & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
 }
 
 /// Restore the terminal and then run `next` only when `current` — the
@@ -228,6 +277,21 @@ pub fn install_panic_hook() {
 
 #[cfg(test)]
 mod tests {
+    mod base64 {
+        use crate::ui::terminal::base64_encode;
+
+        #[test]
+        fn encodes_the_standard_reference_vectors() {
+            assert_eq!(base64_encode(b""), "");
+            assert_eq!(base64_encode(b"f"), "Zg==");
+            assert_eq!(base64_encode(b"fo"), "Zm8=");
+            assert_eq!(base64_encode(b"foo"), "Zm9v");
+            assert_eq!(base64_encode(b"foob"), "Zm9vYg==");
+            assert_eq!(base64_encode(b"fooba"), "Zm9vYmE=");
+            assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+        }
+    }
+
     mod guard {
         use std::cell::RefCell;
         use std::collections::BTreeMap;
@@ -306,6 +370,10 @@ mod tests {
             }
             fn disable_raw(&self) -> Result<(), TerminalError> {
                 self.record("disable_raw")
+            }
+            fn write_clipboard(&self, text: &str) -> Result<(), TerminalError> {
+                let _ = text;
+                self.record("write_clipboard")
             }
         }
 
@@ -574,7 +642,8 @@ mod tests {
             let rec = Recorder::default();
             let guard = TerminalGuard::enter(&rec).expect("enter succeeds");
             rec.write_clipboard("first").expect("first write succeeds");
-            rec.write_clipboard("second").expect("second write succeeds");
+            rec.write_clipboard("second")
+                .expect("second write succeeds");
             drop(guard);
 
             assert_eq!(
@@ -597,7 +666,12 @@ mod tests {
                     .into_iter()
                     .filter(|op| *op != "write_clipboard")
                     .collect::<Vec<_>>(),
-                vec!["enable_raw", "enter_alternate", "leave_alternate", "disable_raw"]
+                vec![
+                    "enable_raw",
+                    "enter_alternate",
+                    "leave_alternate",
+                    "disable_raw"
+                ]
             );
         }
     }
