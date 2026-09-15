@@ -239,9 +239,35 @@ fn maybe_copy_selection(
     before: Option<crate::ui::app::Granularity>,
     write: crate::ui::app::ClipboardWriter<'_>,
 ) {
-    // RED checkpoint: completion detection and the clipboard write are not implemented yet —
-    // the four tests above this function fail against this stub, for the right reason.
-    let _ = (dashboard, kind, before, write);
+    use crate::ui::app::Granularity;
+
+    let after = dashboard.selection.as_ref().map(|s| s.granularity);
+    let completing = match kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            after != before && matches!(after, Some(Granularity::Word) | Some(Granularity::Row))
+        }
+        MouseEventKind::Up(MouseButton::Left) => matches!(after, Some(Granularity::Span)),
+        _ => false,
+    };
+    if !completing {
+        return;
+    }
+    let Some(width) = dashboard.detail.drawn_width else {
+        return;
+    };
+    let Some(selection) = dashboard.selection.clone() else {
+        return;
+    };
+    let rows =
+        crate::ui::detail::content_lines(&dashboard.detail, dashboard.selected_change(), width);
+    let Some((start, end)) = view::highlight_span(&rows, &selection) else {
+        return;
+    };
+    let text = crate::ui::detail::span_text(&rows, start, end);
+    let result = write(&text).err();
+    if let Some(selection) = dashboard.selection.as_mut() {
+        selection.problem = result;
+    }
 }
 
 /// Map a mouse event to one of the actions `Action` already carries, using
