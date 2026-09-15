@@ -284,6 +284,26 @@ will be written against the synced spec rather than a stale one. `tasks-emphasis
 names `tasks-progress-bar` and is the one to write next against the `u128` arithmetic, not the
 saturating `u64` text it would have quoted a day earlier.
 
+**The same hazard, 2026-09-15: absent at `tasks-emphasis`'s archive, checked rather than
+assumed — and now live in one direction.** It modified `artifact-folds`, `detail-scroll`,
+`markdown-render`, `tasks-checklist`, `tasks-progress-bar` and `view-palette`, and added
+`task-labels`. Four changes were active in this checkout when it archived
+(`agent-client-choice`, `mouse-text-selection`, `settings-window`, `spec-emphasis`) and all
+four are **proposal-only** — no `specs/` directory, so none had a block extracted from
+anything, and each will be written against the synced spec. `git log` over
+`openspec/specs/` showed no live spec moved while the change was implemented, and every
+`MODIFIED` block was compared scenario by scenario against the file the sync actually wrote:
+none dropped a scenario the live spec carried.
+
+**The direction that is still open**: `spec-emphasis`' proposal names `markdown-render` and
+`view-palette`, both of which `tasks-emphasis` has now rewritten. Whoever writes its deltas
+must extract those two requirement blocks from `openspec/specs/<capability>/spec.md` as they
+read **after** this archive — `markdown-render`'s "Markdown source becomes plain-data lines"
+now declares a nine-field `Face`, and `view-palette`'s four blocks now carry five further
+roles, two licences in place of an enumeration, and a corrected account of where a
+`ListProblem` row is drawn. A block quoted from the pre-archive text would silently discard
+all of it.
+
 **A note for whoever runs the suite while more than one session is live.** `cargo test
 --all-features` was measured non-deterministic on this machine on 2026-09-09 with three
 sessions active: 4–5 tests under `ui::tests::wiring` failed, a **different set on each run**,
