@@ -1,3 +1,109 @@
+//! Recognising the structural vocabulary OpenSpec itself writes into a delta
+//! spec: the three delta-operation headings (`## ADDED Requirements` and its
+//! two siblings), and the keyword that opens a scenario clause (`- **WHEN**`,
+//! `- **THEN**`, `- **AND**`). Two pure total functions over borrowed text,
+//! plus the [`DeltaOp`] vocabulary. `ui::app` owns the attribution walk that
+//! turns the first into a per-section operation and the header row that
+//! draws it, `ui::markdown` faces a clause keyword from the second, and
+//! `ui::palette` decides what each looks like. This module classifies one
+//! heading and one run; it never walks a section list. See
+//! `openspec/changes/spec-emphasis/specs/spec-delta-badges/spec.md`.
+//!
+//! It lives outside `src/ui/` for exactly the reason `crate::tasks` does:
+//! recognising a heading is a fact about a spec's text and not about how a
+//! frame is painted, and a new pure-view file would move a count that
+//! `view-palette` and `responsive-layout` both bind and that three gate
+//! scripts carry as a `PURE` list — five sites for a function that needs
+//! none of them. This module classifies and never styles, never reads a
+//! file, and never consults any workflow definition — see `AGENTS.md` ->
+//! Architecture rules.
+
+use crate::tasks::LabelRole;
+
+/// A requirement's delta operation, as OpenSpec's own `##` heading names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeltaOp {
+    Added,
+    Modified,
+    Removed,
+}
+
+/// The delta operation the heading at `level` with label `label` names, or
+/// `None` when it names none. `label` is the heading's remainder with
+/// surrounding whitespace trimmed, exactly as `HeadingSection.label` carries
+/// it.
+///
+/// `Some` only when **both** hold:
+///
+/// 1. `level` is exactly `2` — the operation headings OpenSpec writes are
+///    `##` headings, and the check lives inside this function so it is not a
+///    caller's to remember.
+/// 2. `label` splits on ASCII whitespace into exactly two tokens, the second
+///    of which is exactly `Requirements`, and the first of which is exactly
+///    `ADDED`, `MODIFIED`, or `REMOVED`, matched case-sensitively.
+///
+/// Splitting on whitespace rather than comparing the whole string is the
+/// only tolerance offered: `##  ADDED   Requirements` classifies, while
+/// `## Added Requirements`, `## ADDED Requirement`, and
+/// `## ADDED Requirements (2)` do not. `RENAMED Requirements` — a fourth
+/// operation OpenSpec's own instructions name, unseen across this
+/// repository's archive — classifies to `None` like any other heading this
+/// crate has never rendered: it loses the badge and keeps every other thing
+/// the detail region already draws.
+///
+/// Total: never panics, for any `u8` and any `&str`.
+pub fn operation_of_heading(level: u8, label: &str) -> Option<DeltaOp> {
+    if level != 2 {
+        return None;
+    }
+    let mut tokens = label.split_ascii_whitespace();
+    let first = tokens.next()?;
+    let second = tokens.next()?;
+    if second != "Requirements" || tokens.next().is_some() {
+        return None;
+    }
+    match first {
+        "ADDED" => Some(DeltaOp::Added),
+        "MODIFIED" => Some(DeltaOp::Modified),
+        "REMOVED" => Some(DeltaOp::Removed),
+        _ => None,
+    }
+}
+
+/// What a bold run at the head of a list item is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Clause {
+    /// A keyword naming its own lifecycle position.
+    Opens(LabelRole),
+    /// A continuation, carrying the position of the clause above it.
+    Continues,
+}
+
+/// `run`'s clause classification, or `None` when it is not a clause keyword.
+/// Classified against the **whole** run, with no trimming, no case folding,
+/// and no prefix matching:
+///
+/// 1. `AND` is `Some(Clause::Continues)`.
+/// 2. Otherwise `run` is looked up in the `task-labels` token table through
+///    [`crate::tasks::role_of`], and a hit is `Some(Clause::Opens(role))` —
+///    so `WHEN` reports `Opens(Change)` and `THEN` reports `Opens(Confirm)`,
+///    and `GIVEN`, `ARRANGE`, `ACT`, and `ASSERT` classify identically to the
+///    conventions they belong to.
+/// 3. Every other run is `None`.
+///
+/// The table is reached and never copied: `crate::tasks::role_of` is the
+/// crate's one lifecycle-token table, and a spec's `WHEN` and a task's
+/// `WHEN` are one fact, not two implementations of it that could drift
+/// (design.md -> Decision 3).
+///
+/// Total: never panics, for any `&str`.
+pub fn clause_of(run: &str) -> Option<Clause> {
+    if run == "AND" {
+        return Some(Clause::Continues);
+    }
+    crate::tasks::role_of(run).map(Clause::Opens)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Clause, DeltaOp, clause_of, operation_of_heading};
@@ -129,7 +235,16 @@ mod tests {
     /// `spec-delta-badges` :: "A run outside the table is not a clause".
     #[test]
     fn a_run_outside_the_table_is_not_a_clause() {
-        for run in ["and", "When", "WHENEVER", "OR", "BUT", "IF", "Requirement", ""] {
+        for run in [
+            "and",
+            "When",
+            "WHENEVER",
+            "OR",
+            "BUT",
+            "IF",
+            "Requirement",
+            "",
+        ] {
             assert_eq!(clause_of(run), None, "{run:?}");
         }
         // `and` and `When` return `None` while `AND` and `WHEN` do not, so
