@@ -62,22 +62,22 @@
 ## 4. `Selection` and the `Dashboard` field
 <!-- kind: behavior -->
 
-- [ ] 4.1 RED: Write the failing test for "`selection` starts empty and is cleared rather than
+- [x] 4.1 RED: Write the failing test for "`selection` starts empty and is cleared rather than
       reloaded".
       Check: `grep -q 'pub struct Selection' src/ui/app.rs` → **exit 1 at HEAD**.
-- [ ] 4.2 GREEN: Add `Selection { anchor, focus, granularity }` with no `Default`, and the
+- [x] 4.2 GREEN: Add `Selection { anchor, focus, granularity }` with no `Default`, and the
       `selection: Option<Selection>` field. Every `Dashboard` construction site names it.
-- [ ] 4.3 CHECK: Move the field count in the same group as the field.
+- [x] 4.3 CHECK: Move the field count in the same group as the field.
       `awk '/^pub struct Dashboard/,/^}/' src/ui/app.rs | grep -cE '^\s+pub [a-z_]+:'` printed
       **15** and must print **16**; update the destructure companion and every assertion that
       spells fifteen.
-- [ ] 4.4 CHECK: Add `Selection` to the `TYPES` list on `Makefile:46`
+- [x] 4.4 CHECK: Add `Selection` to the `TYPES` list on `Makefile:46`
       (`TYPES='Dashboard Filter Detail Sections Help'`) — the gate sweeps only the types the
       recipe names, so without this it passes identically before and after this group and
       proves nothing. Re-measure that line's `SCAN_MIN=308` per `notes/gate-floors.md`'s
       convention and update it.
       Check: `grep -c 'Selection' Makefile` → **0** at HEAD, must print **1**.
-- [ ] 4.5 VERIFY: `cargo test ui::app` and `make gates` green, and confirm the gate is now
+- [x] 4.5 VERIFY: `cargo test ui::app` and `make gates` green, and confirm the gate is now
       falsifiable for this type: add `..Default::default()` to a `Selection` literal, run
       `make gates`, see `NODEFAULT-UI` fail, remove it, see it pass.
 
