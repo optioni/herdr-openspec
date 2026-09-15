@@ -152,26 +152,39 @@ group has an honest RED state rather than a manufactured one.
 
 Depends on 2 (for `DeltaOp`) and 3 (for the roles).
 
-- [ ] 4.1 RED: Write failing tests `every_segment_lines_returns_carries_no_delta` in `ui::markdown` and an extension of
+- [x] 4.1 RED: Write failing tests `every_segment_lines_returns_carries_no_delta` in `ui::markdown` and an extension of
       `a plain face is the default style` in `ui::view`, from the same-named specs/markdown-render
       and specs/view-palette scenarios. Each answers to its **own** width gate:
       `every_segment_lines_returns_carries_no_delta` is in `src/ui/markdown.rs` and names 58 and
       78 (`MDWIDTHS`); the `ui::view` extension keeps the 60 and 120 it already has (`WIDTHS`).
       `DETAILWIDTHS` sweeps only `src/ui/detail.rs` and neither of these — rewriting the
       `ui::view` test to 58/78 would redden `make gates`.
-- [ ] 4.1a RED: In the same step assert `style_for` over all three operations —
+- [x] 4.1a RED: In the same step assert `style_for` over all three operations —
       `the_three_delta_roles_carry_their_colour_and_no_modifier`'s sibling in `ui::view`, from
       specs/view-palette → "`style_for` maps each `DeltaOp` to its own role". Without it group 4
       has no test that step 10 exists at all, and a slip mapping `Modified` to `DeltaAdded`
       passes every other check in this plan.
-- [ ] 4.2 GREEN: Add `delta: Option<crate::specs::DeltaOp>` to `Face`, keeping its `Default`
+- [x] 4.2 GREEN: Add `delta: Option<crate::specs::DeltaOp>` to `Face`, keeping its `Default`
       derive, and name the new field at `src/ui/tasks.rs`'s `heading_line` — the crate's one
       site that spells every field out (`grep -n "heading_line" src/ui/tasks.rs` → `286`).
-- [ ] 4.3 GREEN: Add step 10 to `ui::view::style_for`, patching `DeltaAdded`/`DeltaModified`/
+- [x] 4.3 GREEN: Add step 10 to `ui::view::style_for`, patching `DeltaAdded`/`DeltaModified`/
       `DeltaRemoved` last, per specs/view-palette → "`ui::view` takes every style it applies
       from the palette".
-- [ ] 4.4 REFACTOR: Clean up while green, or state that none was needed.
-- [ ] 4.5 Run the group tests — `cargo test ui::markdown:: ui::view::` green.
+- [x] 4.4 REFACTOR: Clean up while green, or state that none was needed.
+- [x] 4.5 Run the group tests — `cargo test ui::markdown:: ui::view::` green.
+- [x] 4.6 CHECK (added during implementation): `cargo test --test degraded_coverage` green.
+      **`tests/degraded-coverage.toml` anchors rows to absolute line numbers**, and
+      `every_table_row_has_a_proof` fails a row whose `covers` range lands on a blank or
+      comment-only line. Adding `Face::delta` moved `src/ui/markdown.rs` by six lines and
+      re-pointed that file's one anchor from `self.blocks` in `end()` at `:703` onto a comment,
+      failing a test no task predicted. Repaired to `:709-709` — the same line of code, not a
+      new one. **Forewarning for the groups below**, since the plan names this nowhere and the
+      failure reads as unrelated to the group that caused it: `grep -o 'covers = \["[^"]*"\]'
+      tests/degraded-coverage.toml` shows anchors into `src/ui/app.rs` (1, group 5),
+      `src/ui/detail.rs` (2, group 6), `src/ui/markdown.rs` (1, group 7) and
+      `src/ui/view.rs` (2, groups 4 and 6). Any insertion **above** one of those lines shifts
+      it. Re-point it to the same code; do not re-point it to whatever now sits at the old
+      number, and do not delete the row.
 
 ## 5. `ArtifactSection::operation` and its attribution walk
 
