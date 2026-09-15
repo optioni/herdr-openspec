@@ -27,11 +27,12 @@ pub struct Line { pub segments: Vec<Segment> }
 pub fn lines(source: &str, width: u16) -> Vec<Line>;
 ```
 
-`muted` and `label` are this change's two new fields, joining `strikethrough`, which
-`markdown-legibility` added on the same terms. `Face` SHALL keep deriving `Default` — it is
-a value with a meaningful zero, not a state type `NODEFAULT-UI` gates — so `Face::plain()`
-SHALL remain the all-`false`, `heading: None`, `label: None`, `delta: None` value. Every construction site
-that spells the fields out rather than writing `..Face::plain()` SHALL name the new fields:
+`delta` is `spec-emphasis`' one new field, joining `muted` and `label` from `tasks-emphasis`
+and `strikethrough` from `markdown-legibility`, all three added on the same terms. `Face`
+SHALL keep deriving `Default` — it is a value with a meaningful zero, not a state type
+`NODEFAULT-UI` gates — so `Face::plain()` SHALL remain the all-`false`, `heading: None`,
+`label: None`, `delta: None` value. Every construction site
+that spells the fields out rather than writing `..Face::plain()` SHALL name the new field:
 `src/ui/tasks.rs`'s `heading_line` is the one such site in the crate, and it is a
 **compile-time** forcing site, which is why the fields are added to the struct rather than
 tracked in a parallel enum.
@@ -41,7 +42,7 @@ every width. It SHALL set `label` on exactly one construct — a clause keyword,
 clause's keyword carries its lifecycle role" below — and `None` on every other segment.
 `spec-emphasis` is what changed this sentence: `tasks-checklist` was `label`'s only writer when
 the field was added, and a second writer on the markdown path is the whole of that change's
-rendered half. The two fields
+rendered half. The `muted` and `label` fields
 exist because `Face` is the crate's one carrier of "what this run of text is", and
 `tasks-checklist` needs to say two things about a run that no markdown construct says —
 that a whole row is finished, and that a leading token is a lifecycle label. Putting them
@@ -204,12 +205,17 @@ consumes them rather than defining them.
   heading, a paragraph, a bullet list, a fenced code block, a block quote, a link, a struck
   run, a table, a checked and an unchecked task-list item, and the literal paragraph
   `VERIFY: this is prose, not a task`
-- **THEN** every segment of every returned line carries `muted: false` and `label: None`
+- **THEN** every segment of every returned line carries `muted: false`, `label: None`, and
+  `delta: None` — the document holds no `- **WHEN**` bullet, so no clause keyword is reached
 - **AND** the `VERIFY:` paragraph in particular carries `label: None`, so recognising a
-  label is `tasks-checklist`'s job on the checklist path and never the markdown renderer's —
-  a proposal that opens with the word `VERIFY:` is not styled as a task
+  *task* label is `tasks-checklist`'s job on the checklist path and never the markdown
+  renderer's — a proposal that opens with the word `VERIFY:` is not styled as a task. This
+  clause is what `spec-emphasis` narrowed: the markdown path now sets `label` on a clause
+  keyword, and this scenario's document deliberately contains none, so the assertion survives
+  the change unweakened rather than being deleted by it
 - **AND** the result at both widths is byte-identical, segment for segment, to the same call
-  before this change, so adding the fields moved no rendered output
+  before `tasks-emphasis`, so neither its two fields nor `spec-emphasis`' third moved any
+  rendered output for a document carrying no clause
 
 ## ADDED Requirements
 
