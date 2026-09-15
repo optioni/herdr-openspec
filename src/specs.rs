@@ -252,4 +252,26 @@ mod tests {
         assert!(clause_of("AND").is_some());
         assert!(clause_of("WHEN").is_some());
     }
+
+    /// `spec-delta-badges` :: "The clause recognition is total over
+    /// degenerate input".
+    #[test]
+    fn the_clause_recognition_is_total_over_degenerate_input() {
+        let long_run = "A".repeat(10_000);
+        for run in [
+            "",
+            "   ",
+            long_run.as_str(),
+            "日本語",
+            "AND 日本語",
+            "🇫🇮 flag",
+        ] {
+            // No call panics, and every call returns `None`; `AND` is
+            // matched whole, so `"AND 日本語"` is not it — the same
+            // obligation `the_recognition_is_total_over_degenerate_input`
+            // carries for `operation_of_heading`, held here to one standard
+            // for one property.
+            assert_eq!(clause_of(run), None, "{run:?}");
+        }
+    }
 }
