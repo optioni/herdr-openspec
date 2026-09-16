@@ -3340,4 +3340,135 @@ mod tests {
             );
         }
     }
+
+    // `task-item-bodies` :: `ui::markdown::inline` — a second entry point
+    // that renders a fragment as one paragraph and recognises no block
+    // construct (design.md -> Decision 4).
+
+    #[test]
+    fn a_fragments_inline_faces_are_set_and_its_text_is_unchanged() {
+        let text =
+            "2.2 GREEN: add the `CrosstermOps` implementation, **bolded**, and *stressed*";
+        for width in [78, 58] {
+            let out = inline(text, width);
+            let segments: Vec<&Segment> = out.iter().flat_map(|l| l.segments.iter()).collect();
+            let concatenated: String = segments.iter().map(|s| s.text.as_str()).collect();
+            assert!(
+                concatenated.contains("CrosstermOps"),
+                "width {width}: {concatenated:?}"
+            );
+            assert!(
+                concatenated.contains("bolded"),
+                "width {width}: {concatenated:?}"
+            );
+            assert!(
+                concatenated.contains("stressed"),
+                "width {width}: {concatenated:?}"
+            );
+
+            let code = segments
+                .iter()
+                .find(|s| s.text == "CrosstermOps")
+                .unwrap_or_else(|| panic!("width {width}: no CrosstermOps segment"));
+            assert!(code.face.code, "width {width}");
+
+            let bolded = segments
+                .iter()
+                .find(|s| s.text == "bolded")
+                .unwrap_or_else(|| panic!("width {width}: no bolded segment"));
+            assert!(bolded.face.strong, "width {width}");
+
+            let stressed = segments
+                .iter()
+                .find(|s| s.text == "stressed")
+                .unwrap_or_else(|| panic!("width {width}: no stressed segment"));
+            assert!(stressed.face.emphasis, "width {width}");
+
+            for seg in &segments {
+                assert_eq!(seg.face.heading, None, "width {width}: {seg:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_leading_block_marker_is_literal_text_not_a_block() {
+        let fragments = [
+            "# not a heading",
+            "- not a bullet",
+            "> not a quote",
+            "1. not an ordered list",
+            "--- not a rule",
+        ];
+        for width in [78, 58] {
+            let mut differences = 0;
+            for fragment in fragments {
+                let out = inline(fragment, width);
+                let full: String = out.iter().map(Line::text).collect();
+                assert_eq!(full, fragment, "width {width}: {fragment:?}");
+                for line in &out {
+                    for seg in &line.segments {
+                        assert_eq!(
+                            seg.face.heading, None,
+                            "width {width}: {fragment:?} {seg:?}"
+                        );
+                    }
+                }
+                if lines(fragment, width) != out {
+                    differences += 1;
+                }
+            }
+            assert!(
+                differences >= 4,
+                "width {width}: only {differences} of {} fragments differed from lines()",
+                fragments.len()
+            );
+        }
+    }
+
+    #[test]
+    fn a_fragment_wraps_and_hard_splits_exactly_as_a_paragraph_does() {
+        let prose = "alpha bravo charlie delta echo foxtrot golf hotel india juliett kilo lima \
+                      mike november oscar papa";
+        for width in [78, 58] {
+            let out = inline(prose, width);
+            assert_eq!(out, lines(prose, width), "width {width}");
+            for line in &out {
+                assert!(
+                    columns(&line.text()) <= width as usize,
+                    "width {width}: {:?}",
+                    line.text()
+                );
+            }
+        }
+        let at58 = inline(prose, 58).len();
+        let at78 = inline(prose, 78).len();
+        assert!(at58 > at78, "58: {at58} lines, 78: {at78} lines");
+
+        let long_word = "x".repeat(150);
+        for width in [78, 58] {
+            let out = inline(&long_word, width);
+            assert_eq!(out, lines(&long_word, width), "width {width}: hard split parity");
+            assert!(
+                out.len() > 1,
+                "width {width}: {} chars should hard-split",
+                long_word.len()
+            );
+            for line in &out {
+                assert!(
+                    columns(&line.text()) <= width as usize,
+                    "width {width}: {:?}",
+                    line.text()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn empty_whitespace_and_zero_width_inputs_return_nothing() {
+        assert_eq!(inline("", 58), Vec::new());
+        assert_eq!(inline("", 78), Vec::new());
+        assert_eq!(inline("   ", 58), Vec::new());
+        assert_eq!(inline("   ", 78), Vec::new());
+        assert_eq!(inline("hello world", 0), Vec::new());
+    }
 }
