@@ -3951,6 +3951,357 @@ esac
             }
         }
 
+        // --- agent-client-choice: the composition root's own threads ---------------------
+
+        /// `agent-launch` :: "With nothing configured, the sole installed integration is what
+        /// launches", and its ambiguous pair. Two runs against one fixture that differ only in
+        /// what `integration status` reports, so the outcome is caused by the evidence and by
+        /// nothing else.
+        #[test]
+        fn the_sole_installed_integration_is_what_launches() {
+            for (installed, expect_launch) in
+                [(vec!["codex"], true), (vec!["claude", "codex"], false)]
+            {
+                let scratch = scratch_repo_with_2fa_support();
+                let root = scratch.path();
+                let canon_root = canonical(root);
+                let herdr_log = root.join("herdr.log");
+                let marker = root.join("marker");
+                let herdr = launch_herdr_script_with_status(
+                    root,
+                    &herdr_log,
+                    &marker,
+                    &canon_root,
+                    &status_with_installed(&installed),
+                );
+                let openspec_log = root.join("openspec.log");
+                let openspec_bin = openspec_script(root, &openspec_log, root);
+                let state = ScratchDir::new();
+
+                let config = Config {
+                    openspec_bin: Some(openspec_bin),
+                    agent_kind: None,
+                    ..Config::default()
+                };
+
+                let stage0 = || true;
+                let stage1 = || log_lines(&herdr_log) >= 1;
+                let wanted = if expect_launch { 4 } else { 1 };
+                let stage2 = || non_agent_list_lines(&herdr_log).len() >= wanted;
+                let stages: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> = vec![
+                    (&stage0, key('j')),
+                    (&stage1, key('a')),
+                    (&stage2, key('q')),
+                ];
+
+                let (result, _buf) =
+                    run_wired_staged(120, root, &config, &herdr, Some(state.path()), stages);
+                let dashboard = result.expect("both are supported states");
+                let calls = non_agent_list_lines(&herdr_log);
+
+                if expect_launch {
+                    assert_eq!(
+                        calls.len(),
+                        4,
+                        "a sole installed integration launches without asking: {calls:?}"
+                    );
+                    assert_eq!(
+                        calls[2],
+                        "agent start c-2fa-support --kind codex --pane wD:pJ"
+                    );
+                    assert!(
+                        dashboard.launch.problems.is_empty(),
+                        "and without a row: {:?}",
+                        dashboard.launch.problems
+                    );
+                } else {
+                    assert_eq!(
+                        calls,
+                        vec!["integration status".to_string()],
+                        "two installed integrations stop the launch before pane split"
+                    );
+                    assert_eq!(
+                        dashboard.launch.problems.len(),
+                        1,
+                        "{:?}",
+                        dashboard.launch.problems
+                    );
+                    let problem = &dashboard.launch.problems[0];
+                    assert!(problem.contains("claude"), "{problem}");
+                    assert!(problem.contains("codex"), "{problem}");
+                    assert!(problem.contains("agent_kind"), "{problem}");
+                }
+            }
+        }
+
+        /// `agent-launch` :: "The recorded kind reaches `--kind` and outranks the installed
+        /// evidence." `WIRED`'s name list carries no `state::recorded_kind`, so a root that
+        /// never calls it satisfies every gate in `make check` — this scenario is the guard,
+        /// and it discriminates by a **disagreement between two outcomes**: a root that skipped
+        /// the call reaches `Choice::Ambiguous` and emits no `pane split` at all.
+        #[test]
+        fn the_recorded_kind_outranks_the_installed_evidence() {
+            let scratch = scratch_repo_with_2fa_support();
+            let root = scratch.path();
+            let canon_root = canonical(root);
+            let herdr_log = root.join("herdr.log");
+            let marker = root.join("marker");
+            let herdr = launch_herdr_script_with_status(
+                root,
+                &herdr_log,
+                &marker,
+                &canon_root,
+                &status_with_installed(&["claude", "codex"]),
+            );
+            let openspec_log = root.join("openspec.log");
+            let openspec_bin = openspec_script(root, &openspec_log, root);
+
+            // `gemini` is installed by nothing in this fixture, so the launch carries the
+            // absent-integration warning and still completes.
+            let state = ScratchDir::new();
+            write_with_mode(
+                &state.path().join("settings.toml"),
+                b"agent_kind = \"gemini\"\n",
+                0o644,
+            );
+            let settings_before =
+                std::fs::read(state.path().join("settings.toml")).expect("read settings.toml");
+
+            let config = Config {
+                openspec_bin: Some(openspec_bin),
+                agent_kind: None,
+                ..Config::default()
+            };
+
+            let stage0 = || true;
+            let stage1 = || log_lines(&herdr_log) >= 1;
+            let stage2 = || non_agent_list_lines(&herdr_log).len() >= 4;
+            let stages: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> = vec![
+                (&stage0, key('j')),
+                (&stage1, key('a')),
+                (&stage2, key('q')),
+            ];
+
+            let (result, _buf) =
+                run_wired_staged(120, root, &config, &herdr, Some(state.path()), stages);
+            let dashboard = result.expect("a recorded kind is a supported state");
+
+            let calls = non_agent_list_lines(&herdr_log);
+            assert_eq!(calls.len(), 4, "the launch completes: {calls:?}");
+            assert_eq!(
+                calls[2], "agent start c-2fa-support --kind gemini --pane wD:pJ",
+                "the recorded kind reaches --kind and outranks both installed integrations"
+            );
+            assert_eq!(
+                dashboard.launch.problems.len(),
+                1,
+                "{:?}",
+                dashboard.launch.problems
+            );
+            assert!(
+                dashboard.launch.problems[0].contains("gemini"),
+                "{:?}",
+                dashboard.launch.problems
+            );
+
+            // `plugin-state` :: "Nothing in this change writes `settings.toml`": the file the
+            // run read is byte-identical, and `agent-names.toml` is the only thing written.
+            assert_eq!(
+                std::fs::read(state.path().join("settings.toml")).expect("read it back"),
+                settings_before
+            );
+            let mut names: Vec<String> = std::fs::read_dir(state.path())
+                .expect("read the state directory")
+                .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
+                .collect();
+            names.sort();
+            assert_eq!(
+                names,
+                vec!["agent-names.toml".to_string(), "settings.toml".to_string()]
+            );
+        }
+
+        /// `agent-launch` :: "A per-kind prompt override reaches the logged `agent prompt`."
+        /// `WIRED`'s name list carries no `config.prompts` either, so a root that passes an
+        /// empty map satisfies every gate — this scenario is that thread's guard.
+        #[test]
+        fn a_per_kind_prompt_override_reaches_the_logged_agent_prompt() {
+            let scratch = scratch_repo_with_2fa_support();
+            let root = scratch.path();
+            let canon_root = canonical(root);
+            let herdr_log = root.join("herdr.log");
+            let marker = root.join("marker");
+            let herdr = launch_herdr_script(root, &herdr_log, &marker, &canon_root);
+            let openspec_log = root.join("openspec.log");
+            let openspec_bin = openspec_script(root, &openspec_log, root);
+            let state = ScratchDir::new();
+
+            let mut prompts = std::collections::BTreeMap::new();
+            prompts.insert(
+                "codex".to_string(),
+                [(
+                    "apply".to_string(),
+                    "work on {change} using {openspec}".to_string(),
+                )]
+                .into_iter()
+                .collect(),
+            );
+            let config = Config {
+                openspec_bin: Some(openspec_bin.clone()),
+                agent_kind: Some("codex".to_string()),
+                prompts,
+                ..Config::default()
+            };
+
+            let stage0 = || true;
+            let stage1 = || log_lines(&herdr_log) >= 1;
+            let stage2 = || non_agent_list_lines(&herdr_log).len() >= 4;
+            let stages: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> = vec![
+                (&stage0, key('j')),
+                (&stage1, key('a')),
+                (&stage2, key('q')),
+            ];
+
+            let (result, _buf) =
+                run_wired_staged(120, root, &config, &herdr, Some(state.path()), stages);
+            result.expect("a prompt override is a supported state");
+
+            let calls = non_agent_list_lines(&herdr_log);
+            assert_eq!(
+                calls[3],
+                format!(
+                    "agent prompt c-2fa-support work on 2fa-support using {}",
+                    openspec_bin.display()
+                ),
+                "the override travelled config::load -> Settings -> the worker -> prompt_text"
+            );
+            assert!(
+                !calls[3].contains("instructions apply"),
+                "and it is not the built-in Apply text: {:?}",
+                calls[3]
+            );
+        }
+
+        /// `integration-status` :: "Startup issues no status call." A pane whose reader never
+        /// presses a launch key costs no `integration status` call at all; the `a`-pressing
+        /// control is what makes the absence caused by the key never being pressed.
+        #[test]
+        fn startup_issues_no_status_call() {
+            for press_a in [false, true] {
+                let scratch = scratch_repo_with_2fa_support();
+                let root = scratch.path();
+                let canon_root = canonical(root);
+                let herdr_log = root.join("herdr.log");
+                let marker = root.join("marker");
+                let herdr = launch_herdr_script(root, &herdr_log, &marker, &canon_root);
+                let openspec_log = root.join("openspec.log");
+                let openspec_bin = openspec_script(root, &openspec_log, root);
+                let state = ScratchDir::new();
+                let config = Config {
+                    openspec_bin: Some(openspec_bin),
+                    agent_kind: Some("codex".to_string()),
+                    ..Config::default()
+                };
+
+                let stage0 = || true;
+                let stage1 = || log_lines(&herdr_log) >= 1;
+                let stage2 = || non_agent_list_lines(&herdr_log).len() >= 4;
+                let stages: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> = if press_a
+                {
+                    vec![
+                        (&stage0, key('j')),
+                        (&stage1, key('a')),
+                        (&stage2, key('q')),
+                    ]
+                } else {
+                    vec![(&stage1, key('q'))]
+                };
+
+                let (result, _buf) =
+                    run_wired_staged(120, root, &config, &herdr, Some(state.path()), stages);
+                result.expect("both runs are supported states");
+
+                let status_calls = non_agent_list_lines(&herdr_log)
+                    .iter()
+                    .filter(|l| *l == "integration status")
+                    .count();
+                assert_eq!(
+                    status_calls,
+                    usize::from(press_a),
+                    "press_a={press_a}: the status is read on the first launch key and never \
+                     at startup"
+                );
+            }
+        }
+
+        /// `agent-prompts` :: "File mode carries no path and builds no prompt", and
+        /// `agent-launch` :: "File mode leaves `a` refusing and `g` working in the shipped
+        /// root." Every probe step is unusable, against a **working** scratch `herdr`, so the
+        /// refusal is `decide`'s and not a consequence of an unreachable socket.
+        #[test]
+        fn file_mode_leaves_a_refusing_and_g_working_in_the_shipped_root() {
+            for width in [120u16, 60u16] {
+                let scratch = scratch_repo_with_2fa_support();
+                let root = scratch.path();
+                let canon_root = canonical(root);
+                let herdr_log = root.join("herdr.log");
+                let marker = root.join("marker");
+                let herdr = launch_herdr_script(root, &herdr_log, &marker, &canon_root);
+                let state = ScratchDir::new();
+                let state_before = snapshot(state.path());
+
+                // No configured path, and `no_env`/`no_npm_hook` leave the `PATH`, nvm and
+                // `npm prefix -g` steps with nothing to find.
+                let config = Config::default();
+
+                let stage0 = || true;
+                let stage1 = || log_lines(&herdr_log) >= 1;
+                let stages: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> = vec![
+                    (&stage0, key('j')),
+                    (&stage1, key('a')),
+                    (&stage1, key('q')),
+                ];
+
+                let (result, buf) =
+                    run_wired_staged(width, root, &config, &herdr, Some(state.path()), stages);
+                let dashboard = result.expect("file mode is a supported state");
+
+                assert!(dashboard.file_mode, "width {width}");
+                let calls = non_agent_list_lines(&herdr_log);
+                assert!(
+                    calls.is_empty(),
+                    "width {width}: the refusal happened in decide, so nothing reached the \
+                     worker: {calls:?}"
+                );
+                assert_eq!(
+                    dashboard.launch.problems.len(),
+                    1,
+                    "width {width}: {:?}",
+                    dashboard.launch.problems
+                );
+                assert!(
+                    dashboard.launch.problems[0].contains("openspec"),
+                    "width {width}: {:?}",
+                    dashboard.launch.problems
+                );
+
+                let footer = &buf[usize::from(19u16)];
+                assert!(
+                    footer.contains("g focus"),
+                    "width {width}: g needs no binary: {footer:?}"
+                );
+                assert!(
+                    !footer.contains("a/c/s launch"),
+                    "width {width}: {footer:?}"
+                );
+                assert_eq!(
+                    state_before,
+                    snapshot(state.path()),
+                    "width {width}: a refused launch writes nothing"
+                );
+            }
+        }
+
         /// `agent-launch`: "An unreachable socket leaves every key inert and the pane a
         /// working TUI." No scratch `herdr` program exists at all, so the poller is never
         /// reachable; `a` and `g` are pressed regardless and must produce no Herdr call and no

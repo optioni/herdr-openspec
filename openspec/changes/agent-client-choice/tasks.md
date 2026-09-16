@@ -284,23 +284,23 @@
 ## 9. The composition root
 <!-- kind: behavior -->
 
-- [ ] 9.1 RED: Write failing tests for: "File mode carries no path and builds no prompt", "With
+- [x] 9.1 RED: Write failing tests for: "File mode carries no path and builds no prompt", "With
   nothing configured, the sole installed integration is what launches", "File mode leaves `a`
   refusing and `g` working in the shipped root", "Startup issues no status call", "Nothing in
   this change writes `settings.toml`".
-- [ ] 9.2 RED: Write failing tests for the two `Settings` threads no gate can see — "The
+- [x] 9.2 RED: Write failing tests for the two `Settings` threads no gate can see — "The
   recorded kind reaches `--kind` and outranks the installed evidence" and "A per-kind prompt
   override reaches the logged `agent prompt`". `WIRED`'s name list carries neither
   `state::recorded_kind` nor `config.prompts`, so a root that skips both passes `make check`.
-- [ ] 9.3 GREEN: Populate `launch::Settings` in `start_collaborators` from `config.agent_kind`,
+- [x] 9.3 GREEN: Populate `launch::Settings` in `start_collaborators` from `config.agent_kind`,
   `state::recorded_kind`, `config.prompts`, `resolution.found.as_ref().map(|f| f.path)`, and
   the state directory, keeping `file_mode` and `openspec_bin.is_none()` the same fact. Keep the
   literal text `config.agent_kind` in that production slice — `WIRED` leg 6 is a bare substring
   grep, so a destructure that drops those words fails it.
-- [ ] 9.4 CHECK: Re-inspect every consumer named in design.md → Contracts and confirm each call
+- [x] 9.4 CHECK: Re-inspect every consumer named in design.md → Contracts and confirm each call
   site moved. Run `/bin/sh scripts/gates/wired.sh` and confirm leg 6 still finds
   `config.agent_kind` in `src/ui/mod.rs`'s production slice.
-- [ ] 9.5 Run the group tests — `cargo test --lib ui::tests::` — green, selecting more than the
+- [x] 9.5 Run the group tests — `cargo test --lib ui::tests::` — green, selecting more than the
   **62** baseline; state that no refactor was needed if none was.
 
 ## 10. Acceptance Test — Outer Loop GREEN
