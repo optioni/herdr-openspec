@@ -74,50 +74,53 @@
 ## 1. `integration::parse`, and the module's own doc-conformance
 <!-- kind: behavior -->
 
-- [ ] 1.1 Record the measured status corpus as an `include_str!` fixture under
+- [x] 1.1 Record the measured status corpus as an `include_str!` fixture under
   `tests/fixtures/`, byte-for-byte as `herdr integration status` printed it on the reference
   machine (17 lines; `claude` `current (v9)`, `codex` `current (v8)`, fifteen `not installed`).
-- [ ] 1.2 RED: Write failing tests for: "The measured 17-line status parses whole", "A version
+- [x] 1.2 RED: Write failing tests for: "The measured 17-line status parses whole", "A version
   in the status does not become the status", "A parenthesised version on an absent integration
   discriminates the split", "An unrecognised status is treated as installed", "A malformed line
   is skipped and the rest survive", "Empty and blank input yield nothing and report nothing".
   CHECK run at HEAD: `cargo test --lib integration::` → exit 0, **0 selected, 1491 filtered
   out**. Zero selected is a failed check, and it is the RED state: the module does not exist.
-- [ ] 1.3 GREEN: Add `src/integration.rs` with `Integration { kind, status, installed }` and
+- [x] 1.3 GREEN: Add `src/integration.rs` with `Integration { kind, status, installed }` and
   `parse`, splitting each line at the **first** `: ` and the **last** ` (`, and declare
   `pub mod integration;` in `src/lib.rs`. `status` is a field, not an inference — per
   design.md → Decisions 14 it is what makes the split rule falsifiable at all.
-- [ ] 1.4 CHANGE: Add `integration` to `SPEC.md`'s Module map and to its `### Unit-tested
+- [x] 1.4 CHANGE: Add `integration` to `SPEC.md`'s Module map and to its `### Unit-tested
   modules` section, **in this group**, so `make check` is green at its end rather than red for
   nine groups.
   CHECK run at HEAD with the module planted: `cargo test --test doc_contract` → **FAILED, 105
   passed, 2 failed, 107 selected** — `module_map_matches_lib_rs` ("in src/lib.rs's pub mod set
   but not SPEC.md's Module map: [\"integration\"]") and `tested_modules_names_every_module`.
   Plant reverted; `grep -c '^pub mod ' src/lib.rs` → **14** again.
-- [ ] 1.5 REFACTOR: Clean up while tests stay green, or state that no refactor was needed.
-- [ ] 1.6 Run the group tests — `cargo test --lib integration::parse` and
+- [x] 1.5 REFACTOR: Clean up while tests stay green, or state that no refactor was needed.
+- [x] 1.6 Run the group tests — `cargo test --lib integration::parse` and
   `cargo test --test doc_contract` — both green; the first must select more than **0** and the
-  second more than **107**.
+  second **exactly 107**, unchanged: this group adds no doc-contract claim, it only repairs
+  the two that 1.4's plant showed failing. (Corrected during apply: the drafted "more than
+  107" could not hold for a group that writes no new claim — group 11 is where that count
+  moves, to 109.)
 
 ## 2. `integration::resolve`
 <!-- kind: behavior -->
 
-- [ ] 2.1 RED: Write failing tests for: "A configured kind beats every other source", "A
+- [x] 2.1 RED: Write failing tests for: "A configured kind beats every other source", "A
   recorded choice beats the evidence but not the configuration", "A sole installed integration
   is used without asking", "Two installed integrations are refused, not guessed between",
   "Nothing installed and nothing configured reaches `claude` and says so", "A blank configured
   or recorded value is not a value", `integration-status` :: "Every combination is total".
-- [ ] 2.2 RED: Write failing tests for: "A configured kind with no integration warns and still
+- [x] 2.2 RED: Write failing tests for: "A configured kind with no integration warns and still
   resolves", "A kind Herdr never listed is warned about on the same terms", "A sole integration
   and a last resort carry no absence warning".
-- [ ] 2.3 GREEN: Implement `Source`, `Choice`, `Resolved`, and `resolve` with the five-step
+- [x] 2.3 GREEN: Implement `Source`, `Choice`, `Resolved`, and `resolve` with the five-step
   precedence, reusing `config::non_blank`'s blank rule rather than restating it.
-- [ ] 2.4 GREEN: Add the `claude` last-resort literal to `src/integration.rs` as a named
+- [x] 2.4 GREEN: Add the `claude` last-resort literal to `src/integration.rs` as a named
   constant. Do **not** touch `src/config.rs` here — three green tests at `src/config.rs:352`,
   `:375` and `:413` still assert the `"claude"` default and are rewritten in group 3, where the
   type changes with them.
-- [ ] 2.5 REFACTOR: Clean up while tests stay green, or state that no refactor was needed.
-- [ ] 2.6 Run the group tests — `cargo test --lib integration::` — green, selecting more than
+- [x] 2.5 REFACTOR: Clean up while tests stay green, or state that no refactor was needed.
+- [x] 2.6 Run the group tests — `cargo test --lib integration::` — green, selecting more than
   group 1 left behind and far more than the **0** baseline.
 
 ## 3. `config`: `agent_kind` becomes an override, `[prompts]` arrives

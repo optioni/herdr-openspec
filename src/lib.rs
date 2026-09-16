@@ -10,6 +10,7 @@ pub mod agents;
 pub mod changes;
 pub mod cli;
 pub mod config;
+pub mod integration;
 pub mod launch;
 pub mod open;
 pub mod refresh;

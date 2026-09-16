@@ -243,10 +243,10 @@ its own problem, so this warning SHALL be reported for the first two sources onl
 
 #### Scenario: A configured kind with no integration warns and still resolves
 
-- **WHEN** `resolve` is called with `configured` `Some("gemini")` against the seventeen
-  measured integrations, in which `gemini` reads `not installed`
-- **THEN** it returns `Use { kind: "gemini", source: Configured }`
-- **AND** `problems` holds exactly one entry naming `gemini` and the word `unknown`
+- **WHEN** `resolve` is called with `configured` `Some("cursor")` against the seventeen
+  measured integrations, in which `cursor` reads `not installed`
+- **THEN** it returns `Use { kind: "cursor", source: Configured }`
+- **AND** `problems` holds exactly one entry naming `cursor` and the word `unknown`
 - **AND** the same call with `configured` `Some("codex")`, which **is** installed, returns
   the same shape with an **empty** `problems`, so the warning is caused by the absence and
   by nothing else

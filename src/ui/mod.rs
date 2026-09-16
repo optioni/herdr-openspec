@@ -3203,12 +3203,8 @@ esac
         fn the_scratch_herdr_program_answers_integration_status() {
             let scratch = ScratchDir::new();
             let root = scratch.path();
-            let program = launch_herdr_script(
-                root,
-                &root.join("herdr.log"),
-                &root.join("marker"),
-                root,
-            );
+            let program =
+                launch_herdr_script(root, &root.join("herdr.log"), &root.join("marker"), root);
             let body = std::fs::read_to_string(&program).expect("read the scratch program back");
             assert!(
                 body.contains("\"integration status\")"),
