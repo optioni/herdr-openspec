@@ -34,6 +34,14 @@ yields 104 distinct triples of which 18 are non-`Ignore`; the stale row that cha
 deleted claims one of them, so under the bare-name form it is **not** vacuous and the check
 passes. The payload discriminant is what makes the vacuity direction able to fire at all.
 
+**Where the zone comes from.** `mouse_action` returns an `Action` and never surfaces the
+`Zone` it resolved, so the sweep SHALL recover it by calling `ui::layout::zone` on the same
+arguments. That recomputation SHALL mirror `mouse_action`'s own precedence: a point outside the
+frame SHALL be `Zone::Outside`, and while the overlay is open the zone SHALL NOT be consulted
+at all, because `mouse_action` returns before reaching it. A recomputation that disagrees with
+that precedence would attribute real behaviour to the wrong zone and is the one way this axis
+can be silently wrong.
+
 **The dashboard-fixture axis.** `mouse_action` is a total function of a `Dashboard`, a `Rect`
 and a `MouseEvent` — the `Dashboard` included. Its `Drag(MouseButton::Left)` arm returns
 `Action::Select` from `Zone::ListRow`, `DetailTab`, `List`, `Detail` and `Outside` when
@@ -183,6 +191,15 @@ one, so the three sites pinned to that count do not move.
   open-overlay claims are left uncovered
 - **AND** both failures are reported — the row as vacuous and the overlay claims as
   undocumented — rather than one masking the other
+
+#### Scenario: An empty catch-all fails rather than passing silently
+
+- **WHEN** the comparator is called with a hand-built claim set containing no `Ignore` claim
+  at all, against the real row set
+- **THEN** the check fails naming the catch-all row as covering nothing
+- **AND** this control is driven with a synthetic claim set rather than the real tree, where
+  the great majority of claims are `Ignore` and the rule could never fire — an assertion that
+  cannot go red is not a guard
 
 #### Scenario: A third row joining a known collision fails
 

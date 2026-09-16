@@ -89,7 +89,8 @@ unchanged, so nothing is **BREAKING**.
 | Dependency | In acceptance test | In unit tests |
 |---|---|---|
 | Filesystem (`SPEC.md`, `src/ui/driver.rs`) | real — `read_doc` of the checked-in files | replaced — synthetic `&str` documents passed to the extractors |
-| `ui::driver::mouse_action` | real — executed at every cell of three frames, over every fixture and overlay state | real for the agree-at-HEAD and clamp rows; replaced by a hand-built claim set for the planted-defect rows |
+| `ui::driver::mouse_action` | real — executed at every cell of three frames × two overlay states × every fixture | real for the agree-at-HEAD and clamp rows; replaced by a hand-built claim set for the planted-defect rows |
+| `ui::layout::zone` | real — called by the sweep itself to recover the zone `mouse_action` never returns (Decision 11) | real — pure, total, no I/O |
 | `Dashboard` fixtures | real values, explicitly listed and pinned by count | real values; planted rows use hand-built claims instead |
 | `ui::help::INVENTORY` | real — a `'static` constant | real |
 | Terminal | not touched — `mouse_action` renders nothing and enters no mode; no `TestBackend` and no `TerminalOps` double | not touched |
@@ -123,6 +124,7 @@ tree — the agree-at-HEAD rows below. There is no user journey beneath it to dr
 | dc: Zone-less rows are rejected, and a second catch-all is an error | Row extractor on a zone-less `SelectTab` row, then on a table with two zone-less `Ignore`-only rows; asserts `Err` both times, naming both rows in the second | contract | synthetic document | same |
 | dc: A gutted table fails as a broken control | Row extractor on a header-plus-separator table and on one with the header deleted; asserts `Err` both times | contract | synthetic document | same |
 | dc: The overlay axis keeps the two passes apart | Comparator with the dismissing-click row marked overlay-closed; asserts both a vacuous-row error and uncovered overlay claims | contract | real sweep, synthetic rows | same |
+| dc: An empty catch-all fails rather than passing silently | Comparator called with a hand-built claim set holding no `Ignore` claim; asserts the empty-catch-all error. Cannot fire against the real tree, where ~70 of 104 claims are `Ignore` | contract | synthetic claims, real rows | same |
 | dc: A third row joining a known collision fails | Comparator with a third row claiming `Click(Change)` at `ListRow`; asserts `Err` naming the pinned count | contract | real sweep, synthetic rows | same |
 | dc: A binding added to the driver and not to the docs fails `make check` | Unchanged existing test | contract | real `action_for`, real `INVENTORY` | same |
 | dc: The documented key set and the inventory agree at HEAD | Unchanged existing test | contract | real filesystem, real `INVENTORY` | same |
@@ -152,7 +154,11 @@ it: `action_name` maps every `Click(_)` to `"Click"`, and under that collapse th
 click rows share one claim, as do the artifact-section-header click and the content-row press.
 The outcome is therefore `Click(Change)`, `Click(Section)`, `Click(DetailHeader)`,
 `Select(Begin)`, `Select(Extend)`, `SelectTab`, `Ignore` — the `Action` variant plus its
-payload's constructor, with the geometry inside (`line`, `column`, `Rect`) dropped. It is a
+payload's constructor, with the geometry inside (`line`, `column`, `Rect`) dropped. Three
+`Zone` variants carry payloads — `ListRow { interior, row }`, `DetailTab { bar, column }` and
+`DetailRow { content, row }` — and none of that geometry survives into a claim, which is why a
+row like "the click on a tab cell, for that cell's **own position**" is checked as far as
+`SelectTab` at `Zone::DetailTab` and no further. It is a
 **projection of the value the function already returned**, not a second computation that could
 disagree with it, and it is the vocabulary the rows already use in prose. Keying on the row
 kind `row_at`/`detail_cell` resolved would work equally but re-derives inside the test
@@ -216,6 +222,21 @@ the row already selected both produce `Click(Change)`, because "a second click o
 detail" is decided in `Dashboard::apply`, not in `mouse_action`. The vacuity direction cannot
 tell them apart. Rather than weaken the assertion, the pair is listed in the check's source and
 the list's length asserted, so a third row joining the collision fails.
+
+**Decision 11 — The sweep recomputes the zone, and must mirror `mouse_action`'s precedence.**
+`mouse_action` returns an `Action` and never surfaces the `Zone` it resolved
+(`src/ui/driver.rs:315`), so the claim's zone can only come from the sweep calling
+`ui::layout::zone(area, route, column, row)` itself. That is a **second, parallel** computation
+merely correlated with the one `mouse_action` used, and it is sound only if it reproduces the
+same precedence: the `help.open` short-circuit that returns **before** `zone` is consulted, and
+`Zone::Outside` for a point outside `area`. Review had to write exactly this code to produce
+its dumps, so it is the first thing an implementer meets and no earlier draft said it. The
+recomputation is acceptable because `zone` is pure and total and is the same function
+`mouse_action` calls on the same arguments; the risk is not disagreement but **drift in
+precedence**, which is why the two precedence rules are stated normatively rather than left to
+be rediscovered. Alternative considered: have `mouse_action` return the zone. Rejected — it
+changes production code for a test's convenience, and this change touches no file under
+`src/`.
 
 ## Risks / Trade-offs
 

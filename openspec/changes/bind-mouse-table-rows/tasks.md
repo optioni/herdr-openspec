@@ -1,6 +1,6 @@
 <!-- Groups are sequential and none carries a `parallel-after` marker. Groups 1, 2, 3 and 5
      all edit `tests/doc_contract.rs`. Group 4 edits `SPEC.md` — a different file, but its
-     gate is not attributable either: tasks 1.5, 2.4, 3.6 and 5.7 each run
+     gate is not attributable either: tasks 1.4, 2.5, 3.6 and 5.9 each run
      `cargo test --test doc_contract`, which reads the very `SPEC.md` a concurrent group-4
      implementer would be mid-edit of, so one group would fail over another's half-written
      table. That is the schema's third criterion, not a cost judgment. -->
@@ -62,13 +62,17 @@ grep -c "fn mouse_table_claims\|fn compare_mouse_claims" tests/doc_contract.rs; 
 <!-- kind: behavior -->
 
 - [ ] 1.1 RED: Write failing tests for `the_sweep_records_all_four_claim_axes` and
-      `the_overlay_state_is_its_own_axis`, asserting the sweep yields claims carrying kind,
-      overlay state, zone variant name, and outcome. They fail to compile at HEAD because no
-      claim-returning function exists.
+      `the_overlay_state_is_its_own_axis`. Assert concretely, so a zone/action mix-up fails:
+      `(ScrollDown, ListRow, SelectNext)` present, `(Down(Left), DetailTab, SelectTab)`
+      present, and `(ScrollDown, ListRow, ScrollDown)` **absent** — a test that only asserts
+      the return type is satisfied by the compiler and cannot go red.
 - [ ] 1.2 GREEN: Add `sweep_mouse_claims(fixture, help_open) -> BTreeSet<Claim>`, with the
       outcome carrying the `Action` variant **plus its payload's constructor name** and the
-      zone carrying its variant name only (per design.md → Decision 2). Cache per
-      `(fixture, overlay)` on `swept_mouse_action_names`' existing `OnceLock` terms.
+      zone carrying its variant name only (per design.md → Decision 2). The zone is recovered
+      by calling `ui::layout::zone` — `mouse_action` never returns it — and must mirror its
+      precedence: `Zone::Outside` outside the frame, and no zone consulted at all while the
+      overlay is open (per design.md → Decision 11). Cache per `(fixture, overlay)` on
+      `swept_mouse_action_names`' existing `OnceLock` terms.
 - [ ] 1.3 REFACTOR: Re-express `swept_mouse_action_names` as a projection of the claim set so
       the two cannot disagree, keeping its signature and `BTreeSet<String>` return. Verify:
       `swept_action_names`, `select_is_the_only_mouse_only_action_by_name_and_count`, and
@@ -86,10 +90,13 @@ grep -c "fn mouse_table_claims\|fn compare_mouse_claims" tests/doc_contract.rs; 
 - [ ] 2.2 GREEN: Give the sweep an explicitly listed fixture set — at minimum selection-absent
       and selection-present — and assert its length in the check's own source, on the terms
       `EXEMPT_ACTIONS` is pinned at two (per design.md → Decision 9).
-- [ ] 2.3 VERIFY: Measure the resulting `cargo test --test doc_contract` wall time and record
+- [ ] 2.3 CHECK: Enumerate the claims the new fixture adds and record them in the commit
+      message. They are claims the table must then cover, so group 4 writes rows against this
+      list rather than against the pre-fixture set.
+- [ ] 2.4 VERIFY: Measure the resulting `cargo test --test doc_contract` wall time and record
       it in the commit message. If it exceeds roughly three minutes, apply design.md → Risks'
       stated lever (the second fixture on the wide frame only) and record the measurement.
-- [ ] 2.4 Run `cargo test --test doc_contract` — green, no regressions.
+- [ ] 2.5 Run `cargo test --test doc_contract` — green, no regressions.
 
 ## 3. Row extraction: zones, payload tokens, and a closed gesture vocabulary
 <!-- kind: behavior -->
@@ -124,6 +131,12 @@ grep -c "fn mouse_table_claims\|fn compare_mouse_claims" tests/doc_contract.rs; 
       and drag rows name their single zone and their `Target::`/`SelectPhase::` constructor; the
       help-overlay row names the overlay-open state rather than a `Zone`; the catch-all stays
       zone-less.
+      The zone sets are measured, not inferred — planning review computed them from the sweep:
+      `ScrollDown`/`SelectNext` and `ScrollUp`/`SelectPrev` → `List`, `ListRow`;
+      `ScrollDown`/`ScrollDown` and `ScrollUp`/`ScrollUp` → `Detail`, `DetailTab`, `DetailRow`;
+      `Click(Change)` and `Click(Section)` → `ListRow`; `SelectTab` → `DetailTab`;
+      `Click(DetailHeader)`, `Select(Begin)` and `Select(Extend)` → `DetailRow`.
+      Thirteen distinct (gesture, outcome) pairs over nineteen active claims.
 - [ ] 4.3 CHANGE: Add a row for the wheel over an open help overlay — `Action::ScrollDown` and
       `Action::ScrollUp` from anywhere in the frame (`src/ui/driver.rs:340-341`), today
       documented only in the paragraph after the table. This is the new check finding a binding
@@ -147,19 +160,22 @@ grep -c "fn mouse_table_claims\|fn compare_mouse_claims" tests/doc_contract.rs; 
       **both** when both occur rather than returning at the first.
 - [ ] 5.3 GREEN: Make a vacuous-row report name the claims actually observed at that row's own
       zones, so the reader is told what the row should have said.
-- [ ] 5.4 GREEN: Give the catch-all the remainder of the `Ignore` claims, require it to claim at
+- [ ] 5.4 RED: Write `an_empty_catch_all_fails` — the comparator called with a hand-built claim
+      set holding no `Ignore` claim. It must be driven synthetically: at HEAD roughly 86 of the
+      104 claims are `Ignore`, so this rule can never fire against the real tree.
+- [ ] 5.5 GREEN: Give the catch-all the remainder of the `Ignore` claims, require it to claim at
       least one, and add the known-collision list pinned by count (per design.md → Decision 10).
-- [ ] 5.5 GREEN: Wire the comparator into `mouse_bindings_match_spec_md` as legs 2 and 3,
+- [ ] 5.6 GREEN: Wire the comparator into `mouse_bindings_match_spec_md` as legs 2 and 3,
       keeping the name-set equality as leg 1. Verify `CLAIM_COUNT` is still 13 and
       `documented_claim_count_matches_the_file` passes untouched.
-- [ ] 5.6 REFACTOR: Now that `SPEC.md` carries the tokens, fold `documented_mouse_actions` into
+- [ ] 5.7 REFACTOR: Now that `SPEC.md` carries the tokens, fold `documented_mouse_actions` into
       a projection of `documented_mouse_rows` so one parse serves both — or state why the
       lenient parse must survive for `documented_mouse_actions_fails_on_a_missing_table`.
-- [ ] 5.7 VERIFY: Re-run the planting script from **Planning-time evidence**, with the planted
+- [ ] 5.8 VERIFY: Re-run the planting script from **Planning-time evidence**, with the planted
       row carrying `` `Zone::DetailRow` `` and `` `Target::DetailLine` `` and **replacing** the
       real content-row row rather than sitting beside it. It must report `PLANTED_EXIT=101`
       with a message naming **vacuity**, not a missing zone; and `CLEAN_EXIT=0`.
-- [ ] 5.8 Run `cargo test --test doc_contract` — green, no regressions.
+- [ ] 5.9 Run `cargo test --test doc_contract` — green, no regressions.
 
 ## 6. Change Review
 <!-- kind: operational -->
