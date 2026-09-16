@@ -17,9 +17,9 @@
 
 <!-- kind: behavior -->
 
-- [ ] 2.1 RED: Write failing tests for `a_numbered_item_reports_its_numbers_width`, `an_unnumbered_item_reports_zero`, and `a_malformed_number_is_not_a_number`, plus `the_exposed_skip_agrees_with_the_one_label_of_performs` in `tests/task_corpus.rs` over every archived item text. Each must fail because the function does not exist.
-- [ ] 2.2 GREEN: Expose `pub fn task_number_len(text: &str) -> usize` over the existing `skip_task_number`, and make `label_of` read the same helper rather than a second copy — `specs::clause_of` calling `tasks::role_of` is the shape to match. Confirm `label_of`'s own 97-test module stays green unmodified.
-- [ ] 2.3 VERIFY: `cargo test --lib tasks::` and `cargo test --test task_corpus` — green, the corpus test reporting a non-zero count of labelled items compared (expect ~2,500; a zero comparison is a failed check).
+- [x] 2.1 RED: Write failing tests for `a_numbered_item_reports_its_numbers_width`, `an_unnumbered_item_reports_zero`, and `a_malformed_number_is_not_a_number`, plus `the_exposed_skip_agrees_with_the_one_label_of_performs` in `tests/task_corpus.rs` over every archived item text. Each must fail because the function does not exist.
+- [x] 2.2 GREEN: Expose `pub fn task_number_len(text: &str) -> usize` over the existing `skip_task_number`, and make `label_of` read the same helper rather than a second copy — `specs::clause_of` calling `tasks::role_of` is the shape to match. Confirm `label_of`'s own 97-test module stays green unmodified.
+- [x] 2.3 VERIFY: `cargo test --lib tasks::` and `cargo test --test task_corpus` — green, the corpus test reporting a non-zero count of labelled items compared (expect ~2,500; a zero comparison is a failed check).
 
 ## 3. `ui::markdown::inline`
 
