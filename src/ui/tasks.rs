@@ -2482,6 +2482,37 @@ mod tests {
         }
     }
 
+    /// `task-item-bodies` -> design.md -> Decision 1a and tasks.md 5.3a: a
+    /// prose-only document parses to a leading group carrying a block and
+    /// no items, so `progress().total == 0` still short-circuits to `No
+    /// tasks yet`, but the retained prose is drawn beneath that row rather
+    /// than discarded — the whole point of retention is that a line, once
+    /// kept by `parse`, is not then dropped by a renderer.
+    #[test]
+    fn a_prose_only_document_draws_its_blocks_beneath_no_tasks_yet() {
+        let source = "Nothing checkable here.\n";
+        let progress = Progress {
+            completed: 0,
+            total: 0,
+        };
+        for width in [78, 58] {
+            let out = lines(source, &progress, width);
+            let texts: Vec<String> = out.iter().map(|l| l.text()).collect();
+            let no_tasks_idx = texts
+                .iter()
+                .position(|t| t.trim_end() == "No tasks yet")
+                .unwrap_or_else(|| panic!("width {width}: no `No tasks yet` row in {texts:?}"));
+            let block_idx = texts
+                .iter()
+                .position(|t| t == "Nothing checkable here.")
+                .unwrap_or_else(|| panic!("width {width}: block not drawn: {texts:?}"));
+            assert!(
+                no_tasks_idx < block_idx,
+                "width {width}: the block must draw beneath the row: {texts:?}"
+            );
+        }
+    }
+
     /// Found in Change Review: `heading_line` took no `width` and emitted
     /// a heading verbatim, so a heading longer than the interior
     /// overwrote the detail region's border — the buffer-level control
