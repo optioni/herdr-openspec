@@ -4889,49 +4889,124 @@ mod tests {
     }
 
     /// `artifact-content` :: "A body row is never indented by its section's depth".
+    ///
+    /// Narrowed to the 60-column frame, where it stays true: the fixture's
+    /// deepest body-bearing section is depth 3, so its floor is
+    /// `64 + 2 * 3 = 70` and the 58-column interior is below it. The
+    /// 78-column case is the sibling scenario below, and the two together
+    /// are what make the floor observable from this capability.
     #[test]
     fn a_body_row_is_never_indented_by_its_sections_depth() {
         let every = std::collections::BTreeSet::from([0, 1, 2, 3, 4, 5, 6]);
-        for width in [120, 60] {
-            let interior = interior_width(width);
-            let d = seven_section_dashboard(every.clone(), 0);
-            let buf = render_at(width, 40, &d);
-            let rows = drawn_content_rows(&buf, interior);
+        let width = 60;
+        let interior = interior_width(width);
+        let d = seven_section_dashboard(every, 0);
+        let buf = render_at(width, 40, &d);
+        let rows = drawn_content_rows(&buf, interior);
 
-            // `Requirement: Alpha` is a depth-2 section: its header begins with
-            // exactly four spaces and then the open glyph.
-            let alpha = rows
-                .iter()
-                .position(|r| r.contains("Requirement: Alpha"))
-                .expect("Alpha's header is drawn");
-            let open = crate::ui::list::fold_glyph(false);
+        // `Requirement: Alpha` is a depth-2 section: its header begins with
+        // exactly four spaces and then the open glyph.
+        let alpha = rows
+            .iter()
+            .position(|r| r.contains("Requirement: Alpha"))
+            .expect("Alpha's header is drawn");
+        let open = crate::ui::list::fold_glyph(false);
+        assert_eq!(
+            rows[alpha],
+            expected_header_at("Requirement: Alpha", false, 2, None, interior),
+            "width {width}: the depth-2 header"
+        );
+        assert!(
+            rows[alpha].starts_with(&format!("    {open} ")),
+            "width {width}: {:?} does not open with exactly four spaces",
+            rows[alpha]
+        );
+
+        // Its body begins at column zero of the content area, with no leading
+        // space the source did not carry, and is wrapped at the full 58
+        // columns — the narrow interior's text column is exactly what it was
+        // before `artifact-folds` gained its indent floor.
+        assert_eq!(
+            rows[alpha + 1],
+            crate::ui::list::pad_or_truncate_right("Alpha text.", interior as usize),
+            "width {width}: a body row carries no depth indent"
+        );
+
+        // Every drawn row measures exactly the content area's width.
+        for (i, row) in rows.iter().enumerate() {
             assert_eq!(
-                rows[alpha],
-                expected_header_at("Requirement: Alpha", false, 2, None, interior),
-                "width {width}: the depth-2 header"
+                columns(row),
+                interior as usize,
+                "width {width}: row {i} ({row:?}) is not the content width"
             );
-            assert!(
-                rows[alpha].starts_with(&format!("    {open} ")),
-                "width {width}: {:?} does not open with exactly four spaces",
-                rows[alpha]
-            );
+        }
+    }
 
-            // Its body begins at column zero of the content area, with no leading
-            // space the source did not carry.
-            assert_eq!(
-                rows[alpha + 1],
-                crate::ui::list::pad_or_truncate_right("Alpha text.", interior as usize),
-                "width {width}: a body row carries no depth indent"
-            );
+    /// `artifact-content` :: "A body row is indented by its section's depth
+    /// once the floor is met".
+    ///
+    /// The same fixture at the 120-column frame, whose 78-column interior
+    /// clears the same floor of 70. That the body is *wrapped* at the
+    /// reduced width rather than prefixed at the full one is asserted here
+    /// as an equality against `ui::markdown::lines` at that width; the
+    /// discriminating proof, over a body long enough to wrap, is
+    /// `ui::detail`'s own wide-interior test.
+    #[test]
+    fn a_body_row_is_indented_by_its_sections_depth_once_the_floor_is_met() {
+        let every = std::collections::BTreeSet::from([0, 1, 2, 3, 4, 5, 6]);
+        let width = 120;
+        let interior = interior_width(width);
+        let d = seven_section_dashboard(every, 0);
+        let buf = render_at(width, 40, &d);
+        let rows = drawn_content_rows(&buf, interior);
 
-            // Every drawn row measures exactly the content area's width.
-            for (i, row) in rows.iter().enumerate() {
-                assert_eq!(
-                    columns(row),
+        let alpha = rows
+            .iter()
+            .position(|r| r.contains("Requirement: Alpha"))
+            .expect("Alpha's header is drawn");
+        let open = crate::ui::list::fold_glyph(false);
+
+        // The header's own indent is unchanged by this rule.
+        assert_eq!(
+            rows[alpha],
+            expected_header_at("Requirement: Alpha", false, 2, None, interior),
+            "width {width}: the depth-2 header"
+        );
+        assert!(
+            rows[alpha].starts_with(&format!("    {open} ")),
+            "width {width}: {:?} does not open with exactly four spaces",
+            rows[alpha]
+        );
+
+        // Its body sits flush beneath it: four columns of indent, and the
+        // text wrapped at `78 - 4`.
+        let body: Vec<String> = crate::ui::markdown::lines("Alpha text.\n\n", interior - 4)
+            .iter()
+            .map(|l| {
+                crate::ui::list::pad_or_truncate_right(
+                    &format!("    {}", l.text()),
                     interior as usize,
-                    "width {width}: row {i} ({row:?}) is not the content width"
-                );
-            }
+                )
+            })
+            .collect();
+        assert_eq!(body.len(), 1, "the fixture's body is one row");
+        assert_eq!(
+            rows[alpha + 1],
+            body[0],
+            "width {width}: the body is not flush beneath its own header"
+        );
+        assert!(
+            rows[alpha + 1].starts_with("    Alpha text."),
+            "width {width}: {:?} does not open with exactly four spaces",
+            rows[alpha + 1]
+        );
+
+        for (i, row) in rows.iter().enumerate() {
+            assert_eq!(
+                columns(row),
+                interior as usize,
+                "width {width}: row {i} ({row:?}) is not the content width"
+            );
         }
     }
 

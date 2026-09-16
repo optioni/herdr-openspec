@@ -471,6 +471,64 @@ fn separator_row(width: u16) -> ContentRow {
     }
 }
 
+/// The display columns of interior a body row keeps when the deepest body on
+/// the tab is indented. A measured trade, not a derivation: the archive's
+/// deepest spec section is depth 3, costing six columns, which leaves 72 at
+/// the 78-column wide interior and 52 at the 58-column narrow one, and 64 is
+/// placed between the two — so the wide layout gains the alignment and the
+/// narrow layout keeps the text column the previous rule protected
+/// (specs/artifact-folds -> "A section header row names the file and shows
+/// its fold state"; design.md -> Decision 3 carries the derivation table).
+const BODY_INDENT_FLOOR: u16 = 64;
+
+/// The columns a body at `depth` is indented by: two per unit of depth, the
+/// same unit `unbadged_row` gives a header row, written once here so the
+/// header's indent and the body's cannot drift apart.
+fn indent_columns(depth: usize) -> u16 {
+    u16::try_from(2 * depth).unwrap_or(u16::MAX)
+}
+
+/// Whether this `content_lines` call indents body rows at all — one decision
+/// per render rather than one per section, so a tab's left edge is either
+/// consistently aligned or consistently flush and never a mixture.
+///
+/// `max_depth` is the greatest `depth` among the sections whose own `text` is
+/// non-empty, read from `detail.sections` and never from the visible or
+/// expanded set: a tab's text column must not widen as a deep section is
+/// collapsed and narrow again as it is opened, which would make `Space`
+/// reflow the prose of every sibling that stayed open.
+///
+/// The subtraction saturates because `width` is a `u16` and this capability's
+/// width sweeps run from `0`, reaching every width below `2 * max_depth`; an
+/// unguarded `-` panics there in the debug build `cargo test` uses. It is
+/// also what makes the *other* subtraction safe — an indented body's own
+/// `width - indent_columns(depth)` is at least `BODY_INDENT_FLOOR` and
+/// therefore never zero.
+fn bodies_are_indented(sections: &[crate::ui::app::ArtifactSection], width: u16) -> bool {
+    let max_depth = sections
+        .iter()
+        .filter(|s| !s.text.is_empty())
+        .map(|s| s.depth)
+        .max()
+        .unwrap_or(0);
+    width.saturating_sub(indent_columns(max_depth)) >= BODY_INDENT_FLOOR
+}
+
+/// `line` with `indent` spaces prepended as a plain-faced segment of its own,
+/// or `line` itself when the indent is empty — so a tab drawn at column zero
+/// produces exactly the segments it produced before this rule existed.
+fn indented_line(indent: &str, line: crate::ui::markdown::Line) -> crate::ui::markdown::Line {
+    if indent.is_empty() {
+        return line;
+    }
+    let mut segments = vec![crate::ui::markdown::Segment {
+        text: indent.to_string(),
+        face: crate::ui::markdown::Face::plain(),
+    }];
+    segments.extend(line.segments);
+    crate::ui::markdown::Line { segments }
+}
+
 /// The indices of `sections` that are **visible**, in order: walking the list
 /// once, a **collapsed labelled** section at depth `d` hides every following
 /// section of depth strictly greater than `d` — header and body alike — until
@@ -655,6 +713,10 @@ pub fn content_lines(
         // exactly when it is open, and a blank separator row after a
         // non-empty open body that a further visible section follows.
         let visible = visible_sections(&detail.sections, &detail.expanded);
+        // `artifact-folds`: one indent decision for the whole call, taken
+        // before the walk from the content width and the tab's own deepest
+        // body-bearing section.
+        let indented = bodies_are_indented(&detail.sections, width);
         for (position, &index) in visible.iter().enumerate() {
             let section = &detail.sections[index];
             // A `None`-labelled preamble is always open and owns no
@@ -683,6 +745,21 @@ pub fn content_lines(
                 // an unfolded one cannot disagree about an item line
                 // (design.md -> D9). Its own heading is already its header
                 // row above.
+                //
+                // The body is *wrapped* at `width - indent_cols` and then
+                // indented, never wrapped at `width` and prefixed: prefixing
+                // would push every long line past an interior the region does
+                // not clip. Both grammars take the reduced width; the
+                // progress bar above every header and the blank separator
+                // below this body do not — neither is a section's body, and
+                // the separator is already exactly `width` blank columns.
+                let indent_cols = if indented {
+                    indent_columns(section.depth)
+                } else {
+                    0
+                };
+                let indent = " ".repeat(indent_cols as usize);
+                let body_width = width.saturating_sub(indent_cols);
                 let body = match tracked_tasks_progress {
                     Some(_) => crate::ui::tasks::items(
                         &crate::tasks::parse(&section.text)
@@ -690,12 +767,15 @@ pub fn content_lines(
                             .into_iter()
                             .flat_map(|g| g.items)
                             .collect::<Vec<_>>(),
-                        width,
+                        body_width,
                     ),
-                    None => crate::ui::markdown::lines(&section.text, width),
+                    None => crate::ui::markdown::lines(&section.text, body_width),
                 };
                 let non_empty = !body.is_empty();
-                out.extend(body.into_iter().map(body_row));
+                out.extend(
+                    body.into_iter()
+                        .map(|line| body_row(indented_line(&indent, line))),
+                );
                 if non_empty && position + 1 < visible.len() {
                     out.push(separator_row(width));
                 }
@@ -2005,16 +2085,22 @@ mod tests {
             opened_set.insert(2);
             let opened = make(opened_set);
             let rows2 = content_lines(&opened, None, width);
+            // `section-body-indent`: every body-bearing section here is at
+            // depth 1, so this tab's floor is `64 + 2 * 1 = 66` — the body
+            // carries two columns of indent at 78 and none at 58.
+            let indent = if width == 78 { "  " } else { "" };
             assert!(
-                rows2.iter().any(|r| r.text() == "Beta text."),
+                rows2
+                    .iter()
+                    .any(|r| r.text() == format!("{indent}Beta text.")),
                 "width {width}: section 2's body did not open"
             );
             assert!(
-                !rows2.iter().any(|r| r.text() == "Alpha text."),
+                !rows2.iter().any(|r| r.text().trim() == "Alpha text."),
                 "width {width}: section 1 opened when it should not have"
             );
             assert!(
-                !rows2.iter().any(|r| r.text() == "Gamma text."),
+                !rows2.iter().any(|r| r.text().trim() == "Gamma text."),
                 "width {width}: section 3 opened when it should not have"
             );
         }
@@ -3323,6 +3409,11 @@ mod tests {
             drawn_width: None,
         };
         for width in [78, 58] {
+            // `section-body-indent`: the two groups sit at depth 1, so this
+            // tab's floor is `64 + 2 * 1 = 66` — its items carry two columns
+            // of indent at 78 and none at 58. This fixture is the live proof
+            // that a tracked-tasks tab has no exemption of its own.
+            let indent = if width == 78 { "  " } else { "" };
             // Both subtrees incomplete: the seed opened every section.
             let d = detail_of(
                 sections(" "),
@@ -3339,12 +3430,12 @@ mod tests {
                     String::new(),
                     header("a", 0, true, None, None, width).text(),
                     header("1. Setup", 1, true, None, None, width).text(),
-                    "[ ] a".to_string(),
+                    format!("{indent}[ ] a"),
                     // The fold walk's own separator row, which IS padded.
                     crate::ui::list::pad_or_truncate_right("", width as usize),
                     header("b", 0, true, None, None, width).text(),
                     header("2. Build", 1, true, None, None, width).text(),
-                    "[ ] b".to_string(),
+                    format!("{indent}[ ] b"),
                 ],
                 "width {width}"
             );
@@ -3361,7 +3452,7 @@ mod tests {
                     header("a", 0, false, None, None, width).text(),
                     header("b", 0, true, None, None, width).text(),
                     header("2. Build", 1, true, None, None, width).text(),
-                    "[ ] b".to_string(),
+                    format!("{indent}[ ] b"),
                 ],
                 "width {width}: a collapsed depth-0 file section hides its own group"
             );
@@ -4360,5 +4451,369 @@ mod tests {
                 "width {width}"
             );
         }
+    }
+
+    /// A foldable tab whose sections sit at depths 0, 1, 2 and 3 with
+    /// one-word bodies. The words are short enough never to wrap above a
+    /// body width of eight columns, which is what lets a sweep from `0`
+    /// assert a row's whole text rather than reason about where
+    /// `ui::markdown` broke it. Its deepest body-bearing section is depth 3,
+    /// so its floor is `64 + 2 * 3 = 70`.
+    fn three_depth_detail(expanded: std::collections::BTreeSet<usize>) -> Detail {
+        let section = |label: &str, text: &str, depth: usize| ArtifactSection {
+            label: Some(label.to_string()),
+            text: text.to_string(),
+            depth,
+            progress: None,
+            operation: None,
+        };
+        Detail {
+            sections: vec![
+                section("degraded-coverage", "", 0),
+                section("ADDED Requirements", "alpha\n", 1),
+                section("Requirement: One", "bravo\n", 2),
+                section("Scenario: Two", "charlie\n", 3),
+            ],
+            scroll: 0,
+            tab: 0,
+            problems: Vec::new(),
+            loaded: None,
+            expanded,
+            drawn_width: Some(78),
+        }
+    }
+
+    /// The same shape one level shallower: its deepest body-bearing section
+    /// is at depth `1`, so its floor is `64 + 2 * 1 = 66`. Neither
+    /// `three_spec_detail` nor `preamble_detail` can stand in — every
+    /// section of both is at depth 0, and `seven_section_detail` is depths
+    /// 0 to 3, whose floor of 70 is the very thing this fixture exists to
+    /// differ from (tasks.md 1.3).
+    fn shallow_detail() -> Detail {
+        let mut d = three_depth_detail(std::collections::BTreeSet::from([0, 1]));
+        d.sections.truncate(2);
+        d
+    }
+
+    /// The body rows drawn beneath section `section`'s own header row, up to
+    /// the next header or the blank separator that closes the body. The
+    /// header is found by its `ContentKind::SectionHeader`'s index and never
+    /// by its label text: a sweep from `0` reaches widths at which the label
+    /// is truncated away entirely, and a text match would panic there rather
+    /// than assert anything.
+    fn body_rows_under(rows: &[ContentRow], section: usize) -> Vec<String> {
+        let header = rows
+            .iter()
+            .position(
+                |r| matches!(r.kind, ContentKind::SectionHeader { section: s, .. } if s == section),
+            )
+            .unwrap_or_else(|| panic!("section {section}'s header row is drawn"));
+        rows[header + 1..]
+            .iter()
+            .take_while(|r| {
+                !matches!(r.kind, ContentKind::SectionHeader { .. }) && !r.text().trim().is_empty()
+            })
+            .map(ContentRow::text)
+            .collect()
+    }
+
+    /// `artifact-folds` :: "A spec tab's bodies align under their headers at
+    /// the wide interior".
+    ///
+    /// `seven_section_detail`'s own shape — a `specs` glob resolving to more
+    /// than one file, so the file sections are depth 0 and the headings
+    /// beneath the first are depths 1, 2 and 3 — with two of its bodies
+    /// replaced: its depth-1 section carries `"\n"`, which is non-empty (so
+    /// it raises no floor question) but renders no row at all, and its
+    /// depth-3 body is too short to wrap. Both clauses this scenario states
+    /// would pass vacuously over the fixture unaltered.
+    #[test]
+    fn a_spec_tabs_bodies_align_under_their_headers_at_the_wide_interior() {
+        let every = std::collections::BTreeSet::from([0, 1, 2, 3, 4, 5, 6]);
+        let mut d = seven_section_detail(every);
+        d.sections[1].text = "Operation prose.\n".to_string();
+        d.sections[3].text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, \
+             sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\n"
+            .to_string();
+
+        let rows = content_lines(&d, None, 78);
+
+        // Each body sits flush beneath its own header: two columns at the
+        // operation heading, four at the requirement, six at the scenario.
+        assert_eq!(
+            body_rows_under(&rows, 1),
+            vec!["  Operation prose.".to_string()]
+        );
+        assert_eq!(
+            body_rows_under(&rows, 2),
+            vec!["    Alpha text.".to_string()]
+        );
+
+        // The deepest body is *wrapped* at `78 - 6` and then indented, not
+        // wrapped at 78 and prefixed — which is the whole of Decision 1, and
+        // the only reading under which no row overflows the interior.
+        let deep = body_rows_under(&rows, 3);
+        let want: Vec<String> = crate::ui::markdown::lines(&d.sections[3].text, 78 - 6)
+            .iter()
+            .map(|l| format!("      {}", l.text()))
+            .collect();
+        assert_eq!(deep, want);
+        assert!(deep.len() > 1, "the deep body does not wrap: {deep:?}");
+        assert!(
+            deep.iter().any(|r| columns(r) > 66),
+            "no row reaches the wrap width, so the width assertion is vacuous: {deep:?}"
+        );
+        for row in &rows {
+            assert!(columns(&row.text()) <= 78, "{:?} exceeds 78", row.text());
+        }
+
+        // The mandated pair, named explicitly per DETAILWIDTHS: the same tab
+        // at the narrow interior draws every one of those bodies at column
+        // zero, 58 being below this tab's floor of 70.
+        let narrow = content_lines(&d, None, 58);
+        for section in [1usize, 2, 3] {
+            for row in body_rows_under(&narrow, section) {
+                assert!(
+                    !row.starts_with(' '),
+                    "width 58: section {section}'s body row {row:?} is indented"
+                );
+            }
+        }
+    }
+
+    /// `artifact-folds` :: "The indent is all-or-nothing across one render".
+    #[test]
+    fn the_indent_is_all_or_nothing_across_one_render() {
+        let every = std::collections::BTreeSet::from([0, 1, 2, 3]);
+        let d = three_depth_detail(every.clone());
+
+        // No width panics and no row overflows, including every width below
+        // `2 * max_depth`, where the floor's own subtraction saturates.
+        for width in 0..=120u16 {
+            for row in content_lines(&d, None, width) {
+                assert!(
+                    columns(&row.text()) <= width as usize,
+                    "width {width}: {:?} overflows",
+                    row.text()
+                );
+            }
+        }
+
+        // The three bodies never wrap above a body width of eight, so from
+        // there up each row's whole text is assertable. At every width the
+        // three agree: all indented to their own depth, or all at column
+        // zero — a per-section rule would indent `alpha` at 66 and leave
+        // `charlie` flush.
+        let mut indented_widths: Vec<u16> = Vec::new();
+        for width in 8..=120u16 {
+            let rows = content_lines(&d, None, width);
+            let indented = width >= 70;
+            for (section, word) in [(1usize, "alpha"), (2, "bravo"), (3, "charlie")] {
+                let indent = if indented {
+                    "  ".repeat(section)
+                } else {
+                    String::new()
+                };
+                assert_eq!(
+                    body_rows_under(&rows, section),
+                    vec![format!("{indent}{word}")],
+                    "width {width}: section {section}"
+                );
+            }
+            if indented {
+                indented_widths.push(width);
+            }
+        }
+        // Exactly one transition, at `64 + 2 * 3` for this tab's max depth.
+        assert_eq!(indented_widths.first().copied(), Some(70));
+        assert_eq!(indented_widths.len(), (70..=120u16).len());
+
+        // The decision reads `detail.sections`, never the visible set.
+        // Collapsing the depth-3 section itself leaves every still-open body
+        // unchanged; and so does collapsing its **parent**, which hides the
+        // depth-3 section outright — the case that discriminates, since an
+        // implementation reading `visible_sections` would then see a max
+        // depth of 2, a floor of 68, and indent at 69.
+        let deep_shut = content_lines(
+            &three_depth_detail(std::collections::BTreeSet::from([0, 1, 2])),
+            None,
+            78,
+        );
+        for (section, word) in [(1usize, "alpha"), (2, "bravo")] {
+            assert_eq!(
+                body_rows_under(&deep_shut, section),
+                vec![format!("{}{word}", "  ".repeat(section))],
+                "collapsing the depth-3 section moved section {section}'s body"
+            );
+        }
+        let subtree_shut = content_lines(
+            &three_depth_detail(std::collections::BTreeSet::from([0, 1])),
+            None,
+            69,
+        );
+        assert_eq!(
+            body_rows_under(&subtree_shut, 1),
+            vec!["alpha".to_string()],
+            "the floor read the visible set rather than detail.sections"
+        );
+
+        // The mandated pair, named explicitly per DETAILWIDTHS.
+        for (width, indent) in [(78u16, "      "), (58, "")] {
+            assert_eq!(
+                body_rows_under(&content_lines(&d, None, width), 3),
+                vec![format!("{indent}charlie")],
+                "width {width}"
+            );
+        }
+    }
+
+    /// `artifact-folds` :: "A shallower tab indents at a narrower width".
+    #[test]
+    fn a_shallower_tab_indents_at_a_narrower_width() {
+        let shallow = shallow_detail();
+        let deep = three_depth_detail(std::collections::BTreeSet::from([0, 1, 2, 3]));
+        for (width, indent) in [(67u16, "  "), (66, "  "), (65, "")] {
+            assert_eq!(
+                body_rows_under(&content_lines(&shallow, None, width), 1),
+                vec![format!("{indent}alpha")],
+                "width {width}: the floor is 64 + 2 * 1 = 66"
+            );
+            // The same three widths leave a depth-3 tab flush throughout, its
+            // own floor being 70 — so the rule reads the tab's maximum depth
+            // rather than one fixed width.
+            assert_eq!(
+                body_rows_under(&content_lines(&deep, None, width), 1),
+                vec!["alpha".to_string()],
+                "width {width}: a depth-3 tab indented below its own floor of 70"
+            );
+        }
+
+        // The mandated pair, named explicitly per DETAILWIDTHS: 78 clears
+        // the shallow tab's floor of 66 and 58 does not.
+        for (width, indent) in [(78u16, "  "), (58, "")] {
+            assert_eq!(
+                body_rows_under(&content_lines(&shallow, None, width), 1),
+                vec![format!("{indent}alpha")],
+                "width {width}"
+            );
+        }
+    }
+
+    /// `artifact-folds` :: "A depth-1 tracked-tasks tab indents its items
+    /// like any other tab".
+    ///
+    /// The shape a task file opening with a level-1 title produces:
+    /// `min_level` is 1, so every `## ` group lands at `base + 1` — 17 of
+    /// this repository's own 44 task files. Its floor is `64 + 2 * 1 = 66`.
+    #[test]
+    fn a_depth_1_tracked_tasks_tab_indents_its_items_like_any_other_tab() {
+        let (change, progress) = tracked_tasks_change();
+        let group_text = "- [x] 1.1 first\n- [ ] 1.2 second\n";
+        let d = Detail {
+            sections: vec![
+                ArtifactSection {
+                    label: Some("Tasks".to_string()),
+                    text: String::new(),
+                    depth: 0,
+                    progress: None,
+                    operation: None,
+                },
+                ArtifactSection {
+                    label: Some("1. Setup".to_string()),
+                    text: group_text.to_string(),
+                    depth: 1,
+                    progress: None,
+                    operation: None,
+                },
+                ArtifactSection {
+                    label: Some("2. Build".to_string()),
+                    text: "- [ ] 2.1 third\n".to_string(),
+                    depth: 1,
+                    progress: None,
+                    operation: None,
+                },
+            ],
+            scroll: 0,
+            tab: 1,
+            problems: Vec::new(),
+            loaded: None,
+            expanded: std::collections::BTreeSet::from([0, 1, 2]),
+            drawn_width: None,
+        };
+        let parsed: Vec<crate::tasks::Item> = crate::tasks::parse(group_text)
+            .groups
+            .into_iter()
+            .flat_map(|g| g.items)
+            .collect();
+        for (width, indent) in [(78u16, "  "), (58, "")] {
+            let rows = content_lines(&d, Some(&change), width);
+            // The items are `ui::tasks::items` at the reduced width, then
+            // indented — at 78 wrapped at 76, at 58 at 58.
+            let body_width = width - columns(indent) as u16;
+            let want: Vec<String> = crate::ui::tasks::items(&parsed, body_width)
+                .iter()
+                .map(|l| format!("{indent}{}", l.text()))
+                .collect();
+            assert_eq!(body_rows_under(&rows, 1), want, "width {width}");
+
+            // The group headers keep their own `"  " * depth` indent, and the
+            // progress-bar rows above every header stay at column zero, owned
+            // by no section.
+            assert_eq!(
+                rows.iter().map(ContentRow::text).next(),
+                Some(crate::ui::tasks::progress_bar(&progress, &[], width)),
+                "width {width}: the bar moved"
+            );
+            for label in ["1. Setup", "2. Build"] {
+                let header_row = rows
+                    .iter()
+                    .find(|r| {
+                        matches!(r.kind, ContentKind::SectionHeader { .. })
+                            && r.text().contains(label)
+                    })
+                    .expect("the group header is drawn");
+                assert!(
+                    header_row.text().starts_with("  ▾ "),
+                    "width {width}: {:?} lost its depth-1 header indent",
+                    header_row.text()
+                );
+            }
+        }
+    }
+
+    /// `artifact-folds` :: "A selection over an indented body row copies the
+    /// indent".
+    #[test]
+    fn a_selection_over_an_indented_body_row_copies_the_indent() {
+        let d = three_depth_detail(std::collections::BTreeSet::from([0, 1, 2, 3]));
+        for (width, indent) in [(78u16, "      "), (58, "")] {
+            let rows = content_lines(&d, None, width);
+            let line = rows
+                .iter()
+                .position(|r| r.text().trim() == "charlie")
+                .expect("the depth-3 body row is drawn");
+            assert_eq!(
+                rows[line].text(),
+                format!("{indent}charlie"),
+                "width {width}"
+            );
+            assert_eq!(
+                span_text(&rows, (line, 0), (line, width)),
+                format!("{indent}charlie"),
+                "width {width}: the indent is rendered content, not trailing padding"
+            );
+        }
+
+        // At 78 a double click inside the indent's own six columns selects
+        // nothing, those cells holding only whitespace.
+        let rows = content_lines(&d, None, 78);
+        let line = rows
+            .iter()
+            .position(|r| r.text().trim() == "charlie")
+            .expect("the depth-3 body row is drawn");
+        for column in 0..6u16 {
+            assert_eq!(word_at(&rows, line, column), None, "column {column}");
+        }
+        assert_eq!(word_at(&rows, line, 6), Some((6, 13)));
     }
 }
