@@ -183,17 +183,17 @@
 ## 10. Change Review
 <!-- kind: operational -->
 
-- [ ] 10.1 CHECK: Dispatch an independent reviewer against proposal, specs, design, and tasks.
-- [ ] 10.2 CHANGE: Fix every CRITICAL, resolve or accept each WARNING, re-run affected tests.
-- [ ] 10.3 VERIFY: Confirm no blocking or unowned finding remains.
+- [x] 10.1 CHECK: Dispatch an independent reviewer against proposal, specs, design, and tasks.
+- [x] 10.2 CHANGE: Fix every CRITICAL, resolve or accept each WARNING, re-run affected tests.
+- [x] 10.3 VERIFY: Confirm no blocking or unowned finding remains.
 
 ## 11. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 11.1 VERIFY: `cargo fmt --all -- --check` — clean.
-- [ ] 11.2 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings.
-- [ ] 11.3 VERIFY: `make gates` — every hygiene gate, `PALETTE`, `NORAW-GREP`, `NOBLOCK`,
+- [x] 11.1 VERIFY: `cargo fmt --all -- --check` — clean.
+- [x] 11.2 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings.
+- [x] 11.3 VERIFY: `make gates` — every hygiene gate, `PALETTE`, `NORAW-GREP`, `NOBLOCK`,
       `COLWIDTH` and `NODEFAULT-UI` included.
-- [ ] 11.4 VERIFY: `cargo test --all-features` — green, contract tier included.
-- [ ] 11.5 VERIFY: `cargo llvm-cov --fail-under-lines 80` and the production-slice floor.
-- [ ] 11.6 VERIFY: `openspec validate mouse-text-selection --strict`.
+- [x] 11.4 VERIFY: `cargo test --all-features` — green, contract tier included.
+- [x] 11.5 VERIFY: `cargo llvm-cov --fail-under-lines 80` and the production-slice floor.
+- [x] 11.6 VERIFY: `openspec validate mouse-text-selection --strict`.
