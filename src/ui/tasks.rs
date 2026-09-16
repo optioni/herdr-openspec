@@ -1632,9 +1632,9 @@ mod tests {
 
     /// `tasks-checklist` :: "A folded group and an unfolded one render the
     /// same item lines". Every expectation here is a **literal**: asserting
-    /// that `items`' output equals a slice of `lines`' output could not fail
-    /// once `lines` calls `items`, and this repository does not keep tests
-    /// that cannot fail.
+    /// that `group_body`'s output equals a slice of `lines`' output could not
+    /// fail once `lines` calls `group_body`, and this repository does not
+    /// keep tests that cannot fail.
     #[test]
     fn a_folded_group_and_an_unfolded_one_render_the_same_item_lines() {
         let progress = Progress {
@@ -1645,8 +1645,8 @@ mod tests {
         let group = &parsed.groups[0];
 
         for width in [78, 58] {
-            // `items` alone: the item rows and nothing else.
-            let out = super::items(&group.items, width);
+            // `group_body` alone: the item rows and nothing else.
+            let out = super::group_body(group, width);
             let texts: Vec<String> = out.iter().map(|l| l.text()).collect();
             assert_eq!(
                 texts,
@@ -1719,6 +1719,382 @@ mod tests {
         // `bar_lines` contributes no blank line either.
         assert!(progress_bar(&progress, &[], 4).is_empty());
         assert!(super::bar_lines(&progress, &[], 4).is_empty());
+    }
+
+    // --- group 4: item bodies and blocks -------------------------------
+
+    /// `tasks-checklist` :: "An item's body is drawn under it at its
+    /// hanging indent".
+    #[test]
+    fn an_items_body_is_drawn_under_it_at_its_hanging_indent() {
+        let parsed = crate::tasks::parse(
+            "- [ ] 2.2 GREEN: add the method\n      writing the OSC 52 sequence, and\n      the arm.\n",
+        );
+        let group = &parsed.groups[0];
+        assert_eq!(
+            group.items[0].body,
+            "writing the OSC 52 sequence, and\nthe arm."
+        );
+
+        let mut body_row_counts = std::collections::HashMap::new();
+        for width in [78, 58] {
+            let out = super::group_body(group, width);
+            assert!(
+                out[0].text().starts_with("[ ] 2.2 "),
+                "width {width}: {:?}",
+                out[0].text()
+            );
+            let label_seg = out[0]
+                .segments
+                .iter()
+                .find(|s| s.text == "GREEN:")
+                .unwrap_or_else(|| panic!("width {width}: no GREEN: segment in {:?}", out[0]));
+            assert_eq!(
+                label_seg.face,
+                crate::ui::markdown::Face {
+                    label: Some(crate::tasks::LabelRole::Change),
+                    ..crate::ui::markdown::Face::plain()
+                },
+                "width {width}"
+            );
+
+            let body_rows = &out[1..];
+            assert!(!body_rows.is_empty(), "width {width}: the body must render");
+            let mut reflowed = String::new();
+            for row in body_rows {
+                let text = row.text();
+                assert!(
+                    text.starts_with("        "),
+                    "width {width}: {text:?} does not hang at eight spaces"
+                );
+                if !reflowed.is_empty() {
+                    reflowed.push(' ');
+                }
+                reflowed.push_str(text.trim_start());
+            }
+            assert_eq!(
+                reflowed,
+                "writing the OSC 52 sequence, and the arm.",
+                "width {width}"
+            );
+            body_row_counts.insert(width, body_rows.len());
+        }
+        assert!(
+            body_row_counts[&58] > body_row_counts[&78],
+            "{body_row_counts:?}: 58 must produce strictly more body rows"
+        );
+    }
+
+    /// `tasks-checklist` :: "The hanging indent falls after the task
+    /// number".
+    #[test]
+    fn the_hanging_indent_falls_after_the_task_number() {
+        let words = long_paragraph(200);
+        let item_of = |text: String| crate::tasks::Item {
+            checked: false,
+            text,
+            indent: 0,
+            body: String::new(),
+        };
+        let group_of = |item: crate::tasks::Item| crate::tasks::Group {
+            heading: None,
+            items: vec![item],
+            blocks: Vec::new(),
+        };
+
+        for width in [78, 58] {
+            for (text, hang) in [
+                (format!("1.1 {words}"), 8usize),
+                (format!("10.11a {words}"), 11usize),
+                (words.clone(), 4usize),
+            ] {
+                let number: Option<&str> = if hang > 4 {
+                    Some(text.split(' ').next().unwrap())
+                } else {
+                    None
+                };
+                let group = group_of(item_of(text));
+                let out = super::group_body(&group, width);
+                assert!(out.len() > 1, "width {width} hang {hang}: the item must wrap");
+
+                for (i, line) in out.iter().enumerate().skip(1) {
+                    let text = line.text();
+                    let indent: String = text.chars().take_while(|&c| c == ' ').collect();
+                    assert_eq!(indent.len(), hang, "width {width} hang {hang} row {i}: {text:?}");
+                }
+
+                // The text column is continuous: the first row's character
+                // at column `hang` is the character the continuation rows
+                // begin with.
+                let first = out[0].text();
+                let second = out[1].text();
+                assert_eq!(
+                    first.chars().nth(hang),
+                    second.chars().nth(hang),
+                    "width {width} hang {hang}: {first:?} vs {second:?}"
+                );
+
+                // The number appears only on the item's first row.
+                if let Some(number) = number {
+                    for line in &out[1..] {
+                        assert!(
+                            !line.text().trim_start().starts_with(number),
+                            "width {width} hang {hang}: {:?}",
+                            line.text()
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// `tasks-checklist` :: "The number hang is dropped before the prefix
+    /// is".
+    #[test]
+    fn the_number_hang_is_dropped_before_the_prefix_is() {
+        let words = long_paragraph(40);
+        let item = crate::tasks::Item {
+            checked: false,
+            text: format!("1.1 {words}"),
+            indent: 0,
+            body: String::new(),
+        };
+        let group = crate::tasks::Group {
+            heading: None,
+            items: vec![item],
+            blocks: Vec::new(),
+        };
+
+        for width in [78, 58, 20, 12, 10, 8, 6, 5, 4, 0] {
+            let out = super::group_body(&group, width);
+            for line in &out {
+                assert!(
+                    columns(&line.text()) <= width as usize,
+                    "width {width}: {:?} exceeds its width",
+                    line.text()
+                );
+            }
+            if width == 0 {
+                assert!(out.is_empty(), "width {width}");
+                continue;
+            }
+            let w = width as usize;
+            if 8 < w {
+                // `[ ] 1.1 ` leaves a text column: the hang is the prefix
+                // plus the number.
+                for line in &out[1..] {
+                    let indent: String = line.text().chars().take_while(|&c| c == ' ').collect();
+                    assert_eq!(indent.len(), 8, "width {width}: {:?}", line.text());
+                }
+            } else if 4 < w {
+                // The number hang was dropped whole; the prefix alone
+                // still leaves a text column and the text is still
+                // rendered.
+                assert!(out.len() > 1, "width {width}: the item's text must still render");
+                for line in &out[1..] {
+                    let indent: String = line.text().chars().take_while(|&c| c == ' ').collect();
+                    assert_eq!(indent.len(), 4, "width {width}: {:?}", line.text());
+                }
+            }
+        }
+    }
+
+    /// `tasks-checklist` :: "A fenced block in an item's body renders as
+    /// code, not as vanished text".
+    #[test]
+    fn a_fenced_block_in_an_items_body_renders_as_code_not_as_vanished_text() {
+        let parsed = crate::tasks::parse("- [ ] run the gate\n      ```\n      make check\n      ```\n");
+        let group = &parsed.groups[0];
+        assert_eq!(group.items[0].body, "```\nmake check\n```");
+
+        for width in [78, 58] {
+            let out = super::group_body(group, width);
+            assert_eq!(out.len(), 2, "width {width}: the item row and one body row");
+            let body_row = &out[1];
+            assert_eq!(body_row.text(), "    make check", "width {width}");
+            assert!(
+                body_row.segments.iter().all(|s| s.face.code),
+                "width {width}: {body_row:?}"
+            );
+            assert!(!body_row.text().contains('`'), "width {width}");
+
+            let same = crate::ui::markdown::lines(&group.items[0].body, width - 4);
+            let same_texts: Vec<String> = same.iter().map(|l| l.text()).collect();
+            assert_eq!(same_texts, vec!["make check".to_string()], "width {width}");
+        }
+    }
+
+    /// `tasks-checklist` :: "A group's block renders between the items it
+    /// sits between".
+    #[test]
+    fn a_groups_block_renders_between_the_items_it_sits_between() {
+        let with_block = crate::tasks::parse("- [ ] a\n```\nmake check\n```\n- [ ] b\n");
+        let group = &with_block.groups[0];
+        assert_eq!(group.blocks.len(), 1, "one block between the two items");
+        assert_eq!(group.blocks[0].after, 1, "after the first item");
+
+        let without_block = crate::tasks::parse("- [ ] a\n- [ ] b\n");
+        let plain_group = &without_block.groups[0];
+        assert!(plain_group.blocks.is_empty());
+
+        for width in [78, 58] {
+            let out = super::group_body(group, width);
+            let texts: Vec<String> = out.iter().map(|l| l.text()).collect();
+            assert_eq!(
+                texts,
+                vec![
+                    "[ ] a".to_string(),
+                    String::new(),
+                    "make check".to_string(),
+                    String::new(),
+                    "[ ] b".to_string(),
+                ],
+                "width {width}"
+            );
+            assert!(
+                out[2].segments.iter().all(|s| s.face.code),
+                "width {width}: {:?}",
+                out[2]
+            );
+
+            let plain = super::group_body(plain_group, width);
+            let plain_texts: Vec<String> = plain.iter().map(|l| l.text()).collect();
+            assert_eq!(
+                plain_texts,
+                vec!["[ ] a".to_string(), "[ ] b".to_string()],
+                "width {width}: no block, no blank row"
+            );
+        }
+    }
+
+    /// `tasks-checklist` :: "An item's inline markdown is faced rather than
+    /// shown as markers".
+    #[test]
+    fn an_items_inline_markdown_is_faced_rather_than_shown_as_markers() {
+        let parsed =
+            crate::tasks::parse("- [ ] 1.1 RED: add the `Recorder` arm and **assert** it\n");
+        let group = &parsed.groups[0];
+        for width in [78, 58] {
+            let out = super::group_body(group, width);
+            assert_eq!(out.len(), 1, "width {width}: fits on one row");
+            let row = &out[0];
+            let code_seg = row
+                .segments
+                .iter()
+                .find(|s| s.text == "Recorder")
+                .unwrap_or_else(|| panic!("width {width}: no Recorder segment: {row:?}"));
+            assert!(code_seg.face.code, "width {width}");
+            let strong_seg = row
+                .segments
+                .iter()
+                .find(|s| s.text == "assert")
+                .unwrap_or_else(|| panic!("width {width}: no assert segment: {row:?}"));
+            assert!(strong_seg.face.strong, "width {width}");
+            assert!(!row.text().contains('`'), "width {width}: {:?}", row.text());
+            assert!(!row.text().contains('*'), "width {width}: {:?}", row.text());
+
+            let label_seg = row
+                .segments
+                .iter()
+                .find(|s| s.text == "RED:")
+                .unwrap_or_else(|| panic!("width {width}: no RED: segment: {row:?}"));
+            assert_eq!(
+                label_seg.face,
+                crate::ui::markdown::Face {
+                    label: Some(crate::tasks::LabelRole::Evidence),
+                    ..crate::ui::markdown::Face::plain()
+                },
+                "width {width}"
+            );
+        }
+    }
+
+    /// `tasks-checklist` :: "An emphasised label degrades to unlabelled
+    /// rather than mis-coloured".
+    #[test]
+    fn an_emphasised_label_degrades_to_unlabelled_rather_than_mis_coloured() {
+        let emphasised = crate::tasks::parse("- [ ] **RED**: write the failing test\n");
+        let plain = crate::tasks::parse("- [ ] RED: write the failing test\n");
+        for width in [78, 58] {
+            let out = super::group_body(&emphasised.groups[0], width);
+            assert_eq!(out.len(), 1, "width {width}: fits on one row");
+            assert!(
+                out[0].segments.iter().all(|s| s.face.label.is_none()),
+                "width {width}: {:?}",
+                out[0]
+            );
+            let bold_seg = out[0]
+                .segments
+                .iter()
+                .find(|s| s.text == "RED")
+                .unwrap_or_else(|| panic!("width {width}: no RED segment: {:?}", out[0]));
+            assert!(bold_seg.face.strong, "width {width}");
+
+            let out_plain = super::group_body(&plain.groups[0], width);
+            assert!(
+                out_plain[0].segments.iter().any(|s| s.face.label.is_some()),
+                "width {width}: {:?}",
+                out_plain[0]
+            );
+        }
+    }
+
+    /// `tasks-checklist` :: "A body is dropped whole with the prefix it
+    /// hangs from".
+    #[test]
+    fn a_body_is_dropped_whole_with_the_prefix_it_hangs_from() {
+        let source = "      - [x] alpha\n        a body line\n";
+        let progress = Progress {
+            completed: 1,
+            total: 1,
+        };
+        for width in [78, 58, 12, 6, 5, 4, 3, 2, 1, 0] {
+            let out = lines(source, &progress, width);
+            for line in &out {
+                assert!(
+                    columns(&line.text()) <= width as usize,
+                    "width {width}: {:?} exceeds its width",
+                    line.text()
+                );
+            }
+            if width == 0 {
+                assert!(out.is_empty(), "width {width}");
+            }
+        }
+
+        for width in [78, 58] {
+            let out = lines(source, &progress, width);
+            let start = first_content_index(&progress, width);
+            assert!(
+                out[start].text().starts_with("      [✓] alpha"),
+                "width {width}: {:?}",
+                out[start].text()
+            );
+            let body_row = out
+                .get(start + 1)
+                .unwrap_or_else(|| panic!("width {width}: no body row"));
+            assert_eq!(
+                body_row.text().trim_start(),
+                "a body line",
+                "width {width}: {:?}",
+                body_row.text()
+            );
+            assert!(
+                body_row.text().starts_with(' '),
+                "width {width}: {:?}",
+                body_row.text()
+            );
+        }
+
+        // At a width where even `[✓] ` leaves no text column, the item
+        // contributes exactly one row — the body dropped whole with the
+        // prefix rather than wrapped into zero columns.
+        for width in [4, 3, 2, 1] {
+            let out = lines(source, &progress, width);
+            let start = first_content_index(&progress, width);
+            let item_rows = &out[start..];
+            assert_eq!(item_rows.len(), 1, "width {width}: {item_rows:?}");
+        }
     }
 
     #[test]
