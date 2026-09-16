@@ -278,7 +278,13 @@ against another fails it, deliberately asserting nothing about `target/release/`
 table bound to a named, passing proving test per row), and `tests/doc_contract.rs`
 (thirteen further claims — the module map, the tested-modules list, the worker-thread
 count, the MSRV, the gate-path programs, the manifest transcription, the injected
-OpenSpec context, the documented mouse bindings, the documented key bindings
+OpenSpec context, the documented mouse bindings (`SPEC.md` → Keys' mouse table
+bound **row by row** by *executing* `mouse_action` at every cell of the swept
+frames, never by parsing its source: each row names the `Zone` variants it covers
+and its outcome's payload constructor, a row covering no observed behaviour fails
+as vacuous and a behaviour no row covers fails as undocumented — so editing that
+table alone is not safe, and `mouse-text-selection`'s four false statements would
+not survive it twice), the documented key bindings
 (`SPEC.md` → Keys and `README.md` → Keys against `ui::help::INVENTORY`), the
 confined terminal-seam
 names, `src/specs.rs`'s production slice carrying no I/O or schema name, the

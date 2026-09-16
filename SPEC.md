@@ -1262,7 +1262,7 @@ own such test lives in `ui::tests::load::`, never in a view module.
 - Every non-`cargo` program `make check`'s path invokes ↔ `README.md` and `AGENTS.md` (the `Makefile` walk and the `scripts/gates/` interpreter scan).
 - `SPEC.md`'s fenced manifest transcription ↔ `herdr-plugin.toml` (values and `[[…]]` order).
 - `openspec/config.yaml`'s injected `context` ↔ the repository (the fixture claim and every `check:` prerequisite target).
-- § Keys' mouse table ↔ the `Action::` variants `ui::driver::mouse_action`'s own body produces (`mouse-input`).
+- § Keys' mouse table ↔ `ui::driver::mouse_action` **executed** at every cell of the swept frames, row by row: each row names in backticks the `Zone` variants it covers and its outcome's payload constructor, and the check holds both ways — a row covering no observed behaviour fails as vacuous, a behaviour no row covers fails as undocumented. The `Action::`-name set equality survives as its first leg, reporting a plain vocabulary mismatch before the stricter ones run (`mouse-input`, `bind-mouse-table-rows`).
 - § Keys' key table and `README.md` → Keys ↔ `ui::help::INVENTORY`, itself swept against the `Action`s `ui::app::action_for` and `ui::driver::mouse_action` really produce when **executed** (`help-overlay`).
 - `AGENTS.md`'s confined terminal-seam names ↔ `scripts/gates/noraw-grep.sh`'s `RAW_RE` (`mouse-input`).
 - `src/specs.rs`'s production slice ↔ carries no filesystem, process, environment, network, standard-I/O, or schema-reading name (`specs-emphasis`).

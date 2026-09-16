@@ -187,13 +187,13 @@ grep -c "fn mouse_table_claims\|fn compare_mouse_claims" tests/doc_contract.rs; 
 ## 7. Documentation
 <!-- kind: operational -->
 
-- [ ] 7.1 Rewrite in `SPEC.md`: § Testing and quality gates → Doc-conformance checks
+- [x] 7.1 Rewrite in `SPEC.md`: § Testing and quality gates → Doc-conformance checks
       (audience: contributors) — the mouse entry becomes an executed row-by-row binding,
       replacing the claim that the mouse and key legs differ in *kind*, which is what made the
       weaker one look deliberate. It must stay exactly **one** bullet:
       `spec_md_doc_conformance_claim_count` counts the `- ` bullets in that section and
       `documented_claim_count_matches_the_file` compares the total against `CLAIM_COUNT` = 13.
-- [ ] 7.2 Rewrite in `AGENTS.md`: the contract-tier paragraph's "the documented mouse bindings"
+- [x] 7.2 Rewrite in `AGENTS.md`: the contract-tier paragraph's "the documented mouse bindings"
       item (audience: agents working in this repo) — say it is bound by executing `mouse_action`
       at every cell, so a future agent does not repeat `mouse-text-selection`'s assumption that
       editing the table alone is safe. `CLAUDE.md` is a **symlink** to `AGENTS.md`, not a copy,
