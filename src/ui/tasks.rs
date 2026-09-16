@@ -405,19 +405,26 @@ fn item_lines(item: &crate::tasks::Item, width: u16) -> Vec<crate::ui::markdown:
     // wrap or indent arithmetic moves.
     let glyph = if item.checked { "[✓]" } else { "[ ]" };
 
+    // The third element is whether the prefix survived *whole*. A prefix
+    // that has degraded to the glyph alone has no column left to hang a
+    // body from, so the body is dropped with it rather than wrapped into
+    // one or two columns (design.md -> Decision 9); at width 5 the body
+    // was measured rendering fourteen one-character rows, which is the
+    // outcome drop-whole exists to avoid.
     let full_prefix_len = item.indent + 4;
     let prefix = if full_prefix_len < w {
         Some((
             format!("{}{glyph} ", " ".repeat(item.indent)),
             full_prefix_len,
+            true,
         ))
     } else if 4 < w {
-        Some((format!("{glyph} "), 4))
+        Some((format!("{glyph} "), 4, false))
     } else {
         None
     };
 
-    let Some((prefix, prefix_len)) = prefix else {
+    let Some((prefix, prefix_len, prefix_whole)) = prefix else {
         let degraded = crate::ui::list::pad_or_truncate_right(glyph, w);
         return vec![if item.checked {
             muted_line(degraded)
@@ -485,7 +492,7 @@ fn item_lines(item: &crate::tasks::Item, width: u16) -> Vec<crate::ui::markdown:
     // The item's body, at the same hanging indent as its own continuation
     // rows, immediately after its own rows and before the next item or
     // block. An empty body contributes no row (design.md -> Decision 9).
-    if !item.body.is_empty() {
+    if prefix_whole && !item.body.is_empty() {
         for line in crate::ui::markdown::lines(&item.body, col) {
             if item.checked {
                 out.push(muted_line(format!("{hang_spaces}{}", line.text())));
@@ -2200,6 +2207,35 @@ mod tests {
             let start = first_content_index(&progress, width);
             let item_rows = &out[start..];
             assert_eq!(item_rows.len(), 1, "width {width}: {item_rows:?}");
+        }
+
+        // The **glyph-only** band, where the six-column indent is gone but
+        // `[✓] ` still fits: the body is dropped here too, this being the
+        // other half of Decision 9's "glyph-only or truncated-glyph" rule.
+        // Measured before the fix, width 5 rendered the body as fourteen
+        // one-character rows — verbatim the outcome drop-whole exists to
+        // avoid — so a row count is asserted rather than a mere absence.
+        for width in [9, 8, 7, 6, 5] {
+            let out = lines(source, &progress, width);
+            let start = first_content_index(&progress, width);
+            let item_rows = &out[start..];
+            assert!(
+                item_rows[0].text().starts_with("[✓]"),
+                "width {width}: the glyph-only prefix did not survive: {:?}",
+                item_rows[0].text()
+            );
+            // The exact claim: at a glyph-only prefix the item renders
+            // what the *same item with no body at all* renders. Comparing
+            // against a bodiless twin rather than searching for the body's
+            // own words is what survives the narrow widths, where the item
+            // text itself wraps to three rows and any word of the body
+            // would be split across rows before a substring search saw it.
+            let bodiless = lines("      - [x] alpha\n", &progress, width);
+            let twin = &bodiless[first_content_index(&progress, width)..];
+            assert_eq!(
+                item_rows, twin,
+                "width {width}: a glyph-only prefix kept body rows its bodiless twin does not"
+            );
         }
     }
 

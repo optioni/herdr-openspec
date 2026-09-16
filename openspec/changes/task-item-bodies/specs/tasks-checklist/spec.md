@@ -381,6 +381,12 @@ capability renders an existing parse and introduces no second checkbox rule.
 - **AND** at a width where even `[✓] ` leaves no text column, the item contributes exactly
   one row and **no** body row, the body having been dropped whole with the prefix rather
   than wrapped into zero columns
+- **AND** at every width of the **glyph-only** band — where the indent is gone but `[✓] `
+  still fits, here `9`, `8`, `7`, `6`, and `5` — the item renders exactly what the same item
+  carrying **no** body renders, the body being dropped with the indent rather than hung from
+  the four columns the glyph leaves. Measured before this rule was implemented, width `5`
+  drew the body as fourteen one-character rows, which is the outcome dropping whole exists to
+  avoid, and is why the two bands are one rule rather than the truncated-glyph case alone
 - **AND** at `0` the returned vector is empty
 
 #### Scenario: A heading with no items still renders its heading
