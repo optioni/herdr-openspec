@@ -4972,4 +4972,165 @@ mod tests {
             );
         }
     }
+
+    /// A single open tracked-tasks section whose text carries a lifecycle
+    /// marker (a group-level block), an item, and that item's own hanging
+    /// body: `## 1. Setup`, `<!-- kind: behavior -->`, a blank line,
+    /// `- [ ] 1.1 RED: write the test`, and a continuation line indented
+    /// six columns. Depth 0 throughout, so the indent floor costs it
+    /// nothing at either mandated width — `artifact-folds` :: "An open
+    /// tracked-tasks section draws item bodies and group blocks" and
+    /// "Collapsing a tracked-tasks section hides its bodies and blocks with
+    /// its items", and `artifact-content` :: "A tracked-tasks section's
+    /// body carries its item bodies and its blocks".
+    fn open_tracked_tasks_section_detail(
+        expanded: std::collections::BTreeSet<usize>,
+    ) -> (
+        Detail,
+        crate::changes::Change,
+        Progress,
+        crate::tasks::Group,
+    ) {
+        let (change, progress) = tracked_tasks_change();
+        let section_text = "<!-- kind: behavior -->\n\n- [ ] 1.1 RED: write the test\n      covering the degraded path\n";
+        // A second section, so `Detail::foldable` (which requires more than
+        // one) is true and the fold in the second scenario has something to
+        // do — a single-section tab is never foldable and would draw the
+        // first scenario's own body regardless of `expanded`.
+        let d = Detail {
+            sections: vec![
+                ArtifactSection {
+                    label: Some("1. Setup".to_string()),
+                    text: section_text.to_string(),
+                    depth: 0,
+                    progress: None,
+                    operation: None,
+                },
+                ArtifactSection {
+                    label: Some("2. Build".to_string()),
+                    text: "- [ ] 2.1 third\n".to_string(),
+                    depth: 0,
+                    progress: None,
+                    operation: None,
+                },
+            ],
+            scroll: 0,
+            tab: 1,
+            problems: Vec::new(),
+            loaded: None,
+            expanded,
+            drawn_width: None,
+        };
+        let group = crate::tasks::parse(section_text)
+            .groups
+            .into_iter()
+            .next()
+            .unwrap();
+        (d, change, progress, group)
+    }
+
+    /// `artifact-folds` :: "An open tracked-tasks section draws item bodies
+    /// and group blocks" and `artifact-content` :: "A tracked-tasks
+    /// section's body carries its item bodies and its blocks".
+    #[test]
+    fn an_open_tracked_tasks_section_draws_item_bodies_and_group_blocks() {
+        for width in [78, 58] {
+            let (d, change, progress, group) =
+                open_tracked_tasks_section_detail(std::collections::BTreeSet::from([0]));
+            let rows = content_lines(&d, Some(&change), width);
+            assert_eq!(
+                rows[0].text(),
+                crate::ui::tasks::progress_bar(&progress, &[], width),
+                "width {width}"
+            );
+            assert_eq!(
+                rows[1].text(),
+                "",
+                "width {width}: the bar's own blank line"
+            );
+            assert!(
+                matches!(rows[2].kind, ContentKind::SectionHeader { section: 0, .. }),
+                "width {width}: {:?}",
+                rows[2].kind
+            );
+
+            // Depth 0 costs no indent, so section 0's body is exactly
+            // `group_body`'s own output at the full content width — bounded
+            // to `want.len()` rows because section 1 ("2. Build", closed)
+            // still draws its own header row right after, behind this
+            // section's own blank separator.
+            let want = crate::ui::tasks::group_body(&group, width);
+            assert!(
+                rows.len() >= 3 + want.len(),
+                "width {width}: only {} rows drawn, expected at least {}: {:?}",
+                rows.len(),
+                3 + want.len(),
+                rows.iter().map(ContentRow::text).collect::<Vec<_>>()
+            );
+            let got = &rows[3..3 + want.len()];
+            for (row, line) in got.iter().zip(want.iter()) {
+                assert_eq!(&row.line, line, "width {width}");
+                assert_eq!(row.kind, ContentKind::Body, "width {width}: {:?}", row.kind);
+            }
+
+            // The block, drawn at the section body's own column zero.
+            assert!(
+                got.iter().any(|r| r.text() == "<!-- kind: behavior -->"),
+                "width {width}: {:?}",
+                got.iter().map(ContentRow::text).collect::<Vec<_>>()
+            );
+            // The item's body, hanging indent stripped.
+            assert!(
+                got.iter()
+                    .any(|r| r.text().trim_start_matches(' ') == "covering the degraded path"),
+                "width {width}: {:?}",
+                got.iter().map(ContentRow::text).collect::<Vec<_>>()
+            );
+
+            // None of section 0's body rows resolve to a section.
+            for (i, _row) in got.iter().enumerate() {
+                let index = 3 + i;
+                assert_eq!(
+                    section_at(&rows, 0, index as u16),
+                    None,
+                    "width {width}: row {index}"
+                );
+            }
+        }
+    }
+
+    /// `artifact-folds` :: "Collapsing a tracked-tasks section hides its
+    /// bodies and blocks with its items". The fixture carries a second
+    /// section ("2. Build") so `Detail::foldable` is true; it stays
+    /// collapsed throughout, so this scenario's own claim is exactly that
+    /// section 0's header is followed immediately by section 1's, with no
+    /// block row and no body row in between.
+    #[test]
+    fn collapsing_a_tracked_tasks_section_hides_its_bodies_and_blocks_with_its_items() {
+        for width in [78, 58] {
+            let (d, change, progress, _group) =
+                open_tracked_tasks_section_detail(std::collections::BTreeSet::new());
+            let rows = content_lines(&d, Some(&change), width);
+            assert_eq!(
+                rows.iter().map(ContentRow::text).collect::<Vec<_>>(),
+                vec![
+                    crate::ui::tasks::progress_bar(&progress, &[], width),
+                    String::new(),
+                    padded_to("▸ 1. Setup", width as usize),
+                    padded_to("▸ 2. Build", width as usize),
+                ],
+                "width {width}: neither the block nor the item's body is drawn"
+            );
+            // Rows 0 and 1 are the bar and its own blank line, both
+            // legitimately `Body` and owned by no section; no row after
+            // them is, since neither section drew anything beyond its own
+            // header.
+            assert!(
+                !rows[2..].iter().any(|r| r.kind == ContentKind::Body),
+                "width {width}: no body row is drawn at all, so no item row can carry a fold \
+                 glyph of its own — an item's body folds with its section rather than with a \
+                 control of its own"
+            );
+        }
+    }
 }
