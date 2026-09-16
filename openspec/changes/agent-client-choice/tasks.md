@@ -127,29 +127,29 @@
 <!-- kind: behavior -->
 <!-- Moves the `src/ui/mod.rs:237` call site in the same group; see the ordering note. -->
 
-- [ ] 3.1 RED: Write failing tests for: "Every key is set", "The file does not exist", "The
+- [x] 3.1 RED: Write failing tests for: "Every key is set", "The file does not exist", "The
   directory does not exist", "An empty file is not a malformed file", "Only one key is set", "A
   blank `agent_kind` is not a value", `plugin-config` :: "Unrecognised keys are ignored", "A
   pre-`list-sections` configuration loads unchanged". This rewrites the three
   `assert_eq!(cfg.agent_kind, "claude")` assertions named in 2.4.
-- [ ] 3.2 RED: Write failing tests for: "A well-formed override table reaches `Config`", "No
+- [x] 3.2 RED: Write failing tests for: "A well-formed override table reaches `Config`", "No
   `[prompts]` table at all", "One malformed entry is skipped and the rest survive", "A
   `prompts` value that is not a table degrades wholesale with one problem", "A blank override
   is treated as absent".
-- [ ] 3.3 GREEN: Change `Config::agent_kind` to `Option<String>` with no default, trimming and
+- [x] 3.3 GREEN: Change `Config::agent_kind` to `Option<String>` with no default, trimming and
   reporting a blank value, add `prompts` per design.md → Decisions 9, and remove the `"claude"`
   literal from `src/config.rs`.
-- [ ] 3.4 GREEN: Move the call site — widen `launch::start`'s `kind` parameter to
+- [x] 3.4 GREEN: Move the call site — widen `launch::start`'s `kind` parameter to
   `Option<String>` and have the worker fall back to `integration`'s last-resort constant, so
   `src/ui/mod.rs:237` compiles without reintroducing a `"claude"` literal under `src/ui/`.
   Group 7 replaces this parameter entirely with `Settings`.
-- [ ] 3.5 CHECK: Re-inspect `Config::agent_kind` against its one consumer,
+- [x] 3.5 CHECK: Re-inspect `Config::agent_kind` against its one consumer,
   `ui::start_collaborators`, and review the diff for breaking changes — the contract gate this
   interface change owes.
-- [ ] 3.6 CHECK: Re-read `SPEC.md`'s `config.toml` description and `README.md`'s configuration
+- [x] 3.6 CHECK: Re-read `SPEC.md`'s `config.toml` description and `README.md`'s configuration
   table against the new key set and record every divergence for group 13 — the config-format
   contract gate this repository's rules require.
-- [ ] 3.7 Run the group tests — `cargo test --lib -- config:: launch::` — green, selecting more
+- [x] 3.7 Run the group tests — `cargo test --lib -- config:: launch::` — green, selecting more
   than the **69** baseline, and `/bin/sh scripts/gates/wired.sh` still exits 0.
 
 ## 4. `state::recorded_kind`

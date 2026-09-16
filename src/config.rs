@@ -3,6 +3,7 @@
 //!
 //! See `openspec/changes/plugin-config/design.md` for the full contract.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// Configuration read from `config.toml`, with a documented default for every
@@ -13,8 +14,22 @@ pub struct Config {
     /// Path to the `openspec` binary, expanded. Absent when not configured, when
     /// the value was blank, or when the key was of the wrong type.
     pub openspec_bin: Option<PathBuf>,
-    /// Herdr agent kind launched by the plugin. Defaults to `claude`.
-    pub agent_kind: String,
+    /// Herdr agent kind launched by the plugin. An **override** with no
+    /// default: absent when unset, when the value was blank, or when the key
+    /// was of the wrong type. `agent-client-choice` removed the documented
+    /// `claude` default — a constant that fires whether or not the reader has
+    /// ever used Claude Code is the guess that change exists to stop making,
+    /// and `claude` now appears only as `integration::resolve`'s last resort,
+    /// in `src/integration.rs`. See `specs/plugin-config/spec.md`.
+    pub agent_kind: Option<String>,
+    /// Per-kind prompt overrides, read from an optional `[prompts]` table
+    /// whose sub-tables are keyed by agent kind: kind, then intent name
+    /// (`apply`, `continue`, or `archive`), then the text. A `BTreeMap` of
+    /// `BTreeMap`s rather than a struct, because `continue` is a Rust keyword
+    /// and a new struct would owe `NODEFAULT-UI` a scanned set for a key that
+    /// has no field whose default could be silently wrong — see design.md ->
+    /// Decisions 9. Defaults to the empty map.
+    pub prompts: BTreeMap<String, BTreeMap<String, String>>,
     /// Number of archived changes listed below the separator. Defaults to `5`.
     pub archived_count: usize,
     /// Human-readable descriptions of every fallback this load took, so a
@@ -27,7 +42,8 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             openspec_bin: None,
-            agent_kind: "claude".to_string(),
+            agent_kind: None,
+            prompts: BTreeMap::new(),
             archived_count: 5,
             problems: Vec::new(),
         }
@@ -148,11 +164,21 @@ pub fn load(dir: Option<&std::path::Path>, env: &dyn Fn(&str) -> Option<String>)
 
     if let Some(value) = table.get("agent_kind") {
         match value.as_str() {
-            Some(s) => config.agent_kind = s.to_string(),
+            // A blank string in a hand-edited file is a reader who meant to
+            // set something, not one who meant to set nothing, so falling
+            // silently through to a resolved kind would hide the typo.
+            Some(s) if s.trim().is_empty() => config
+                .problems
+                .push("agent_kind is empty - remove the key or name a kind".to_string()),
+            Some(s) => config.agent_kind = Some(s.trim().to_string()),
             None => config
                 .problems
                 .push("agent_kind is not a string".to_string()),
         }
+    }
+
+    if let Some(value) = table.get("prompts") {
+        read_prompts(value, &mut config);
     }
 
     if let Some(value) = table.get("archived_count") {
@@ -165,6 +191,57 @@ pub fn load(dir: Option<&std::path::Path>, env: &dyn Fn(&str) -> Option<String>)
     }
 
     config
+}
+
+/// Read the `[prompts]` table into [`Config::prompts`], degrading per entry on
+/// `state::read`'s established rule: a `prompts` value that is not a table, a
+/// kind whose value is not a table, and an intent whose value is not a string
+/// are each skipped with exactly one problem naming what was skipped, while
+/// every well-formed entry in the same file still reaches `Config`.
+///
+/// Only the three intent names are read from a kind's sub-table; any other key
+/// is ignored **without comment**, on exactly the top-level unrecognised-key
+/// rule's terms, so a newer plugin's configuration can be read by an older
+/// binary. A blank override is treated as absent and reports one problem, on
+/// exactly `agent_kind`'s terms — the built-in prompt is then used.
+fn read_prompts(value: &toml::Value, config: &mut Config) {
+    const INTENTS: [&str; 3] = ["apply", "continue", "archive"];
+
+    let Some(kinds) = value.as_table() else {
+        config
+            .problems
+            .push("prompts is not a table of per-kind prompt overrides".to_string());
+        return;
+    };
+
+    for (kind, kind_value) in kinds {
+        let Some(intents) = kind_value.as_table() else {
+            config
+                .problems
+                .push(format!("prompts.{kind} is not a table"));
+            continue;
+        };
+        let mut overrides = BTreeMap::new();
+        for intent in INTENTS {
+            let Some(text) = intents.get(intent) else {
+                continue;
+            };
+            match text.as_str() {
+                Some(s) if s.trim().is_empty() => config
+                    .problems
+                    .push(format!("prompts.{kind}.{intent} is empty")),
+                Some(s) => {
+                    overrides.insert(intent.to_string(), s.to_string());
+                }
+                None => config
+                    .problems
+                    .push(format!("prompts.{kind}.{intent} is not a string")),
+            }
+        }
+        if !overrides.is_empty() {
+            config.prompts.insert(kind.clone(), overrides);
+        }
+    }
 }
 
 /// The single binding of a name to `std::env::var` in this crate. Treated as
@@ -313,7 +390,7 @@ mod tests {
             cfg.openspec_bin,
             Some(std::path::PathBuf::from("/opt/bin/openspec"))
         );
-        assert_eq!(cfg.agent_kind, "codex");
+        assert_eq!(cfg.agent_kind, Some("codex".to_string()));
         assert_eq!(cfg.archived_count, 12);
         assert!(cfg.problems.is_empty());
     }
@@ -349,7 +426,11 @@ mod tests {
         write_config(scratch.path(), "archived_count = 0\n");
         let cfg = super::load(Some(scratch.path()), &env(&[]));
         assert_eq!(cfg.archived_count, 0);
-        assert_eq!(cfg.agent_kind, "claude");
+        assert_eq!(
+            cfg.agent_kind, None,
+            "a reader who has never written a config.toml reaches the precedence, \
+             not a constant"
+        );
         assert_eq!(cfg.openspec_bin, None);
         assert!(cfg.problems.is_empty());
     }
@@ -362,7 +443,7 @@ mod tests {
             "agent_kind = \"codex\"\nfuture_setting = \"x\"\n[some_table]\nkey = 1\n",
         );
         let cfg = super::load(Some(scratch.path()), &env(&[]));
-        assert_eq!(cfg.agent_kind, "codex");
+        assert_eq!(cfg.agent_kind, Some("codex".to_string()));
         assert!(cfg.problems.is_empty());
     }
 
@@ -372,7 +453,7 @@ mod tests {
         write_config(scratch.path(), "agent_kind = = \"codex\"\n");
         let cfg = super::load(Some(scratch.path()), &env(&[]));
         assert_eq!(cfg.openspec_bin, None);
-        assert_eq!(cfg.agent_kind, "claude");
+        assert_eq!(cfg.agent_kind, None);
         assert_eq!(cfg.archived_count, 5);
         assert_eq!(cfg.problems.len(), 1);
         assert!(cfg.problems[0].contains("config.toml"));
@@ -388,7 +469,7 @@ mod tests {
         let cfg = super::load(Some(scratch.path()), &env(&[]));
         assert_eq!(cfg.openspec_bin, None);
         assert_eq!(cfg.archived_count, 5);
-        assert_eq!(cfg.agent_kind, "codex");
+        assert_eq!(cfg.agent_kind, Some("codex".to_string()));
         assert_eq!(cfg.problems.len(), 2);
         assert!(cfg.problems.iter().any(|p| p.contains("openspec_bin")));
         assert!(cfg.problems.iter().any(|p| p.contains("archived_count")));
@@ -410,7 +491,7 @@ mod tests {
         fs::create_dir(scratch.path().join("config.toml")).expect("create dir as config.toml");
         let cfg = super::load(Some(scratch.path()), &env(&[]));
         assert_eq!(cfg.openspec_bin, None);
-        assert_eq!(cfg.agent_kind, "claude");
+        assert_eq!(cfg.agent_kind, None);
         assert_eq!(cfg.archived_count, 5);
         assert_eq!(cfg.problems.len(), 1);
         assert!(cfg.problems[0].contains("config.toml"));
@@ -506,6 +587,167 @@ mod tests {
         super::load(Some(scratch.path()), &env(&[]));
         let after = snapshot(scratch.path());
         assert_eq!(before, after);
+    }
+
+    // --- agent-client-choice: agent_kind as an override, and [prompts] ------
+
+    #[test]
+    fn a_blank_agent_kind_is_not_a_value() {
+        for blank in ["\"\"", "\"   \""] {
+            let scratch = ScratchDir::new();
+            write_config(scratch.path(), &format!("agent_kind = {blank}\n"));
+            let cfg = super::load(Some(scratch.path()), &env(&[]));
+            assert_eq!(cfg.agent_kind, None, "{blank}");
+            assert_eq!(cfg.problems.len(), 1, "{blank}: {:?}", cfg.problems);
+            assert!(cfg.problems[0].contains("agent_kind"), "{:?}", cfg.problems);
+        }
+
+        // Surrounding whitespace is trimmed and honoured, not rejected.
+        let scratch = ScratchDir::new();
+        write_config(scratch.path(), "agent_kind = \"  codex  \"\n");
+        let cfg = super::load(Some(scratch.path()), &env(&[]));
+        assert_eq!(cfg.agent_kind, Some("codex".to_string()));
+        assert!(cfg.problems.is_empty(), "{:?}", cfg.problems);
+    }
+
+    /// The `list-sections` scenario, restated for `Option<String>`: `Config`
+    /// still carries the count, and nothing reads it.
+    #[test]
+    fn a_pre_list_sections_configuration_loads_unchanged() {
+        let scratch = ScratchDir::new();
+        write_config(
+            scratch.path(),
+            "openspec_bin = \"/opt/bin/openspec\"\nagent_kind = \"codex\"\narchived_count = 25\n",
+        );
+        let cfg = super::load(Some(scratch.path()), &env(&[]));
+        assert_eq!(
+            cfg.openspec_bin,
+            Some(std::path::PathBuf::from("/opt/bin/openspec"))
+        );
+        assert_eq!(cfg.agent_kind, Some("codex".to_string()));
+        assert_eq!(cfg.archived_count, 25);
+        assert!(cfg.problems.is_empty(), "{:?}", cfg.problems);
+    }
+
+    #[test]
+    fn a_well_formed_override_table_reaches_config() {
+        let scratch = ScratchDir::new();
+        write_config(
+            scratch.path(),
+            "[prompts.codex]\napply = \"do {change}\"\narchive = \"archive {change}\"\n\n             [prompts.gemini]\ncontinue = \"next\"\n",
+        );
+        let cfg = super::load(Some(scratch.path()), &env(&[]));
+
+        assert_eq!(cfg.prompts.len(), 2, "{:?}", cfg.prompts);
+        assert_eq!(
+            cfg.prompts
+                .get("codex")
+                .map(std::collections::BTreeMap::len),
+            Some(2)
+        );
+        assert_eq!(
+            cfg.prompts.get("codex").and_then(|m| m.get("apply")),
+            Some(&"do {change}".to_string())
+        );
+        assert_eq!(
+            cfg.prompts.get("gemini").and_then(|m| m.get("continue")),
+            Some(&"next".to_string())
+        );
+        assert!(cfg.problems.is_empty(), "{:?}", cfg.problems);
+        assert!(
+            !cfg.prompts.contains_key("claude"),
+            "a lookup for an unmentioned kind finds nothing, so the built-in text is used"
+        );
+    }
+
+    #[test]
+    fn no_prompts_table_at_all() {
+        let scratch = ScratchDir::new();
+        write_config(scratch.path(), "agent_kind = \"codex\"\n");
+        let cfg = super::load(Some(scratch.path()), &env(&[]));
+        assert!(cfg.prompts.is_empty(), "{:?}", cfg.prompts);
+        assert!(cfg.problems.is_empty(), "{:?}", cfg.problems);
+    }
+
+    #[test]
+    fn one_malformed_override_entry_is_skipped_and_the_rest_survive() {
+        let scratch = ScratchDir::new();
+        write_config(
+            scratch.path(),
+            "[prompts.codex]\napply = \"do {change}\"\ncontinue = 7\nunknown_intent = \"x\"\n",
+        );
+        let cfg = super::load(Some(scratch.path()), &env(&[]));
+
+        let codex = cfg.prompts.get("codex").expect("codex survives");
+        assert_eq!(codex.get("apply"), Some(&"do {change}".to_string()));
+        assert_eq!(codex.get("continue"), None);
+        assert_eq!(cfg.problems.len(), 1, "{:?}", cfg.problems);
+        assert!(
+            cfg.problems[0].contains("prompts.codex.continue"),
+            "{:?}",
+            cfg.problems
+        );
+        assert!(
+            !cfg.problems[0].contains("unknown_intent"),
+            "an unrecognised key is ignored without comment: {:?}",
+            cfg.problems
+        );
+    }
+
+    #[test]
+    fn a_prompts_value_that_is_not_a_table_degrades_wholesale() {
+        let scratch = ScratchDir::new();
+        write_config(
+            scratch.path(),
+            "prompts = \"yes\"\nagent_kind = \"codex\"\narchived_count = 7\n",
+        );
+        let cfg = super::load(Some(scratch.path()), &env(&[]));
+
+        assert!(cfg.prompts.is_empty(), "{:?}", cfg.prompts);
+        assert_eq!(cfg.problems.len(), 1, "{:?}", cfg.problems);
+        assert!(cfg.problems[0].contains("prompts"), "{:?}", cfg.problems);
+        assert_eq!(
+            cfg.agent_kind,
+            Some("codex".to_string()),
+            "one bad key costs one setting"
+        );
+        assert_eq!(cfg.archived_count, 7);
+
+        // A kind whose own value is not a table degrades the same way, per
+        // entry rather than wholesale.
+        let scratch = ScratchDir::new();
+        write_config(
+            scratch.path(),
+            "[prompts]\ncodex = \"yes\"\n\n[prompts.gemini]\napply = \"go\"\n",
+        );
+        let cfg = super::load(Some(scratch.path()), &env(&[]));
+        assert_eq!(cfg.prompts.len(), 1, "{:?}", cfg.prompts);
+        assert!(cfg.prompts.contains_key("gemini"));
+        assert_eq!(cfg.problems.len(), 1, "{:?}", cfg.problems);
+        assert!(
+            cfg.problems[0].contains("prompts.codex"),
+            "{:?}",
+            cfg.problems
+        );
+    }
+
+    #[test]
+    fn a_blank_override_is_treated_as_absent() {
+        let scratch = ScratchDir::new();
+        write_config(scratch.path(), "[prompts.codex]\napply = \"   \"\n");
+        let cfg = super::load(Some(scratch.path()), &env(&[]));
+
+        assert!(
+            !cfg.prompts.contains_key("codex"),
+            "a kind whose only override is blank carries none: {:?}",
+            cfg.prompts
+        );
+        assert_eq!(cfg.problems.len(), 1, "{:?}", cfg.problems);
+        assert!(
+            cfg.problems[0].contains("prompts.codex.apply"),
+            "{:?}",
+            cfg.problems
+        );
     }
 
     #[test]

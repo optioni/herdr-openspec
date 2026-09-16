@@ -433,7 +433,7 @@ fn dead_worker_outcome() -> Outcome {
 pub fn start(
     cli: std::sync::Arc<dyn crate::cli::HerdrCli>,
     repo: std::path::PathBuf,
-    kind: String,
+    kind: Option<String>,
     state_dir: Option<std::path::PathBuf>,
 ) -> Box<dyn Launcher> {
     let (request_tx, request_rx) = std::sync::mpsc::channel();
@@ -487,11 +487,17 @@ pub fn settle(launcher: &mut dyn Launcher, budget: std::time::Duration) -> Optio
 fn worker_body(
     cli: std::sync::Arc<dyn crate::cli::HerdrCli>,
     repo: std::path::PathBuf,
-    kind: String,
+    kind: Option<String>,
     state_dir: Option<std::path::PathBuf>,
     request_rx: std::sync::mpsc::Receiver<Request>,
     result_tx: std::sync::mpsc::Sender<Outcome>,
 ) {
+    // `agent-client-choice` group 3: `Config::agent_kind` is an override with
+    // no default, so the worker falls back to `integration`'s own last-resort
+    // constant rather than reintroducing a `"claude"` literal under `src/ui/`.
+    // Group 7 replaces this parameter entirely with `Settings`, where the
+    // fallback becomes the five-step precedence.
+    let kind = kind.unwrap_or_else(|| crate::integration::LAST_RESORT.to_string());
     loop {
         let Ok(request) = request_rx.recv() else {
             return; // the launcher was dropped
@@ -1603,7 +1609,7 @@ mod tests {
                 super::super::worker_body(
                     cli,
                     PathBuf::from("/repo"),
-                    "codex".to_string(),
+                    Some("codex".to_string()),
                     None,
                     request_rx,
                     result_tx,
@@ -1681,7 +1687,7 @@ mod tests {
                 release_rx: std::sync::Mutex::new(Some(release_rx)),
             });
             let mut launcher =
-                super::super::start(cli, PathBuf::from("/repo"), "codex".to_string(), None);
+                super::super::start(cli, PathBuf::from("/repo"), Some("codex".to_string()), None);
             launcher.request(Request::Launch {
                 change: "add-auth".to_string(),
                 agent: "add-auth".to_string(),
@@ -1815,7 +1821,7 @@ mod tests {
             );
             let cli: std::sync::Arc<dyn crate::cli::HerdrCli> = std::sync::Arc::new(fake);
             let mut launcher =
-                super::super::start(cli, PathBuf::from("/repo"), "codex".to_string(), None);
+                super::super::start(cli, PathBuf::from("/repo"), Some("codex".to_string()), None);
             launcher.request(Request::Focus {
                 pane_id: "wD:pJ".to_string(),
             });
@@ -1874,7 +1880,7 @@ mod tests {
             let mut launcher = super::super::start(
                 cli,
                 PathBuf::from("/repo"),
-                "codex".to_string(),
+                Some("codex".to_string()),
                 Some(state.path().to_path_buf()),
             );
             launcher.request(Request::Launch {

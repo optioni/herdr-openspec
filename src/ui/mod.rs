@@ -3731,7 +3731,7 @@ esac
 
                 let config = Config {
                     openspec_bin: Some(openspec_bin.clone()),
-                    agent_kind: "codex".to_string(),
+                    agent_kind: Some("codex".to_string()),
                     ..Config::default()
                 };
 
@@ -3863,7 +3863,7 @@ esac
 
                 let config = Config {
                     openspec_bin: Some(openspec),
-                    agent_kind: "gemini".to_string(),
+                    agent_kind: Some("gemini".to_string()),
                     ..Config::default()
                 };
 
@@ -4050,7 +4050,7 @@ esac
 
             let config = Config {
                 openspec_bin: Some(openspec),
-                agent_kind: "codex".to_string(),
+                agent_kind: Some("codex".to_string()),
                 ..Config::default()
             };
 
