@@ -3872,20 +3872,28 @@ mod tests {
             .iter()
             .position(|r| matches!(r.kind, crate::ui::detail::ContentKind::SectionHeader { .. }))
             .expect("the fixture is foldable, so it draws header rows");
+        // `task-item-bodies`: a `None`-labelled section's body now goes
+        // through `ui::tasks::group_body`, which draws that section's own
+        // blocks and item bodies beside its items rather than items alone —
+        // so the preamble's prose, retained as its leading group's
+        // position-0 block, now draws a row of its own, wrapped in the
+        // block's own blank separators, and the fold's own blank separator
+        // follows before the first header: bar, blank, blank, `Intro
+        // prose.`, blank, blank.
         assert_eq!(
-            first_header, 2,
-            "the progress-bar row and its blank line precede every header"
+            first_header, 6,
+            "the progress-bar row, its blank line, and the preamble's block-wrapped prose \
+             precede every header"
         );
-        // `Intro prose.` itself draws **no** row on this tab: a `None`-labelled
-        // section's body goes through `ui::tasks::items`, which renders task
-        // items and nothing else, and that text holds none. So the rows above
-        // the first header are exactly the bar row and its blank line —
-        // narrower than the scenario's "through the last line of `Intro
-        // prose.`", which names rows this grammar does not draw. Asserted here
-        // so the finding cannot rot into a stale comment.
         assert!(
-            rows.iter().all(|r| !r.line.text().contains("Intro prose.")),
-            "the preamble's prose is not drawn on the tracked-tasks tab"
+            rows[..first_header]
+                .iter()
+                .any(|r| r.line.text() == "Intro prose."),
+            "the preamble's prose is now drawn, as its leading group's own block: {:?}",
+            rows[..first_header]
+                .iter()
+                .map(|r| r.line.text())
+                .collect::<Vec<_>>()
         );
 
         for row in 0..first_header {
