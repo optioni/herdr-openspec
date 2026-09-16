@@ -772,26 +772,23 @@ pub fn content_lines(
                 let indent = " ".repeat(indent_cols as usize);
                 let body_width = width.saturating_sub(indent_cols);
                 let body = match tracked_tasks_progress {
-                    // `task-item-bodies` -> group 5 owns folding this walk
-                    // over every group a multi-heading section might parse
-                    // to, blocks included; this call keeps the previous
-                    // items-only, flattened-across-groups behaviour this
-                    // section walk has always produced, as a mechanical
-                    // stand-in until then, so a preamble's own prose (a
-                    // block, never an item) still draws no row here.
-                    Some(_) => {
-                        let items: Vec<crate::tasks::Item> = crate::tasks::parse(&section.text)
-                            .groups
-                            .into_iter()
-                            .flat_map(|g| g.items)
-                            .collect();
-                        let merged = crate::tasks::Group {
-                            heading: None,
-                            items,
-                            blocks: Vec::new(),
-                        };
-                        crate::ui::tasks::group_body(&merged, body_width)
-                    }
+                    // A section's own text never carries a heading of its
+                    // own — that heading became this section's header row
+                    // above, via `split_headings` — so `tasks::parse` over
+                    // it almost always yields exactly one group. Walking
+                    // every group it does yield, rather than assuming one,
+                    // is what a multi-heading section would need, and costs
+                    // nothing when there is only one (design.md -> D5).
+                    // `group_body` draws each group's own blocks and its
+                    // items' own bodies beside its items (D9, D10); no
+                    // separator is inserted between two groups here, since
+                    // nothing else marks the boundary between them once
+                    // their own headings are gone.
+                    Some(_) => crate::tasks::parse(&section.text)
+                        .groups
+                        .iter()
+                        .flat_map(|group| crate::ui::tasks::group_body(group, body_width))
+                        .collect(),
                     None => crate::ui::markdown::lines(&section.text, body_width),
                 };
                 let non_empty = !body.is_empty();
