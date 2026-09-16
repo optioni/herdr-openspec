@@ -86,7 +86,7 @@ emphasis, strong, code spans, links, and strikethrough set their faces, and no l
 This **retires** the rule that an item's text is unfaced, and with it the guarantee that
 `Line::text()` is byte-identical to what this capability produced before. That guarantee
 cannot survive facing and is deliberately given up: a fragment reading
-``add the `CrosstermOps` implementation`` renders as `add the CrosstermOps implementation`
+``add the `Recorder` implementation`` renders as `add the Recorder implementation`
 with a `code`-faced segment, its backticks consumed. The reason the guarantee is not worth
 keeping is the defect it would preserve — an item's text and its body are one sentence in the
 source, and rendering the first row with literal backticks beside a body row with a styled

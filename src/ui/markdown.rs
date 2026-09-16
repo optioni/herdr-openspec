@@ -3492,13 +3492,13 @@ mod tests {
 
     #[test]
     fn a_fragments_inline_faces_are_set_and_its_text_is_unchanged() {
-        let text = "2.2 GREEN: add the `CrosstermOps` implementation, **bolded**, and *stressed*";
+        let text = "2.2 GREEN: add the `Recorder` implementation, **bolded**, and *stressed*";
         for width in [78, 58] {
             let out = inline(text, width);
             let segments: Vec<&Segment> = out.iter().flat_map(|l| l.segments.iter()).collect();
             let concatenated: String = segments.iter().map(|s| s.text.as_str()).collect();
             assert!(
-                concatenated.contains("CrosstermOps"),
+                concatenated.contains("Recorder"),
                 "width {width}: {concatenated:?}"
             );
             assert!(
@@ -3512,8 +3512,8 @@ mod tests {
 
             let code = segments
                 .iter()
-                .find(|s| s.text == "CrosstermOps")
-                .unwrap_or_else(|| panic!("width {width}: no CrosstermOps segment"));
+                .find(|s| s.text == "Recorder")
+                .unwrap_or_else(|| panic!("width {width}: no Recorder segment"));
             assert!(code.face.code, "width {width}");
 
             let bolded = segments

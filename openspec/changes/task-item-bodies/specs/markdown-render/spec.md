@@ -68,11 +68,15 @@ subject does not move.
 #### Scenario: A fragment's inline faces are set and its text is unchanged
 
 - **WHEN** `inline` is called at width `78` and at width `58` with
-  `2.2 GREEN: add the `` `CrosstermOps` `` implementation, **bolded**, and *stressed*`
+  `2.2 GREEN: add the `` `Recorder` `` implementation, **bolded**, and *stressed*`
 - **THEN** at both widths the concatenated text of every returned segment holds
-  `CrosstermOps`, `bolded`, and `stressed` with their markers removed
-- **AND** the `CrosstermOps` segment carries `face.code`, the `bolded` segment
+  `Recorder`, `bolded`, and `stressed` with their markers removed
+- **AND** the `Recorder` segment carries `face.code`, the `bolded` segment
   `face.strong`, and the `stressed` segment `face.emphasis`
+- **AND** the identifier in the code span is `Recorder` and **not** `CrosstermOps`, which
+  `NORAW` confines to `src/ui/terminal.rs` and `src/ui/mod.rs` — a fixture naming it puts a
+  gate failure in whichever file quotes this scenario, and the scenario asserts that a code
+  span is faced, never which identifier sits inside it
 - **AND** every returned segment carries `face.heading == None`
 
 #### Scenario: A leading block marker is literal text, not a block
