@@ -240,6 +240,11 @@ the click on any other content row of a foldable artifact: **seven**, five befor
 `foldable-spec-sections` — and SHALL state that enabling mouse capture costs the terminal's
 own drag-to-select **outside the detail content area**.
 
+The table is the pane's **whole** mouse surface, not only this capability's seven: it also
+carries rows for bindings other capabilities define, `help-overlay`'s dismissing click and
+its overlay wheel among them. A binding the pane has and the table omits is a defect of this
+table wherever the binding was defined.
+
 **The bypass sentence is corrected here, because this change measured it and it was wrong.**
 `Option`+drag was observed **not** to restore selection under any mode set in Ghostty on
 macOS, while `Shift`+drag restored it under every one. `SPEC.md` SHALL name `Shift`, SHALL
@@ -261,9 +266,22 @@ A doc-conformance test SHALL bind both claims to the files that determine them, 
 added, removed, or renamed in `ui::driver::mouse_action` without the document following
 fails `cargo test`.
 
-**What that test's subject actually is, stated because it is narrower than it reads:** the
-leg extracts the backticked `Action::<Variant>` names from the table and compares that set
-against `mouse_action`'s body, as a **set equality**.
+**What that test's subject actually is, stated because it is narrower than it reads —
+and this paragraph is now superseded.** It read: "the leg extracts the backticked
+`Action::<Variant>` names from the table and compares that set against `mouse_action`'s body,
+as a **set equality**." That set equality is no longer the whole of the leg. It survives as
+the leg's **first** step, reporting a plain vocabulary mismatch in its existing terms; beyond
+it the table is bound by **executing** `mouse_action` at every cell of the swept frames and
+requiring, in both directions, that every observed behaviour is covered by a row and every row
+covers an observed behaviour. `doc-conformance` → "`SPEC.md`'s mouse table is bound by
+executing `mouse_action`, row by row" states that binding in full and owns its details.
+
+The reason for the change belongs here, because this requirement is where the narrower
+subject was written down as if it were sufficient: a set equality over names cannot see a row
+whose **prose** is wrong. `mouse-text-selection` left four false statements in this very table
+past a green `make check`, including a row still describing `Target::DetailLine` after that
+binding was removed. The narrowness was documented and then relied upon; documenting a
+weakness does not make it safe.
 
 **This change inverts the note that stood here.** `foldable-spec-sections` recorded that its
 two new gestures resolved to `Action::Click` and `Action::Ignore`, both already named, so the
@@ -281,6 +299,14 @@ own proof rather than something needing a separate negative control — though t
 - **THEN** every documented binding is implemented and every implemented binding is
   documented
 - **AND** the check fails when the mouse table is absent, rather than passing vacuously
+
+#### Scenario: The comparison is executed, not parsed
+
+- **WHEN** a row of the mouse table describes a binding `mouse_action` no longer produces,
+  while every `Action::` name in the table still appears in `mouse_action`'s source
+- **THEN** the check fails, because the row covers no behaviour the executed sweep observed
+- **AND** the set-equality step alone would have passed, which is the case that motivated
+  replacing it
 
 #### Scenario: The documented confined set matches the gate
 

@@ -248,10 +248,17 @@ function: `action_for` is a pure total function of an `Event` and a `bool` and
 `mouse_action` is a pure total function of a `Dashboard`, a `Rect`, and a `MouseEvent`,
 so the set each produces is **computable by calling it**, and a derivation that calls
 the function cannot disagree with the function the way a derivation that parses it can.
-This is what `SPEC.md`'s mouse table is bound by today
-(`tests/doc_contract.rs` -> `documented_mouse_actions`), one layer stronger: that check
-parses a markdown table and compares it against parsed source, and this one compares a
-`'static` value against a swept function.
+`SPEC.md`'s mouse table is bound the same executed way (`doc-conformance` ->
+"`SPEC.md`'s mouse table is bound by executing `mouse_action`, row by row"). The contrast
+that stood here is **superseded**: it read "one layer stronger: that check parses a markdown
+table and compares it against parsed source, and this one compares a `'static` value against
+a swept function", which was true only while the mouse table was bound by parsing. It is not
+a layer weaker now, and the two are no longer distinguished by that. What still separates
+them is **subject**, not strength: this requirement compares a `'static` value against the
+set of action **names** the sweep produces, while the mouse table's own check compares each
+documented **row** against the gesture, overlay state, zone and outcome the sweep observed.
+A binding missing from `INVENTORY` fails here; a row of `SPEC.md` describing a binding the
+pane does not have fails there.
 
 The derivation SHALL be:
 
