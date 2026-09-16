@@ -4121,6 +4121,64 @@ fn the_documented_key_set_and_the_inventory_agree_at_head() {
 }
 
 #[test]
+fn the_key_legs_are_unaffected_by_the_mouse_tables_stronger_binding() {
+    // `doc-conformance` -> "The key legs are unaffected by the mouse table's
+    // stronger binding". The mouse table is now bound by executing
+    // `mouse_action`; legs 2 and 3 still compare **key** atoms against
+    // `INVENTORY`, and the `Mouse` group is still excluded from that comparison
+    // because `README.md` documents no gesture at all.
+    let spec_md = read_doc(&manifest_dir().join("SPEC.md")).expect("read SPEC.md");
+    let readme = read_doc(&manifest_dir().join("README.md")).expect("read README.md");
+    let inventory = inventory_key_atoms();
+
+    let (spec_atoms, _) =
+        documented_key_atoms(&spec_md, "### Keys").expect("SPEC.md -> Keys' key table");
+    compare_key_atoms("SPEC.md -> Keys", &spec_atoms, &inventory).expect("leg 2 still agrees");
+    let (readme_atoms, _) =
+        documented_key_atoms(&readme, "## Keys").expect("README.md -> Keys' key table");
+    compare_key_atoms("README.md -> Keys", &readme_atoms, &inventory).expect("leg 3 still agrees");
+
+    // The exclusion, asserted directly rather than left to be inferred from the
+    // pinned atom count in `the_documented_key_set_and_the_inventory_agree_at_head`.
+    // Non-vacuous: the group exists and carries bindings.
+    let mouse_inputs: Vec<&str> = INVENTORY
+        .iter()
+        .filter(|group| group.title == "Mouse")
+        .flat_map(|group| group.bindings.iter())
+        .map(|binding| binding.input)
+        .collect();
+    assert!(
+        !mouse_inputs.is_empty(),
+        "INVENTORY carries a `Mouse` group, so excluding it is not vacuous"
+    );
+
+    // And load-bearing: folding it back in makes both legs fail, which is what
+    // says the exclusion is doing work rather than merely being harmless.
+    let mut with_mouse = inventory.clone();
+    for input in &mouse_inputs {
+        for atom in input.split(" / ") {
+            let atom = atom.trim();
+            if !atom.is_empty() {
+                with_mouse.insert(atom.to_string());
+            }
+        }
+    }
+    assert!(
+        with_mouse.len() > inventory.len(),
+        "the `Mouse` group contributes atoms of its own: {mouse_inputs:?}"
+    );
+    assert!(
+        compare_key_atoms("SPEC.md -> Keys", &spec_atoms, &with_mouse).is_err(),
+        "leg 2 compares key atoms only - the mouse table has its own, differently \
+         grammared check"
+    );
+    assert!(
+        compare_key_atoms("README.md -> Keys", &readme_atoms, &with_mouse).is_err(),
+        "leg 3 compares key atoms only - README.md documents no gesture at all"
+    );
+}
+
+#[test]
 fn a_gutted_document_fails_as_a_broken_control_rather_than_a_clean_tree() {
     // The section is gone.
     let no_section = "## Overview\n\nnothing here\n";
