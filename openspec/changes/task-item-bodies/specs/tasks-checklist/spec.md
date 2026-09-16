@@ -527,7 +527,8 @@ conflated. `No tasks yet` and `No content yet` SHALL never both appear for the s
   a heading and prose but no checkbox line at all, whose leading group therefore carries one
   block and no items
 - **THEN** at both widths the rows are the progress-bar line, a blank line, `No tasks yet`,
-  and then the block's own rows, in that order
+  **one blank line**, and then the block's own rows, in that order — the blank separating the
+  status row from the content beneath it
 - **AND** the block's text reaches the screen rather than being discarded with the items the
   document does not have
 - **AND** no heading line is drawn at either width, the source's heading notwithstanding

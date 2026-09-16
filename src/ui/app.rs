@@ -3876,12 +3876,18 @@ mod tests {
         // through `ui::tasks::group_body`, which draws that section's own
         // blocks and item bodies beside its items rather than items alone —
         // so the preamble's prose, retained as its leading group's
-        // position-0 block, now draws a row of its own, wrapped in the
-        // block's own blank separators, and the fold's own blank separator
-        // follows before the first header: bar, blank, blank, `Intro
-        // prose.`, blank, blank.
+        // position-0 block, now draws a row of its own: bar, blank, `Intro
+        // prose.`, the block's own closing blank, and the fold's separator.
+        //
+        // Five, not six. A position-0 block opens a section body with
+        // nothing above it to be separated from, and the separator rule
+        // emits a blank only where one is missing — so the preamble rows
+        // are exactly the three the amended scenario names, "the
+        // progress-bar row, its blank line, and the row `Intro prose.`
+        // itself now draws". An unconditional leading separator put a
+        // fourth, empty row above the prose and made that sentence false.
         assert_eq!(
-            first_header, 6,
+            first_header, 5,
             "the progress-bar row, its blank line, and the preamble's block-wrapped prose \
              precede every header"
         );

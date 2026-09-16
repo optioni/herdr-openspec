@@ -11,8 +11,11 @@ environment, network, or standard-I/O work, no clock, no global state, and no pa
 `&str` and any `u16`.
 
 `inline` exists because an item's text is a **fragment**, not a document. Handing
-`# not a heading` or `1. first` to the block parser reinterprets the fragment and eats its
-marker, which a renderer of task text must not do. Measured over this repository's archive,
+`# not a heading` or `1. first` to the block parser **reinterprets** the fragment — restyled,
+re-segmented, mis-faced, or dropped, not deleted — which a renderer of task text must not do.
+Measured: `lines` keeps the `#` and wrongly sets `heading: Some(1)`, `- ` and `> ` are
+*replaced* by `• ` and `│ `, `1. first` splits into two segments, and a leading `` ``` ``
+is the one case that deletes anything, returning **zero** rows. Measured over this repository's archive,
 **0 of 2,842** item texts would be reinterpreted today; the function is therefore justified
 structurally rather than by a live defect, and this sentence records that so a later reader
 does not mistake the measurement for a motivating bug.

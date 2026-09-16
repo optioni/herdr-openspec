@@ -177,10 +177,27 @@ leaves no text column the hang falls back to `prefix_len`, and only then does th
 prefix chain (indent, then glyph-only, then truncated glyph) apply. So a width that can hold
 the glyph and some text never loses the text to the number's indent.
 
-**10. Blocks draw at column zero with a blank row either side.** A block belongs to the group,
-not to the item above it, so it carries no hanging indent. The blank separators belong to the
+**10. Blocks draw at column zero, separated from the rows around them by exactly one blank
+row — and by none where there is no row to separate from.** A block belongs to the group, not
+to the item above it, so it carries no hanging indent. The blank separators belong to the
 block: a group with no blocks renders byte-identically to the group it was, blank rows included,
 which is what keeps every existing `tasks-checklist` scenario passing unchanged.
+
+The separator is emitted only where one is **missing**, which is one rule rather than three
+special cases. Emitting unconditionally was measured to produce all three of: a leading blank
+at the top of a section body, where nothing sits above the block at all — which falsifies
+`artifact-folds`' amended "`Space` on a preamble row is inert", whose preamble row set is
+exactly "the progress-bar row, its blank line, and the row `Intro prose.` itself now draws";
+a **double** blank between two blocks sharing an `after`, each contributing one; and a double
+blank after a fenced block, `ui::markdown::lines` already ending one with a blank of its own —
+which is what made "A group's block renders between the items it sits between" render six rows
+where it states five.
+
+The rule is relative to the rows of the **group** being filled, which is what a section body
+is. A caller appending a group's rows beneath a row of its own cannot be seen from there, so
+where such a row needs separating the caller pushes it: `ui::tasks::lines` does exactly this
+for the `No tasks yet` row, which is a status row rather than content and would otherwise read
+as the retained prose's own first line.
 
 **11. No second fold level.** Folding an item's body is the better end state — items carry
 4.72 body lines each here, so a 12-item group grows from ~12 rows to ~68 — but the detail cursor

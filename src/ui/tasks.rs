@@ -528,20 +528,36 @@ pub(crate) fn bar_lines(
 /// Every block `group` records at position `after`, each drawn through
 /// `ui::markdown::lines` at the group's own full `width` — no hanging
 /// indent, a block belonging to the group rather than to the item above it
-/// — and separated from the rows around it by one blank row either side
-/// (design.md -> Decision 10). A group carrying no block at that position
-/// contributes nothing, which is what keeps a blockless group's rows
-/// byte-identical to the group it was before blocks existed.
+/// — and separated from the rows around it by **exactly** one blank row,
+/// and by none where there is no row to separate it from (design.md ->
+/// Decision 10). A group carrying no block at that position contributes
+/// nothing, which is what keeps a blockless group's rows byte-identical to
+/// the group it was before blocks existed.
+///
+/// A separator is emitted only where one is missing, which is one rule
+/// rather than three special cases. Emitting unconditionally was measured
+/// to produce all three of: a leading blank at the very top of a section
+/// body, where nothing sits above the block to separate it from; a double
+/// blank between two blocks sharing an `after`, each contributing one; and
+/// a double blank after a fenced block, `ui::markdown::lines` already
+/// ending one with a blank row of its own.
 fn push_blocks(
     out: &mut Vec<crate::ui::markdown::Line>,
     group: &crate::tasks::Group,
     after: usize,
     width: u16,
 ) {
+    let is_blank = |line: &crate::ui::markdown::Line| line.text().trim().is_empty();
     for block in group.blocks.iter().filter(|b| b.after == after) {
-        out.push(blank_line());
-        out.extend(crate::ui::markdown::lines(&block.text, width));
-        out.push(blank_line());
+        if out.last().is_some_and(|last| !is_blank(last)) {
+            out.push(blank_line());
+        }
+        let rendered = crate::ui::markdown::lines(&block.text, width);
+        let ends_blank = rendered.last().is_some_and(is_blank);
+        out.extend(rendered);
+        if !ends_blank {
+            out.push(blank_line());
+        }
     }
 }
 
@@ -626,6 +642,16 @@ pub fn lines(
         // Decision 1a — and that prose is drawn beneath the row rather than
         // discarded with the items it does not have. `group_body` with an
         // empty `items` slice draws exactly that group's own blocks.
+        //
+        // The separating blank is pushed here rather than left to
+        // `push_blocks`, whose rule is relative to the rows of the group it
+        // is filling and which therefore cannot see the `No tasks yet` row
+        // above it. `No tasks yet` is a status row rather than content, and
+        // the blank is what keeps it from reading as the prose's own first
+        // line.
+        if tasks.groups.iter().any(|g| !g.blocks.is_empty()) {
+            out.push(blank_line());
+        }
         for group in &tasks.groups {
             out.extend(group_body(group, width));
         }
@@ -2039,30 +2065,28 @@ mod tests {
         for width in [78, 58] {
             let out = super::group_body(group, width);
             let texts: Vec<String> = out.iter().map(|l| l.text()).collect();
-            assert_eq!(texts[0], "[ ] a", "width {width}");
-            assert_eq!(texts.last().unwrap(), "[ ] b", "width {width}");
-            assert_eq!(texts[1], "", "width {width}: a blank row opens the block");
-            let code_idx = texts
-                .iter()
-                .position(|t| t.trim_start() == "make check")
-                .unwrap_or_else(|| panic!("width {width}: no `make check` row: {texts:?}"));
+            // The scenario's own five-row sequence, asserted in order
+            // rather than searched for. It is assertable because the
+            // separator rule emits a blank only where one is missing: a
+            // fenced block's rendering already ends in a blank of its own,
+            // and an unconditional closing separator made this six rows
+            // with a double blank before `[ ] b`.
             assert_eq!(
-                texts[code_idx], "make check",
-                "width {width}: a block carries no hanging indent"
+                texts,
+                vec![
+                    "[ ] a".to_string(),
+                    String::new(),
+                    "make check".to_string(),
+                    String::new(),
+                    "[ ] b".to_string(),
+                ],
+                "width {width}"
             );
+            let code_idx = 2;
             assert!(
                 out[code_idx].segments.iter().all(|s| s.face.code),
                 "width {width}: {:?}",
                 out[code_idx]
-            );
-            // A blank row closes the block, immediately before the next
-            // item — the block's own rendering may itself trail a further
-            // blank, a `ui::markdown::lines` property of the fenced
-            // content, not something this grammar adds.
-            assert_eq!(
-                texts[texts.len() - 2],
-                "",
-                "width {width}: a blank row precedes the next item"
             );
 
             let plain = super::group_body(plain_group, width);
