@@ -74,13 +74,21 @@ pub struct Heading {
     pub text: String,
 }
 
-/// One task line: its checked state, its trimmed text, and its indent —
-/// the number of whitespace characters preceding its bullet.
+/// One task line: its checked state, its trimmed text, its indent — the
+/// number of whitespace characters preceding its bullet — and the body it
+/// carries.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Item {
     pub checked: bool,
     pub text: String,
     pub indent: usize,
+    /// The lines following this item's bullet that continue it, joined with
+    /// `\n` and dedented to the shallowest non-blank line among them, so a
+    /// fence indented six columns under a bullet survives as a *fenced*
+    /// block rather than degrading to an indented-code one. The empty
+    /// string when the item has none, so that every item carries the field
+    /// and no consumer distinguishes absent from empty.
+    pub body: String,
 }
 
 /// Which third of a testing lifecycle a task's leading label names:
@@ -212,12 +220,28 @@ pub fn role_of(run: &str) -> Option<LabelRole> {
     }
 }
 
+/// One run of content inside a group that no item's body claimed: prose, a
+/// lifecycle comment, a fenced code block. `after` is the number of items
+/// preceding it in its group — zero for content above the group's first
+/// item — so a renderer places it in document order without a second pass
+/// over the source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Block {
+    pub text: String,
+    pub after: usize,
+}
+
 /// The task lines under one heading (or, for the leading group, under no
-/// heading at all), in document order.
+/// heading at all), in document order, plus the blocks that sit between
+/// them. Together with each item's own `body` the two fields **retain**
+/// every non-blank line of the group: a line is attributed to exactly one
+/// of them and never to both, so a renderer drawing every item, every body,
+/// and every block reproduces the source once over.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Group {
     pub heading: Option<Heading>,
     pub items: Vec<Item>,
+    pub blocks: Vec<Block>,
 }
 
 impl Group {
@@ -262,39 +286,228 @@ impl Tasks {
     }
 }
 
-/// Arrange `text`'s task lines into groups under the ATX headings above
-/// them. One pass over the same split-and-strip-`\r` lines as [`count`]: a
-/// line starting at column zero with one to six `#` followed by a space or
-/// the end of the line closes the current group and opens a new one; a
-/// line matching the task rule appends an item; every other line — prose —
-/// is discarded. The leading (headingless) group is emitted only when it
-/// holds at least one item; every group with a heading is emitted
-/// regardless, including one with no items and one whose heading text is
-/// empty. Never sorts, merges, deduplicates, or nests.
+/// Arrange `text`'s lines into groups under the ATX headings above them.
+/// One pass over the same split-and-strip-`\r` lines as [`count`]: a line
+/// starting at column zero with one to six `#` followed by a space or the
+/// end of the line closes the current group and opens a new one; a line
+/// matching the task rule appends an item; every other line is **retained**
+/// — as the preceding item's [`Item::body`] when it continues that item,
+/// and as one of the group's [`Group::blocks`] otherwise. Never both, so a
+/// consumer drawing all three reproduces each non-blank line once.
+///
+/// The leading (headingless) group is emitted only when it holds at least
+/// one item **or** at least one block — the block half is what keeps
+/// retention total, since 27 of this repository's 44 archived task files
+/// open with prose above their first heading. Every group with a heading is
+/// emitted regardless, including one with no items and one whose heading
+/// text is empty. Never sorts, merges, deduplicates, or nests, and
+/// retention changes none of that: a block between two items does not close
+/// a group, open one, or produce a third.
 pub fn parse(text: &str) -> Tasks {
     let mut groups = Vec::new();
-    let mut heading: Option<Heading> = None;
-    let mut items: Vec<Item> = Vec::new();
+    let mut group = GroupAcc::new(None);
 
     for raw_line in text.split('\n') {
         let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
         if let Some(new_heading) = heading_line(line) {
-            close_group(&mut groups, heading.take(), std::mem::take(&mut items));
-            heading = Some(new_heading);
+            close_group(
+                &mut groups,
+                std::mem::replace(&mut group, GroupAcc::new(None)),
+            );
+            group.heading = Some(new_heading);
         } else if let Some(parts) = task_line(line) {
-            items.push(Item {
+            group.push_item(Item {
                 checked: parts.checked,
                 text: parts.text.trim().to_string(),
                 indent: parts.indent,
+                body: String::new(),
             });
+        } else {
+            group.push_retained(line);
         }
     }
-    close_group(&mut groups, heading, items);
+    close_group(&mut groups, group);
 
     Tasks {
         groups,
         problems: Vec::new(),
     }
+}
+
+/// The group [`parse`] is currently filling: its heading, its items, the
+/// blocks between them, and the run of lines not yet attributed to either.
+///
+/// One accumulator rather than three interleaved state machines in the
+/// loop. `pending` is shared by the body and the block path because at most
+/// one of the two is ever open — `in_body` is the single bit that decides
+/// which of them a flush writes to — and `fence` is shared for the same
+/// reason: both paths take the same fence exception, and a fence cannot
+/// span a group.
+struct GroupAcc {
+    heading: Option<Heading>,
+    items: Vec<Item>,
+    blocks: Vec<Block>,
+    /// The lines retained so far, awaiting a flush.
+    pending: Vec<String>,
+    /// True while `pending` belongs to the last item's body rather than to
+    /// the next block.
+    in_body: bool,
+    /// The open fence's delimiter character and length, while one is open.
+    fence: Option<(char, usize)>,
+}
+
+impl GroupAcc {
+    fn new(heading: Option<Heading>) -> Self {
+        GroupAcc {
+            heading,
+            items: Vec::new(),
+            blocks: Vec::new(),
+            pending: Vec::new(),
+            in_body: false,
+            fence: None,
+        }
+    }
+
+    /// Close whatever run is open and start `item`'s body. A checkbox line
+    /// is never body text, at any indent: a nested sub-task is indented past
+    /// its parent's bullet and would otherwise be swallowed by it, and a
+    /// checkbox inside a fence must stay an item because [`count`] has no
+    /// fence exemption and the two entry points may not disagree.
+    fn push_item(&mut self, item: Item) {
+        self.flush();
+        self.items.push(item);
+        self.in_body = true;
+    }
+
+    /// Attribute one non-heading, non-task line to the open item's body or
+    /// to the next block.
+    fn push_retained(&mut self, line: &str) {
+        if self.fence.is_some() {
+            // Inside a fence every line belongs to the run that opened it,
+            // blank ones included: 46 of the archive's 112 column-zero
+            // fenced blocks hold a blank line, and ending the run there
+            // leaves delimiters that no longer pair.
+            self.pending.push(line.to_string());
+            if closes_fence(line, self.fence) {
+                self.fence = None;
+            }
+            return;
+        }
+
+        let blank = line.trim().is_empty();
+        if self.in_body {
+            let indent = self.items.last().map_or(0, |item| item.indent);
+            if blank || line_indent(line) > indent {
+                self.open_fence(line);
+                self.pending.push(line.to_string());
+                return;
+            }
+            // Non-blank at or below the item's own indent: the body ends
+            // here, and this line is the group's, not the item's.
+            self.flush();
+        }
+
+        if blank {
+            self.flush();
+            return;
+        }
+        self.open_fence(line);
+        self.pending.push(line.to_string());
+    }
+
+    fn open_fence(&mut self, line: &str) {
+        if let Some(fence) = fence_delimiter(line) {
+            self.fence = Some(fence);
+        }
+    }
+
+    /// Write `pending` to the open item's body or to a new block, whichever
+    /// `in_body` names, and reopen neither. Trailing blank lines are
+    /// stripped, so an item followed by a blank line and then a new item
+    /// carries an empty body rather than a body of one blank line.
+    fn flush(&mut self) {
+        while self.pending.last().is_some_and(|l| l.trim().is_empty()) {
+            self.pending.pop();
+        }
+        self.fence = None;
+        if !self.pending.is_empty() {
+            if self.in_body {
+                let body = dedent(&self.pending);
+                if let Some(item) = self.items.last_mut() {
+                    item.body = body;
+                }
+            } else {
+                self.blocks.push(Block {
+                    text: self.pending.join("\n"),
+                    after: self.items.len(),
+                });
+            }
+        }
+        self.pending.clear();
+        self.in_body = false;
+    }
+}
+
+/// `lines` joined with `\n`, each dedented by the leading-whitespace count
+/// of the shallowest non-blank line among them, so the run's own relative
+/// indentation survives while its position under a bullet does not.
+fn dedent(lines: &[String]) -> String {
+    let shallowest = lines
+        .iter()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| line_indent(l))
+        .min()
+        .unwrap_or(0);
+    lines
+        .iter()
+        .map(|line| {
+            let mut chars = line.chars();
+            for _ in 0..shallowest {
+                match chars.clone().next() {
+                    Some(c) if is_task_whitespace(c) => {
+                        chars.next();
+                    }
+                    _ => break,
+                }
+            }
+            chars.as_str()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The number of [`is_task_whitespace`] characters `line` opens with,
+/// counted as characters rather than columns — the same measure
+/// [`task_line`] reports as an item's `indent`, so the two are comparable.
+fn line_indent(line: &str) -> usize {
+    line.chars().take_while(|&c| is_task_whitespace(c)).count()
+}
+
+/// If `line` opens a fence — a first non-whitespace run of three or more
+/// `` ` `` or `~` characters — that run's character and length.
+fn fence_delimiter(line: &str) -> Option<(char, usize)> {
+    let rest = line.trim_start_matches(is_task_whitespace);
+    let marker = rest.chars().next()?;
+    if marker != '`' && marker != '~' {
+        return None;
+    }
+    let len = rest.chars().take_while(|&c| c == marker).count();
+    (len >= 3).then_some((marker, len))
+}
+
+/// True when `line` closes the fence `open` opened: the same delimiter
+/// character, a run at least as long, and nothing but whitespace after it.
+/// The trailing test is what stops a second ```` ```rust ```` inside a block
+/// from closing the first.
+fn closes_fence(line: &str, open: Option<(char, usize)>) -> bool {
+    let Some((marker, len)) = open else {
+        return false;
+    };
+    let Some((found, found_len)) = fence_delimiter(line) else {
+        return false;
+    };
+    let rest = line.trim_start_matches(is_task_whitespace);
+    found == marker && found_len >= len && rest[found_len..].trim().is_empty()
 }
 
 /// Read a task file at `path`, without writing anything. Never returns a
@@ -329,12 +542,20 @@ pub fn read(path: &std::path::Path) -> Tasks {
     }
 }
 
-/// Push the group being closed, unless it is the leading (headingless)
-/// group and holds no items — the one case `parse`'s doc comment names as
-/// suppressed.
-fn close_group(groups: &mut Vec<Group>, heading: Option<Heading>, items: Vec<Item>) {
-    if heading.is_some() || !items.is_empty() {
-        groups.push(Group { heading, items });
+/// Flush whatever run `group` still holds open and push it, unless it is
+/// the leading (headingless) group and holds neither an item nor a block —
+/// the one case `parse`'s doc comment names as suppressed. The block half
+/// of that condition is what a document of prose alone turns on: without it
+/// the prose is retained into a group that is then thrown away, and "every
+/// retained line appears exactly once" cannot hold.
+fn close_group(groups: &mut Vec<Group>, mut group: GroupAcc) {
+    group.flush();
+    if group.heading.is_some() || !group.items.is_empty() || !group.blocks.is_empty() {
+        groups.push(Group {
+            heading: group.heading,
+            items: group.items,
+            blocks: group.blocks,
+        });
     }
 }
 
@@ -1140,7 +1361,10 @@ mod tests {
                 groups: vec![super::Group {
                     heading: None,
                     items: vec![],
-                    blocks: vec![block("Some prose that mentions nothing checkbox-shaped.", 0)],
+                    blocks: vec![block(
+                        "Some prose that mentions nothing checkbox-shaped.",
+                        0
+                    )],
                 }],
                 problems: vec![],
             }

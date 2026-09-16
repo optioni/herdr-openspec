@@ -136,7 +136,10 @@ fn retained_other_lines(parsed: &Tasks) -> Vec<String> {
 #[test]
 fn retention_leaves_every_count_in_the_archive_unmoved() {
     let files = corpus();
-    println!("retention_leaves_every_count_in_the_archive_unmoved: swept {} files", files.len());
+    println!(
+        "retention_leaves_every_count_in_the_archive_unmoved: swept {} files",
+        files.len()
+    );
     assert!(
         !files.is_empty(),
         "the corpus sweep selected zero files: a mistyped path finds nothing and passes vacuously"
@@ -199,7 +202,10 @@ fn every_retained_line_appears_exactly_once() {
         // when the parse holds a line the source does not, and pins the order.
         let expected = source_other_lines(&text);
         let retained = retained_other_lines(&parsed);
-        assert_eq!(retained, expected, "{relative}: retention is not a partition");
+        assert_eq!(
+            retained, expected,
+            "{relative}: retention is not a partition"
+        );
         lines_compared += expected.len();
 
         // The other two thirds of the partition: no heading and no item line
