@@ -159,13 +159,26 @@ re-run by 1.9 and 4.5, not rewrites.
 
 <!-- kind: operational -->
 
-- [ ] 2.1 CHECK: Dispatch an independent reviewer — not a fork of this session — against
+- [x] 2.1 CHECK: Dispatch an independent reviewer — not a fork of this session — against
       proposal.md, both MODIFIED requirements, design.md, and the diff. Point it first at the
       two concentration points this change can actually fail on: a rewritten assertion that
       counts a glyph the fixture never reaches, and a scenario that passes against a
       production caller handing `progress_bar` an empty slice.
-- [ ] 2.2 CHANGE: Fix every CRITICAL, resolve or accept each WARNING with a one-line reason,
+- [x] 2.2 CHANGE: Fix every CRITICAL, resolve or accept each WARNING with a one-line reason,
       note SUGGESTIONs, and re-run the affected tests.
+      **No CRITICAL and no WARNING was found.** All three SUGGESTIONs were taken:
+      (a) the "no position is drawn with both families" clause in
+      `segmentation_is_total_and_partitions_the_run_exactly` was a tautology — `is_block` and
+      `is_braille` are disjoint sets of `char`s — so it was dropped, keeping the
+      non-interleaving half that does fail on a scatter, and the scenario's own bullet was
+      reworded to say so rather than leaving the code and the spec disagreeing;
+      (b) the whole-line identity `two_groups_of_unequal_size…` lost in the reglyphing was
+      restored as the three-way inverse map `▒`→`█`, `⢕`/`⠌`→`░`, which pins that
+      segmentation moved neither cell nor the gauge's length, and the scenario gained an AND
+      clause for it; (c) `a_group_straddling_the_fill_boundary_keeps_one_identity` sliced
+      before its straddle guard ran, so a regression would have surfaced as a slice panic
+      instead of the message written for it — the guard moved above the slices.
+      `cargo test --lib ui::tasks` — 41 passed.
 - [ ] 2.3 VERIFY: Confirm no blocking or unowned finding remains, and that any artifact a
       finding changed was updated rather than only the code.
 

@@ -1250,8 +1250,16 @@ mod tests {
             assert_eq!(filled_count(&bar), g * 3 / 12, "width {width}");
 
             // And the empty-slice call holds only `█` and `░`, with the same
-            // filled count and no braille anywhere.
+            // filled count and no braille anywhere. Mapping the segmented line
+            // back through the inverse substitution reproduces it exactly,
+            // which is what pins that segmentation moved neither cell nor the
+            // gauge's length — not only its glyphs.
             let plain = progress_bar(&progress, &[], width);
+            assert_eq!(
+                bar.replace('▒', "█").replace('⢕', "░").replace('⠌', "░"),
+                plain,
+                "width {width}: segmentation moved something other than a glyph"
+            );
             let plain_run = gauge_run(&plain);
             assert!(
                 plain_run.chars().all(|c| c == '█' || c == '░'),
@@ -1470,8 +1478,14 @@ mod tests {
             let (first, second) = chars.split_at(split);
 
             // Group 0 straddles the fill boundary at `floor(g/4)`: `█` before
-            // it and `⢕` after, both the even-indexed pair.
+            // it and `⢕` after, both the even-indexed pair. The straddle guard
+            // runs **first**, so a regression that moved the fill past the
+            // group boundary reports that rather than panicking on the slice.
             let fill = g / 4;
+            assert!(
+                fill > 0 && fill < split,
+                "width {width}: g {g} must straddle"
+            );
             assert!(
                 first[..fill].iter().all(|&c| c == '█'),
                 "width {width}: {run:?}"
@@ -1479,10 +1493,6 @@ mod tests {
             assert!(
                 first[fill..].iter().all(|&c| c == '⢕'),
                 "width {width}: {run:?}"
-            );
-            assert!(
-                fill > 0 && fill < split,
-                "width {width}: g {g} must straddle"
             );
 
             // Group 1 is wholly empty and wholly odd.
@@ -1591,15 +1601,13 @@ mod tests {
                     filled_count(&progress_bar(progress, &[], width)),
                     "case {index} width {width}: the fill moved"
                 );
-                // No position is drawn with both families, and the two never
-                // interleave: every braille position lies at or after every
-                // block one, so the fill boundary is a single transition
-                // rather than a scatter.
+                // The two families never interleave: every braille position
+                // lies at or after every block one, so the fill boundary is a
+                // single transition rather than a scatter. (No "and no
+                // position is both" clause: `is_block` and `is_braille` are
+                // disjoint by construction, so asserting it could not fail,
+                // and this repository does not keep tests that cannot.)
                 let chars: Vec<char> = run.chars().collect();
-                assert!(
-                    chars.iter().all(|&c| !(is_block(c) && is_braille(c))),
-                    "case {index} width {width}: {run:?}"
-                );
                 let last_block = chars.iter().rposition(|&c| is_block(c));
                 let first_braille = chars.iter().position(|&c| is_braille(c));
                 if let (Some(last_block), Some(first_braille)) = (last_block, first_braille) {

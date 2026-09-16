@@ -290,6 +290,10 @@ repair.
   `floor(g * 3 / 12)` at each width, the same count the unsegmented gauge produces
 - **AND** calling the same function with an **empty** `groups` slice returns a line holding
   only `█` and `░`, with the same filled count and no braille anywhere
+- **AND** mapping the segmented line back through the **inverse** substitution — every `▒` to
+  `█`, every `⢕` and `⠌` to `░` — reproduces that empty-slice line byte for byte, which is
+  what pins that segmentation moved neither cell nor the gauge's length rather than only that
+  its glyphs are the expected ones
 
 #### Scenario: An empty group contributes no span and consumes no index
 
@@ -338,9 +342,12 @@ repair.
 - **AND** at every width the count of **filled** positions — `█` and `▒` together — is equal
   to the count of `█` in the same call made with an **empty** `groups` slice, so the
   substitution provably preserves the fill rather than being asserted to by construction
-- **AND** at every width no position is drawn with a block glyph and a braille glyph both, and
-  the two families never interleave: every braille position lies at or after every block one,
-  so the fill boundary is a single transition rather than a scatter
+- **AND** at every width the two families never interleave: every braille position lies at or
+  after every block one, so the fill boundary is a single transition rather than a scatter.
+  The clause SHALL be exactly that one. An accompanying "and no position is drawn with both"
+  reads as a second guard but is a **tautology** — the two families are disjoint sets of
+  `char`s, so no position can be in both and no implementation can fail it — and this
+  repository does not keep assertions that cannot fail
 - **AND** for `{ usize::MAX, usize::MAX }` every position is a filled glyph, `█` or `▒`, and
   the percent cell reads `100%`, so segmentation did not reintroduce the saturation defect the
   requirement above repairs
