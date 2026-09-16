@@ -223,8 +223,12 @@ capability renders an existing parse and introduces no second checkbox rule.
 - **AND** the body rows follow it, each beginning with exactly eight spaces — four for the
   prefix and four for the task number `2.2 ` — their text reflowed at `width - 8` and holding
   `writing the OSC 52 sequence, and the arm.`
-- **AND** the 58-column call produces strictly more body rows than the 78-column call, so
-  the body genuinely reflows rather than being reproduced line for line
+- **AND** this fixture's forty-one reflowed characters fit **one** body row at both widths —
+  a 50-column body at `58` and a 70-column one at `78` — so the fixture pins the hang, the
+  label, and the reflowed text, and cannot itself demonstrate a width-dependent row count
+- **AND** the same item carrying a body long enough to wrap at both widths produces strictly
+  more body rows at `58` than at `78`, so the body genuinely reflows rather than being
+  reproduced line for line
 
 #### Scenario: The hanging indent falls after the task number
 
