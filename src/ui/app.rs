@@ -96,10 +96,16 @@ pub enum Action {
     /// sense as `Refresh`: it opens a layer over whichever route is current
     /// and leaves `route` alone.
     ToggleHelp,
-    /// `mouse-input`'s five. `action_for` maps **no key** to any of them:
-    /// they exist because a mouse event names the region or the row it landed
-    /// on, where a key does not, and `ui::driver::mouse_action` is their only
-    /// producer.
+    /// `mouse-input`'s five. `action_for` maps **no key** to any of these
+    /// *names*: they exist because a mouse event names the region or the row
+    /// it landed on, where a key does not, and `ui::driver::mouse_action` is
+    /// their only producer. That is not the same as being mouse-**only** —
+    /// every one of them has a key above reaching an identical `Dashboard`
+    /// under a different name, which is what keeps the pane usable with no
+    /// pointer at all, and `tests/doc_contract.rs` pins the five by name for
+    /// exactly that reason. `Select`, declared after them, is the enum's one
+    /// variant with no keyboard path of any name (`text-selection`), and it
+    /// carries a phase rather than being flat.
     ///
     /// `SelectNext`/`SelectPrev` move the list selection and
     /// `ScrollDown`/`ScrollUp` move the detail offset **at either route**,
