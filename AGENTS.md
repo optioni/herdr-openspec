@@ -139,10 +139,12 @@ seven glyphs are East Asian **Ambiguous** and a CJK-locale terminal paints
 them at two columns where `layout::columns` says one — an accepted,
 uncompensated exposure `SPEC.md` records beside the standing rule it widens.
 The progress gauge's own glyphs join that exposure and do not move the count
-above, which is the markdown renderer's alone: `tasks-emphasis` added `▓` and
-`▒` beside `█` and `░` to mark a group boundary by shade, and all four are
-Ambiguous, so a terminal that painted the old pair at two columns already
-painted this gauge at twice its width. `ui` refuses to start with exit status 3 when stdout is not a terminal, which is
+above, which is the markdown renderer's alone: `gauge-fill-contrast` draws the
+gauge's filled half from blocks (`█`, `▒`) and its empty half from braille
+(`⢕`, `⠌`) so that the fill boundary is a change of character family, and the
+blocks are Ambiguous where the braille — and the unsegmented run's `░` — is
+Neutral, so a CJK-locale terminal mis-proportions the gauge rather than
+painting it uniformly at twice its width. `ui` refuses to start with exit status 3 when stdout is not a terminal, which is
 also what keeps `cargo test` (which spawns this binary) from ever putting a
 real terminal into raw mode.
 

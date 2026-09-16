@@ -401,13 +401,23 @@ nonetheless paint six of them at two and overrun the row. The trade-off was put 
 with the measurement in hand and answered in favour of the glyphs; the rule above is
 unchanged, and no compensation is added.
 
-`tasks-emphasis` widens the same exposure once more, and by two characters rather than
-seven. The segmented progress gauge draws each group's stretch with an alternating pair —
-`█` and `░` where it always did, `▓` (U+2593) and `▒` (U+2592) where the group's index is
-odd — and the two new shades are Ambiguous exactly as the two old ones are, so a
-CJK-locale terminal already painted this gauge at twice its width and gains no new class of
-failure from them. The renderer's own count above does **not** move: it is a count of the
-markdown renderer's glyphs, and this change adds none there.
+`tasks-emphasis` widened the same exposure once more, and `gauge-fill-contrast` changed its
+shape. The segmented progress gauge draws each group's stretch from two character families
+rather than one lightness scale — `█` (U+2588) where a filled position falls in an
+even-indexed group and `▒` (U+2592) where it falls in an odd-indexed one, the braille
+patterns `⢕` (U+2895) and `⠌` (U+280C) for the empty positions of those same two. The blocks
+are Ambiguous and the braille is Neutral, so a CJK-locale terminal paints the filled half at
+two columns and the empty half at one and **mis-proportions** the gauge rather than doubling
+it uniformly: a 53%-complete change reads as roughly 69%. The paragraph this replaces called
+the gauge's glyph set uniformly Ambiguous, which was false as written — `░` (U+2591), which
+the unsegmented run still draws, is Neutral — and so named the wrong failure as well as the
+wrong count: the old gauge went *ragged* in that terminal, its Ambiguous positions painting
+at two columns beside a Neutral one at one. Drawing the whole empty half from a single width
+class removes the raggedness and keeps the mis-proportion, accepted and uncompensated on the
+terms above; closing it entirely would need every glyph in one class, which in practice means
+an all-braille bar whose filled half no longer reads as solid. The renderer's own count above
+does **not** move: it is a count of the markdown renderer's glyphs, and neither change adds
+one there.
 
 ### List view
 

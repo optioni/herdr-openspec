@@ -191,25 +191,25 @@ each document is within a line or two. The third site carrying the same claim,
 `openspec/specs/tasks-progress-bar/spec.md:65-70`, is **not** edited here — it is owned by
 this change's own MODIFIED grammar requirement and lands when `openspec archive` runs.
 
-- [ ] 3.1 CHANGE: Rewrite in `SPEC.md`: the paragraph at `404-410` beginning "`tasks-emphasis` widens
+- [x] 3.1 CHANGE: Rewrite in `SPEC.md`: the paragraph at `404-410` beginning "`tasks-emphasis` widens
       the same exposure once more" (audience: future implementers) — it names the retiring `▓`
       and states that the gauge's glyphs are uniformly Ambiguous, which 0.1 measures as false.
       Say instead that the filled half is Ambiguous and the empty half Neutral, so a CJK-locale
       terminal mis-proportions the bar rather than doubling it. The markdown renderer's
       "seven glyphs, six Ambiguous" count above it does **not** move.
-- [ ] 3.2 CHANGE: Rewrite in `AGENTS.md`: the paragraph at `141-145` beginning "The progress gauge's
+- [x] 3.2 CHANGE: Rewrite in `AGENTS.md`: the paragraph at `141-145` beginning "The progress gauge's
       own glyphs join that exposure" (audience: every agent session) — it repeats `SPEC.md`'s
       claim and must say the same thing after 3.1. Rewrite in place; do not append beside it.
       `CLAUDE.md` is a symlink to this file, so there is one edit, not two.
       **Watch the tail of `:145`:** that line ends the gauge paragraph and then starts an
       unrelated claim on the same physical line — "`ui` refuses to start with exit status 3…" —
       which `tests/doc_contract.rs` binds. Rewrite the sentence, keep the tail.
-- [ ] 3.3 VERIFY: Confirm the prose edits actually landed, with checks that can fail:
+- [x] 3.3 VERIFY: Confirm the prose edits actually landed, with checks that can fail:
       `grep -n '▓' SPEC.md AGENTS.md` selects **0** lines (both sites named the retiring glyph
       before this group), and `grep -n 'all four' SPEC.md AGENTS.md` selects **0** lines. Both
       select non-zero at HEAD, so each is red before the group and green after — which is the
       only executable evidence this group has.
-- [ ] 3.4 VERIFY: `cargo test --all-features --test doc_contract` — green — confirming no
+- [x] 3.4 VERIFY: `cargo test --all-features --test doc_contract` — green — confirming no
       documented claim this change touched drifted from the file that determines it. 0.1 records
       that this suite binds none of the glyph claims, so a green run here is evidence about the
       claims it does bind and not about 3.1 or 3.2. It takes about three minutes on its own.
