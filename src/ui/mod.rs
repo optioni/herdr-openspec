@@ -3099,15 +3099,59 @@ apply:
 
         // --- agent-launch: the outer-loop acceptance harness ------------------------------
 
-        /// A scratch `herdr` program supporting the whole launch flow — `pane split`,
-        /// `agent start`, `agent prompt`, `agent focus`, and `agent list` — logging every
+        /// The seventeen-line `herdr integration status` output measured on the reference
+        /// machine, `include_str!`-embedded at compile time rather than read at run time, on
+        /// exactly `crate::tasks`' corpus terms. `agent-client-choice`'s addition: the scratch
+        /// `herdr` program answers `integration status` with it, so the launcher's own
+        /// resolution runs against real bytes rather than a paraphrase.
+        pub(crate) const STATUS_CORPUS: &str =
+            include_str!("../../tests/fixtures/integration-status.txt");
+
+        /// A two-line `integration status` output naming `kinds` as installed and every other
+        /// measured integration as absent — built from [`STATUS_CORPUS`] by rewriting each
+        /// line's status, so the shape stays Herdr's own and only the installed set moves.
+        fn status_with_installed(kinds: &[&str]) -> String {
+            STATUS_CORPUS
+                .lines()
+                .map(|line| {
+                    let (kind, rest) = line.split_once(": ").expect("a measured status line");
+                    let path = &rest[rest.rfind(" (").expect("a measured path") + 1..];
+                    if kinds.contains(&kind) {
+                        format!("{kind}: current (v9) {path}")
+                    } else {
+                        format!("{kind}: not installed {path}")
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n"
+        }
+
+        /// A scratch `herdr` program supporting the whole launch flow — `integration status`,
+        /// `pane split`, `agent start`, `agent prompt`, `agent focus`, and `agent list` —
+        /// logging every
         /// invocation to `log`, one line per call. `agent start` additionally writes `marker`,
         /// recording the derived agent name it was given; `agent list` reports that agent, at
         /// the fixed pane id `pane split` handed out and with `cwd` the canonicalized `root`,
         /// once `marker` exists, and an empty list otherwise. This is what lets the wiring test
         /// observe "the started agent reaches a later poll" through a real, if scripted, round
         /// trip rather than a shortcut.
+        ///
+        /// `status` is the exact text `integration status` prints — the real/replaced split of
+        /// design.md -> Test Boundaries keeps the `herdr` binary real here, as a scratch shell
+        /// program, so the corpus travels through the seam rather than around it.
         fn launch_herdr_script(dir: &Path, log: &Path, marker: &Path, root: &Path) -> PathBuf {
+            launch_herdr_script_with_status(dir, log, marker, root, STATUS_CORPUS)
+        }
+
+        /// [`launch_herdr_script`], with the `integration status` answer chosen by the caller.
+        fn launch_herdr_script_with_status(
+            dir: &Path,
+            log: &Path,
+            marker: &Path,
+            root: &Path,
+            status: &str,
+        ) -> PathBuf {
             let root = root.display().to_string();
             write_script(
                 dir,
@@ -3115,6 +3159,9 @@ apply:
                 &format!(
                     r#"printf '%s\n' "$*" >> "{log}"
 case "$1 $2" in
+  "integration status")
+    printf '%s' '{status}'
+    ;;
   "pane split")
     printf '%s' '{{"id":"cli:pane:split","result":{{"pane":{{"agent_status":"unknown","cwd":"{root}","pane_id":"wD:pJ","tab_id":"wD:t2","workspace_id":"wD"}},"type":"pane_info"}}}}'
     ;;
@@ -3144,6 +3191,62 @@ esac
                     root = root,
                 ),
             )
+        }
+
+        /// `agent-client-choice` 0.1: the harness's own check. A scratch program cannot be
+        /// invoked by hand from a test — `NOSPAWN-GREP` forbids naming a process-spawn API
+        /// outside `src/cli.rs`, `tests/` included — so the branch is verified by reading the
+        /// program back off disk and asserting the `integration status` arm carries the
+        /// measured corpus verbatim. Every other assertion about it runs through the real
+        /// seam, in the acceptance tests below.
+        #[test]
+        fn the_scratch_herdr_program_answers_integration_status() {
+            let scratch = ScratchDir::new();
+            let root = scratch.path();
+            let program = launch_herdr_script(
+                root,
+                &root.join("herdr.log"),
+                &root.join("marker"),
+                root,
+            );
+            let body = std::fs::read_to_string(&program).expect("read the scratch program back");
+            assert!(
+                body.contains("\"integration status\")"),
+                "the scratch program must carry an `integration status` branch: {body}"
+            );
+            assert!(
+                body.contains(STATUS_CORPUS),
+                "the branch must print the measured corpus verbatim: {body}"
+            );
+            assert_eq!(
+                STATUS_CORPUS.lines().count(),
+                17,
+                "the measured corpus is seventeen lines"
+            );
+
+            // The rewriting helper keeps Herdr's own shape and moves only the installed set,
+            // which is what makes the ambiguous and sole-integration fixtures below honest.
+            let two = status_with_installed(&["claude", "codex"]);
+            assert_eq!(two.lines().count(), 17);
+            assert_eq!(
+                two.lines()
+                    .filter(|l| !l.contains(": not installed "))
+                    .count(),
+                2,
+                "exactly two installed: {two}"
+            );
+            let one = status_with_installed(&["codex"]);
+            assert_eq!(
+                one.lines()
+                    .filter(|l| !l.contains(": not installed "))
+                    .count(),
+                1,
+                "exactly one installed: {one}"
+            );
+            assert!(
+                one.lines().any(|l| l.starts_with("codex: current (v9) (/")),
+                "the installed line keeps Herdr's own shape: {one}"
+            );
         }
 
         /// The number of the log's lines that are **not** `agent list` — every predicate and
@@ -3627,11 +3730,11 @@ esac
                 let marker = root.join("marker");
                 let herdr = launch_herdr_script(root, &herdr_log, &marker, &canon_root);
                 let openspec_log = root.join("openspec.log");
-                let openspec = openspec_script(root, &openspec_log, root);
+                let openspec_bin = openspec_script(root, &openspec_log, root);
                 let state = ScratchDir::new();
 
                 let config = Config {
-                    openspec_bin: Some(openspec),
+                    openspec_bin: Some(openspec_bin.clone()),
                     agent_kind: "codex".to_string(),
                     ..Config::default()
                 };
@@ -3642,7 +3745,7 @@ esac
                 // header; move onto the one active change before the launch key.
                 let stage0 = || true;
                 let stage1 = || log_lines(&herdr_log) >= 1;
-                let stage2 = || non_agent_list_lines(&herdr_log).len() >= 3;
+                let stage2 = || non_agent_list_lines(&herdr_log).len() >= 4;
                 let stages: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> = vec![
                     (&stage0, key('j')),
                     (&stage1, key('a')),
@@ -3656,11 +3759,15 @@ esac
                 let calls = non_agent_list_lines(&herdr_log);
                 assert_eq!(
                     calls.len(),
-                    3,
-                    "width {width}: exactly three non-agent-list Herdr calls: {calls:?}"
+                    4,
+                    "width {width}: the lazy status read plus exactly three launch calls: {calls:?}"
                 );
                 assert_eq!(
-                    calls[0],
+                    calls[0], "integration status",
+                    "width {width}: the kind is resolved from evidence before the launch runs"
+                );
+                assert_eq!(
+                    calls[1],
                     format!(
                         "pane split --cwd {} --direction right --no-focus",
                         canon_root.display()
@@ -3668,12 +3775,34 @@ esac
                     "width {width}: call 1 must be the split, with the canonicalized root"
                 );
                 assert_eq!(
-                    calls[1], "agent start c-2fa-support --kind codex --pane wD:pJ",
+                    calls[2], "agent start c-2fa-support --kind codex --pane wD:pJ",
                     "width {width}: call 2 must start the derived agent name on the pane split returned"
                 );
                 assert_eq!(
-                    calls[2], "agent prompt c-2fa-support /opsx:apply 2fa-support",
-                    "width {width}: call 3 must send the /opsx:apply prompt"
+                    calls[3],
+                    format!(
+                        "agent prompt c-2fa-support Run: {bin} instructions apply \
+                         --change 2fa-support --json. Follow the instruction it returns to \
+                         implement this OpenSpec change.",
+                        bin = openspec_bin.display()
+                    ),
+                    "width {width}: call 3 must send the CLI-driven prompt naming the resolved \
+                     binary's own absolute path"
+                );
+                assert!(
+                    !calls[3].contains("/opsx:"),
+                    "width {width}: no launch still sends a Claude Code slash command: {:?}",
+                    calls[3]
+                );
+                // The fixture change is `2fa-support`, never a name containing `openspec`, so
+                // striking the resolved path out of the element leaves a remainder in which
+                // any surviving `openspec` would be a bare command the agent's own shell
+                // could not resolve.
+                let without_path = calls[3].replace(&openspec_bin.display().to_string(), "<bin>");
+                assert!(
+                    !without_path.contains("openspec"),
+                    "width {width}: the prompt must name the probe's own path, never a bare \
+                     command: {without_path:?}"
                 );
 
                 let mapping_path = state.path().join("agent-names.toml");
@@ -3865,12 +3994,16 @@ esac
             root: &Path,
         ) -> PathBuf {
             let root = root.display().to_string();
+            let status = STATUS_CORPUS;
             write_script(
                 dir,
                 "herdr",
                 &format!(
                     r#"printf '%s\n' "$*" >> "{log}"
 case "$1 $2" in
+  "integration status")
+    printf '%s' '{status}'
+    ;;
   "pane split")
     sleep 0.3
     printf '%s' '{{"id":"cli:pane:split","result":{{"pane":{{"agent_status":"unknown","cwd":"{root}","pane_id":"wD:pJ","tab_id":"wD:t2","workspace_id":"wD"}},"type":"pane_info"}}}}'
@@ -4977,6 +5110,7 @@ esac
                 "printf '%s' '{\"id\":\"cli:agent:prompt\",\"result\":{\"agent\":{}},\"type\":\"agent_prompted\"}'\n"
                     .to_string()
             };
+            let status_body = format!("printf '%s' '{STATUS_CORPUS}'\n");
             let agent_list_body = if case == "refusal" {
                 format!(
                     "printf '%s' '{{\"id\":\"cli:agent:list\",\"result\":{{\"agents\":[{{\"agent\":\"claude\",\"agent_status\":\"working\",\"name\":\"{derived_name}\",\"pane_id\":\"wD:pJ\",\"tab_id\":\"wD:t2\",\"workspace_id\":\"wD\"}}],\"type\":\"agent_list\"}}}}'\n"
@@ -4990,7 +5124,7 @@ esac
                 dir,
                 "herdr",
                 &format!(
-                    "printf '%s\\n' \"$*\" >> \"{log}\"\ncase \"$1 $2\" in\n  \"pane split\")\n    {split_body}    ;;\n  \"agent start\")\n    {start_body}    ;;\n  \"agent prompt\")\n    {prompt_body}    ;;\n  \"agent list\")\n    {agent_list_body}    ;;\nesac\n",
+                    "printf '%s\\n' \"$*\" >> \"{log}\"\ncase \"$1 $2\" in\n  \"integration status\")\n    {status_body}    ;;\n  \"pane split\")\n    {split_body}    ;;\n  \"agent start\")\n    {start_body}    ;;\n  \"agent prompt\")\n    {prompt_body}    ;;\n  \"agent list\")\n    {agent_list_body}    ;;\nesac\n",
                     log = log.display(),
                 ),
             )

@@ -58,16 +58,16 @@
 ## 0. Acceptance Test — Outer Loop RED
 <!-- kind: behavior -->
 
-- [ ] 0.1 Extend the wiring harness in `src/ui/mod.rs`'s test module so the scratch `herdr`
+- [x] 0.1 Extend the wiring harness in `src/ui/mod.rs`'s test module so the scratch `herdr`
   program answers `integration status` with the recorded seventeen-line corpus, honouring the
   real/replaced split in design.md → Test Boundaries. Verify by asserting the scratch program
   echoes that branch when invoked by hand.
-- [ ] 0.2 RED: Write the failing end-to-end test for `agent-launch` :: "Pressing `a` splits a
+- [x] 0.2 RED: Write the failing end-to-end test for `agent-launch` :: "Pressing `a` splits a
   pane, starts an agent, and sends the prompt" — four **non-`agent list`** entries, `--kind`
   `codex`, and an `agent prompt` element naming the scratch `openspec` program's absolute path
   and containing no `/opsx:`. Name the fixture change `2fa-support`, never a name containing
   the substring `openspec`, or the "no standalone `openspec`" assertion cannot fail.
-- [ ] 0.3 Confirm it fails because the behavior is missing, not because the harness is
+- [x] 0.3 Confirm it fails because the behavior is missing, not because the harness is
   misconfigured: the run must fail on the prompt text and the missing `integration status`
   entry, while the existing three-entry wiring test still passes unchanged.
 
