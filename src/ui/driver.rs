@@ -3716,6 +3716,86 @@ mod tests {
         assert!(!dashboard.launch.in_flight);
     }
 
+    /// `agent-client-choice`: an ambiguous resolution stops the launch, but it
+    /// is not a broken pane — the same `drain` that adopts the outcome clears
+    /// `in_flight`, so `g` still focuses and `a` is not refused by the
+    /// in-flight guard on the next press.
+    #[test]
+    fn the_ambiguous_refusal_clears_the_in_flight_flag_and_leaves_g_working() {
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut dashboard = dashboard();
+        dashboard.launch.in_flight = true;
+        let refusal = "more than one herdr agent integration is installed (claude, codex) - \
+                       set agent_kind in config.toml to choose between them";
+        let mut events = Script::new(vec![Ok(Some(press(
+            KeyCode::Char('q'),
+            KeyModifiers::NONE,
+        )))]);
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut agents = crate::agents::none();
+        let mut launcher =
+            crate::testutil::ScriptedLauncher::new(vec![Some(crate::launch::Outcome {
+                named: None,
+                problems: vec![refusal.to_string()],
+            })]);
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+            agents: &mut *agents,
+            launcher: &mut launcher,
+        };
+        run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+
+        assert!(!dashboard.launch.in_flight);
+        assert_eq!(dashboard.launch.problems, vec![refusal.to_string()]);
+        assert_eq!(
+            dashboard.agent_names.names.len(),
+            0,
+            "named is None, so nothing may reach agent_names"
+        );
+
+        // `g` still focuses, and `a` is no longer refused by the in-flight
+        // guard: the reader can retry after editing config.toml without
+        // restarting the pane.
+        assert_eq!(
+            crate::launch::decide(
+                crate::launch::Intent::Focus,
+                Some("alpha"),
+                Some("w8:p3"),
+                true,
+                &[],
+                dashboard.launch.in_flight,
+                false,
+            ),
+            crate::launch::Decision::Go(crate::launch::Request::Focus {
+                pane_id: "w8:p3".to_string()
+            })
+        );
+        assert!(matches!(
+            crate::launch::decide(
+                crate::launch::Intent::Apply,
+                Some("alpha"),
+                None,
+                true,
+                &[],
+                dashboard.launch.in_flight,
+                false,
+            ),
+            crate::launch::Decision::Go(_)
+        ));
+    }
+
     #[test]
     fn a_dead_launcher_clears_the_flag() {
         let backend = TestBackend::new(60, 20);

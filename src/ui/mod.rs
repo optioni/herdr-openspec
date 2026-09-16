@@ -208,9 +208,14 @@ pub fn start_collaborators(
         .map(|parent| openspec_path_overlay(parent, env))
         .unwrap_or_default();
     let resolved_bin = resolution.found.as_ref().map(|found| found.path.clone());
+    // `agent-client-choice`: step 2 of the kind precedence, read once here
+    // beside the agent-name mapping. Its problems join the same causal list the
+    // configuration's and the probe's do.
+    let (recorded_kind_value, recorded_problems) = crate::state::recorded_kind(state_dir);
     let (cli, bin_problems) = crate::cli::worker_cli(resolution, repo, &overlay);
     let file_mode = cli.is_none();
     problems.extend(bin_problems);
+    problems.extend(recorded_problems);
 
     // `seam-resilience`'s addition (design.md -> Decision 8): the watch is narrowed to
     // `<repo>/openspec`, never the repository root — `watch::start` itself is unchanged,
@@ -234,14 +239,22 @@ pub fn start_collaborators(
     let launcher = match repo {
         Some(root) => crate::launch::start(
             crate::cli::agent_cli_via(herdr),
-            root.to_path_buf(),
-            config.agent_kind.clone(),
-            state_dir.map(Path::to_path_buf),
-            // The same path the CLI seam was built from, threaded on rather
-            // than re-probed: `Collaborators::file_mode` and the prompt's own
-            // `openspec` both follow this one fact.
-            resolved_bin.clone(),
-            config.prompts.clone(),
+            crate::launch::Settings {
+                repo: root.to_path_buf(),
+                // Step 1 of the precedence. The literal text `config.agent_kind`
+                // stays in this production slice: `WIRED`'s leg 6 is a bare
+                // substring grep, so a destructure dropping those words fails it.
+                configured_kind: config.agent_kind.clone(),
+                // Step 2, read here and written by nothing in this crate. No
+                // gate carries this name, so the wiring scenarios guard it.
+                recorded_kind: recorded_kind_value,
+                prompts: config.prompts.clone(),
+                // The same path the CLI seam was built from, threaded on rather
+                // than re-probed: `Collaborators::file_mode` and the prompt's own
+                // `openspec` both follow this one fact.
+                openspec_bin: resolved_bin.clone(),
+                state_dir: state_dir.map(Path::to_path_buf),
+            },
         ),
         None => crate::launch::none(),
     };
@@ -3878,7 +3891,7 @@ esac
                 let stage0 = || true;
                 let stage1 = || log_lines(&herdr_log) >= 1;
                 let stage2 = || agent_seen_in_a_later_poll(&herdr_log);
-                let stage3 = || non_agent_list_lines(&herdr_log).len() >= 4;
+                let stage3 = || non_agent_list_lines(&herdr_log).len() >= 5;
                 let stages: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> = vec![
                     (&stage0, key('j')),
                     (&stage1, key('a')),
@@ -3893,16 +3906,27 @@ esac
                 let calls = non_agent_list_lines(&herdr_log);
                 assert_eq!(
                     calls.len(),
-                    4,
-                    "width {width}: the launch's three calls plus one focus: {calls:?}"
+                    5,
+                    "width {width}: the status read, the launch's three calls, and one focus: \
+                     {calls:?}"
                 );
                 assert_eq!(
-                    calls[1], "agent start c-2fa-support --kind gemini --pane wD:pJ",
+                    calls.iter().filter(|c| *c == "integration status").count(),
+                    1,
+                    "width {width}: g adds no status call of its own: {calls:?}"
+                );
+                assert_eq!(
+                    calls[2], "agent start c-2fa-support --kind gemini --pane wD:pJ",
                     "width {width}: two different configured kinds across the two tests"
                 );
                 assert_eq!(
-                    calls[3], "agent focus wD:pJ",
+                    calls[4], "agent focus wD:pJ",
                     "width {width}: the last call must be exactly one focus, on the split's pane"
+                );
+                assert_eq!(
+                    calls.iter().filter(|c| c.starts_with("pane split")).count(),
+                    1,
+                    "width {width}: g focuses, it does not launch: {calls:?}"
                 );
 
                 // `list-sections`: the detail region's own header also names
@@ -4051,11 +4075,11 @@ esac
             let marker = root.join("marker");
             let herdr = launch_herdr_script_slow_split(root, &herdr_log, &marker, &canon_root);
             let openspec_log = root.join("openspec.log");
-            let openspec = openspec_script(root, &openspec_log, root);
+            let openspec_bin = openspec_script(root, &openspec_log, root);
             let state = ScratchDir::new();
 
             let config = Config {
-                openspec_bin: Some(openspec),
+                openspec_bin: Some(openspec_bin.clone()),
                 agent_kind: Some("codex".to_string()),
                 ..Config::default()
             };
@@ -4079,12 +4103,18 @@ esac
             assert_eq!(
                 calls,
                 vec![
+                    "integration status".to_string(),
                     format!(
                         "pane split --cwd {} --direction right --no-focus",
                         canon_root.display()
                     ),
                     "agent start c-2fa-support --kind codex --pane wD:pJ".to_string(),
-                    "agent prompt c-2fa-support /opsx:apply 2fa-support".to_string(),
+                    format!(
+                        "agent prompt c-2fa-support Run: {} instructions apply --change \
+                         2fa-support --json. Follow the instruction it returns to implement \
+                         this OpenSpec change.",
+                        openspec_bin.display()
+                    ),
                 ],
                 "the prompt that makes the agent useful must not be lost to the exit"
             );
@@ -5112,7 +5142,11 @@ esac
                 "printf '%s' '{\"id\":\"cli:agent:prompt\",\"result\":{\"agent\":{}},\"type\":\"agent_prompted\"}'\n"
                     .to_string()
             };
-            let status_body = format!("printf '%s' '{STATUS_CORPUS}'\n");
+            // A single installed integration, so the five-step precedence
+            // resolves without asking and these six cases stay about the launch
+            // itself rather than about the kind. The measured corpus reports
+            // two, which would stop the launch before `pane split`.
+            let status_body = format!("printf '%s' '{}'\n", status_with_installed(&["codex"]));
             let agent_list_body = if case == "refusal" {
                 format!(
                     "printf '%s' '{{\"id\":\"cli:agent:list\",\"result\":{{\"agents\":[{{\"agent\":\"claude\",\"agent_status\":\"working\",\"name\":\"{derived_name}\",\"pane_id\":\"wD:pJ\",\"tab_id\":\"wD:t2\",\"workspace_id\":\"wD\"}}],\"type\":\"agent_list\"}}}}'\n"
@@ -5316,12 +5350,16 @@ esac
                     // section header; move onto the one active change first.
                     let stage0 = || true;
                     let stage1 = || log_lines(&herdr_log) >= 1;
+                    // One more than before `agent-client-choice`: the lazy
+                    // `integration status` read precedes the first launch of a
+                    // session. A refusal happens in `decide` and reaches the
+                    // worker not at all, so it still costs none.
                     let expected_calls = match case {
                         "refusal" => 0,
-                        "split" => 1,
-                        "start" => 2,
-                        "malformed" => 1,
-                        "prompt" | "record" => 3,
+                        "split" => 2,
+                        "start" => 3,
+                        "malformed" => 2,
+                        "prompt" | "record" => 4,
                         other => unreachable!("unexpected case {other}"),
                     };
                     let stage2 = || non_agent_list_lines(&herdr_log).len() >= expected_calls.max(1);

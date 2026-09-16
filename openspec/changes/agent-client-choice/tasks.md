@@ -209,46 +209,46 @@
 <!-- kind: behavior -->
 <!-- Moves the `src/ui/mod.rs:234` call site in the same group; see the ordering note. -->
 
-- [ ] 7.1 RED: Write failing tests for: "The first launch reads the status and the second does
+- [x] 7.1 RED: Write failing tests for: "The first launch reads the status and the second does
   not", "Focus never reads the status", "A failed status call still launches the configured
   kind", "A failed status call with nothing configured reaches `claude` with two problems",
   "Unparseable output is not a failed call", "`g` still works with no binary".
-- [ ] 7.2 RED: Write failing tests for the ambiguous stop: "Two installed integrations stop the
+- [x] 7.2 RED: Write failing tests for the ambiguous stop: "Two installed integrations stop the
   launch with one problem and no pane", "The ambiguous refusal clears the in-flight flag and
   leaves `g` working", "A configured kind suppresses the stop entirely".
-- [ ] 7.3 RED: Write failing tests for: "The three calls appear in order with the split's own
+- [x] 7.3 RED: Write failing tests for: "The three calls appear in order with the split's own
   pane id", "Each intent sends its own `/opsx:*` command and nothing else" (title kept verbatim
   per design.md → Decisions 13; the body asserts the CLI shape), "An archived change launches
   on the same terms as an active one", "The prompt carries the probe's own path, not a bare
   command".
-- [ ] 7.4 RED: Write failing tests for the failure ladder: "A failed split leaves nothing
+- [x] 7.4 RED: Write failing tests for the failure ladder: "A failed split leaves nothing
   behind", "A failed start leaves the pane and names it", "A failed prompt leaves a running,
   un-prompted agent that is still attributable", "A failed recording does not undo a successful
   start", "A failed recording and a failed prompt are both reported", "Two resolution problems,
   a failed recording, and a failed prompt are all four reported", "A success clears both
   entries".
-- [ ] 7.5 GREEN: Introduce `launch::Settings` (no `Default`), change `launch::start` to
+- [x] 7.5 GREEN: Introduce `launch::Settings` (no `Default`), change `launch::start` to
   `(cli, Settings)`, and move the `src/ui/mod.rs:234` call site to construct one.
-- [ ] 7.6 GREEN: Resolve the kind in the worker on the first `Request::Launch` only and cache
+- [x] 7.6 GREEN: Resolve the kind in the worker on the first `Request::Launch` only and cache
   the `Choice` for the process. A `Choice::Ambiguous` **stops** the launch before `pane split`
   with one problem and `named` `None`; every other resolution problem is pushed before the
   three calls run, summarised to at most two per design.md → Decisions 11.
-- [ ] 7.7 CHECK: Re-inspect `launch::start`'s signature against its one consumer,
+- [x] 7.7 CHECK: Re-inspect `launch::start`'s signature against its one consumer,
   `ui::start_collaborators`, and review the diff — the contract gate this interface change owes.
-- [ ] 7.8 CHECK: Confirm the migration, backfill, cache invalidation, and index rebuild steps
+- [x] 7.8 CHECK: Confirm the migration, backfill, cache invalidation, and index rebuild steps
   this change requires — design.md → Persistence and Rollout records none, and states that the
   cached `Choice` is deliberately not invalidated mid-session.
-- [ ] 7.9 CHECK: Run `/bin/sh scripts/gates/launchseam.sh` and confirm the `HerdrCli` handle is
+- [x] 7.9 CHECK: Run `/bin/sh scripts/gates/launchseam.sh` and confirm the `HerdrCli` handle is
   still confined to the same five files, `src/integration.rs` not among them.
   CHECK at HEAD (green invariant + negative control): baseline → exit **0**, reporting
   `35 files searched (>= 25)`; plant `// planted: fn _p(_c: &dyn crate::cli::HerdrCli) {}`
   appended to `src/ui/view.rs` → exit **1**, one `LAUNCHSEAM FAIL (leg 3)` line naming it;
   `git checkout -- src/ui/view.rs` → exit **0**.
-- [ ] 7.10 CHANGE: Update `src/launch.rs:55-61`'s `Outcome` doc comment, which states the
+- [x] 7.10 CHANGE: Update `src/launch.rs:55-61`'s `Outcome` doc comment, which states the
   `problems` bound as "at most two", to the bound design.md → Decisions 11 now fixes at four.
   Production prose no gate reads, falsified by this change.
-- [ ] 7.11 REFACTOR: Clean up while tests stay green, or state that no refactor was needed.
-- [ ] 7.12 Run the group tests — `cargo test --lib -- launch:: ui::tests::` — green, selecting
+- [x] 7.11 REFACTOR: Clean up while tests stay green, or state that no refactor was needed.
+- [x] 7.12 Run the group tests — `cargo test --lib -- launch:: ui::tests::` — green, selecting
   more than the **107** baseline (45 + 62).
 
 ## 8. The view layer: the footer, the problem rows, and the stale descriptions

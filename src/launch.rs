@@ -420,6 +420,33 @@ fn run_request(
     }
 }
 
+/// Everything the launcher's worker needs that is not the request itself: the
+/// repository root every launch passes as `--cwd`, the two kind overrides the
+/// precedence consults before any evidence, the per-kind prompt overrides, the
+/// resolved `openspec` path the prompt names, and the state directory a derived
+/// agent name is recorded under.
+///
+/// Constructed at exactly one site, `ui::start_collaborators`, and deliberately
+/// **not** `Default`, on `ui::app::Launch`'s and `agents::AgentSnapshot`'s
+/// terms: a defaulted `repo` is `""` and a defaulted `openspec_bin` is the
+/// file-mode value, both silently wrong at the one place they are built.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Settings {
+    pub repo: std::path::PathBuf,
+    /// `Config::agent_kind` — step 1 of the precedence, and an override rather
+    /// than a defaulted value.
+    pub configured_kind: Option<String>,
+    /// `state::recorded_kind`'s answer — step 2, what `settings-window` will
+    /// write. Read here and written by nothing in this crate.
+    pub recorded_kind: Option<String>,
+    /// `Config::prompts` — kind, then intent name, then text.
+    pub prompts: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+    /// `resolve::openspec_bin`'s own `found.path`, never re-probed here.
+    /// `None` is file mode, and the worker refuses a launch carrying it.
+    pub openspec_bin: Option<std::path::PathBuf>,
+    pub state_dir: Option<std::path::PathBuf>,
+}
+
 /// A non-blocking source of launch outcomes. Every method SHALL be non-blocking, on exactly
 /// `watch::FsEvents`'s, `refresh::Refresher`'s, and `agents::AgentPoll`'s terms: the render path
 /// calls both on every iteration and neither may wait on anything. Carries no `pending_in`: the
@@ -515,19 +542,11 @@ fn dead_worker_outcome() -> Outcome {
 /// process-spawn API of its own.
 pub fn start(
     cli: std::sync::Arc<dyn crate::cli::HerdrCli>,
-    repo: std::path::PathBuf,
-    kind: Option<String>,
-    state_dir: Option<std::path::PathBuf>,
-    openspec: Option<std::path::PathBuf>,
-    prompts: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+    settings: Settings,
 ) -> Box<dyn Launcher> {
     let (request_tx, request_rx) = std::sync::mpsc::channel();
     let (result_tx, result_rx) = std::sync::mpsc::channel::<Outcome>();
-    std::thread::spawn(move || {
-        worker_body(
-            cli, repo, kind, state_dir, openspec, prompts, request_rx, result_tx,
-        )
-    });
+    std::thread::spawn(move || worker_body(cli, settings, request_rx, result_tx));
     Box::new(RealLauncher {
         request_tx,
         result_rx,
@@ -573,60 +592,181 @@ pub fn settle(launcher: &mut dyn Launcher, budget: std::time::Duration) -> Optio
 /// The worker's whole body: consumes every request and runs it through `run_request`, sending
 /// its `Outcome` back. Returns when the request channel disconnects, on exactly
 /// `refresh::worker_body`'s and `agents::worker_body`'s lifecycle.
-#[allow(clippy::too_many_arguments)]
 fn worker_body(
     cli: std::sync::Arc<dyn crate::cli::HerdrCli>,
-    repo: std::path::PathBuf,
-    kind: Option<String>,
-    state_dir: Option<std::path::PathBuf>,
-    openspec: Option<std::path::PathBuf>,
-    prompts: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+    settings: Settings,
     request_rx: std::sync::mpsc::Receiver<Request>,
     result_tx: std::sync::mpsc::Sender<Outcome>,
 ) {
-    // `agent-client-choice` group 3: `Config::agent_kind` is an override with
-    // no default, so the worker falls back to `integration`'s own last-resort
-    // constant rather than reintroducing a `"claude"` literal under `src/ui/`.
-    // Group 7 replaces this parameter entirely with `Settings`, where the
-    // fallback becomes the five-step precedence.
-    let kind = kind.unwrap_or_else(|| crate::integration::LAST_RESORT.to_string());
+    // The resolved kind, cached for the rest of the process the first time a
+    // `Request::Launch` is handled. A pane whose reader never presses a launch
+    // key issues no `integration status` call at all, and a second launch
+    // reuses this rather than reading the status again. Deliberately not
+    // invalidated mid-session: "Configuration SHALL be read once per process"
+    // already holds for every other value, and restarting the pane is the
+    // existing remedy.
+    let mut cached: Option<crate::integration::Choice> = None;
+
     loop {
         let Ok(request) = request_rx.recv() else {
             return; // the launcher was dropped
         };
-        // `agent-prompts`: a `Request::Launch` carrying no resolved binary is
-        // refused before any Herdr call. `Collaborators::file_mode` is computed
-        // from the CLI handle, **not** from the launcher's own settings, so the
-        // two are separate values a defect can drive apart; this refusal is
-        // what makes that state observable instead of a prompt naming an empty
-        // path. `Focus` is unaffected: it sends no prompt and needs no binary.
-        let outcome = match (&openspec, &request) {
-            (None, Request::Launch { .. }) => Outcome {
-                named: None,
-                problems: vec![
-                    "no openspec binary was resolved, so there is no path to name in the \
-                     prompt an agent would be sent"
-                        .to_string(),
-                ],
-            },
-            _ => {
-                let empty = std::collections::BTreeMap::new();
-                let overrides = prompts.get(&kind).unwrap_or(&empty);
-                run_request(
-                    cli.as_ref(),
-                    &repo,
-                    &kind,
-                    state_dir.as_deref(),
-                    openspec.as_deref().unwrap_or(std::path::Path::new("")),
-                    overrides,
-                    request,
-                )
-            }
-        };
+        let outcome = handle(cli.as_ref(), &settings, &mut cached, request);
         if result_tx.send(outcome).is_err() {
             return; // nobody reads the result any more
         }
     }
+}
+
+/// One request, start to finish, on the worker thread: the file-mode refusal,
+/// the once-per-session kind resolution, the ambiguous stop, and then
+/// [`run_request`]'s three calls with the resolution's own problems leading the
+/// outcome's. Free to block — it is reached only from inside the
+/// `thread::spawn` closure above.
+fn handle(
+    cli: &dyn crate::cli::HerdrCli,
+    settings: &Settings,
+    cached: &mut Option<crate::integration::Choice>,
+    request: Request,
+) -> Outcome {
+    // `Focus` needs no kind and no binary: it focuses an agent that is already
+    // running, so it never reads the status and never builds a prompt. Matched
+    // on `Focus` rather than on the other variant with a rest pattern, because
+    // `NODEFAULT-UI` scans every `Launch { … }` span in the crate and a rest
+    // pattern in one is exactly what it exists to catch.
+    if matches!(request, Request::Focus { .. }) {
+        return run_request(
+            cli,
+            &settings.repo,
+            "",
+            settings.state_dir.as_deref(),
+            std::path::Path::new(""),
+            &std::collections::BTreeMap::new(),
+            request,
+        );
+    }
+
+    // `agent-prompts`: a launch carrying no resolved binary is refused before
+    // resolution and before any Herdr call. `Collaborators::file_mode` is
+    // computed from the CLI handle, **not** from `Settings`, so the two are
+    // separate values a defect can drive apart; this refusal is what makes that
+    // state observable instead of a prompt naming an empty path.
+    let Some(openspec) = settings.openspec_bin.as_deref() else {
+        return Outcome {
+            named: None,
+            problems: vec![
+                "no openspec binary was resolved, so there is no path to name in the prompt \
+                 an agent would be sent"
+                    .to_string(),
+            ],
+        };
+    };
+
+    // The resolution's problems lead the outcome's because they occurred first,
+    // before `pane split` — the rule `degraded-states` already fixed for the
+    // record/prompt pair — and they are reported on the resolution that
+    // produced them and not replayed on every later launch.
+    let mut problems = Vec::new();
+    if cached.is_none() {
+        let (choice, resolution_problems) = resolve_kind(cli, settings);
+        *cached = Some(choice);
+        problems = resolution_problems;
+    }
+    let choice = cached.as_ref().expect("the choice was just cached");
+
+    let kind = match choice {
+        crate::integration::Choice::Use { kind, .. } => kind.clone(),
+        // The one resolution outcome that stops a launch: the evidence exists
+        // and points two ways at once, so no `--kind` value can be produced and
+        // choosing between two clients the reader has both set up would be
+        // exactly the guess `agent-attribution` refuses to make. No pane is
+        // split, so none can be left behind.
+        crate::integration::Choice::Ambiguous { installed } => {
+            problems.push(format!(
+                "more than one herdr agent integration is installed ({}) - \
+                 set agent_kind in config.toml to choose between them",
+                installed.join(", ")
+            ));
+            return Outcome {
+                named: None,
+                problems,
+            };
+        }
+    };
+
+    let empty = std::collections::BTreeMap::new();
+    let overrides = settings.prompts.get(&kind).unwrap_or(&empty);
+    let outcome = run_request(
+        cli,
+        &settings.repo,
+        &kind,
+        settings.state_dir.as_deref(),
+        openspec,
+        overrides,
+        request,
+    );
+    problems.extend(outcome.problems);
+    Outcome {
+        named: outcome.named,
+        problems,
+    }
+}
+
+/// Read `herdr integration status` once and fold it into the five-step
+/// precedence, with at most **two** problems: one about obtaining the status —
+/// a call failure carrying Herdr's own reason, **or** a single summary naming
+/// how many lines could not be parsed, the two being mutually exclusive because
+/// a call that failed produces no output to parse — and one about the kind
+/// chosen. `parse`'s per-line problems are summarised into that one entry here,
+/// rather than forwarded one per line, so a seventeen-line status whose format
+/// changed degrades the explanation rather than putting eighteen `! ` rows above
+/// the change list.
+fn resolve_kind(
+    cli: &dyn crate::cli::HerdrCli,
+    settings: &Settings,
+) -> (crate::integration::Choice, Vec<String>) {
+    let mut problems = Vec::new();
+    let integrations = match cli.run(&["integration", "status"]) {
+        Ok(text) => {
+            let (integrations, parse_problems) = crate::integration::parse(&text);
+            if !parse_problems.is_empty() {
+                problems.push(format!(
+                    "herdr integration status: {} of its lines could not be read",
+                    parse_problems.len()
+                ));
+            }
+            integrations
+        }
+        Err(err) => {
+            problems.push(herdr_reason(&err));
+            Vec::new()
+        }
+    };
+
+    let resolved = crate::integration::resolve(
+        settings.configured_kind.as_deref(),
+        settings.recorded_kind.as_deref(),
+        &integrations,
+    );
+
+    // When no integration was obtained at all — a failed call, or output that
+    // parsed to nothing — the *absence* of an integration for a configured or
+    // recorded kind cannot be established, so that warning is not carried. The
+    // last-resort warning still is: it is about there being no evidence, which
+    // is exactly what happened.
+    let carry = !integrations.is_empty()
+        || matches!(
+            resolved.choice,
+            crate::integration::Choice::Use {
+                source: crate::integration::Source::LastResort,
+                ..
+            }
+        );
+    if carry {
+        problems.extend(resolved.problems);
+    }
+
+    (resolved.choice, problems)
 }
 
 #[cfg(test)]
@@ -1981,6 +2121,736 @@ mod tests {
         }
     }
 
+    /// `agent-client-choice`: the worker's own resolution — lazy, cached,
+    /// summarised, and stopping at an ambiguous answer. Driven through
+    /// `handle` directly, which is the worker body with the thread taken away:
+    /// the same function `worker_body`'s loop calls, with the cache passed in
+    /// so a test can make two requests against one session.
+    mod resolution {
+        use crate::cli::{CliError, FakeCli};
+        use crate::integration::{Choice, Source};
+        use crate::launch::{Intent, Outcome, Request, Settings, handle};
+        use crate::testutil::{ScratchDir, snapshot};
+        use std::collections::BTreeMap;
+        use std::path::{Path, PathBuf};
+
+        const REPO: &str = "/repo";
+        const OPENSPEC: &str = "/opt/bin/openspec";
+
+        /// A `Settings` over a real scratch state directory, so a launch's own
+        /// `state::record` succeeds and the outcome's `problems` carry only
+        /// what the scenario is about.
+        fn settings(
+            state: &ScratchDir,
+            configured: Option<&str>,
+            recorded: Option<&str>,
+        ) -> Settings {
+            Settings {
+                repo: PathBuf::from(REPO),
+                configured_kind: configured.map(str::to_string),
+                recorded_kind: recorded.map(str::to_string),
+                prompts: BTreeMap::new(),
+                openspec_bin: Some(PathBuf::from(OPENSPEC)),
+                state_dir: Some(state.path().to_path_buf()),
+            }
+        }
+
+        /// The measured corpus, or a rewrite of it in which exactly `kinds` are
+        /// installed — Herdr's own shape, with only the installed set moved.
+        fn status(kinds: &[&str]) -> String {
+            crate::integration::tests::MEASURED
+                .lines()
+                .map(|line| {
+                    let (kind, rest) = line.split_once(": ").expect("a measured line");
+                    let path = &rest[rest.rfind(" (").expect("a measured path") + 1..];
+                    if kinds.contains(&kind) {
+                        format!("{kind}: current (v9) {path}")
+                    } else {
+                        format!("{kind}: not installed {path}")
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+
+        fn status_ok(fake: &FakeCli, text: &str) {
+            fake.register_herdr(&["integration", "status"], Ok(text.to_string()));
+        }
+
+        fn status_failed(fake: &FakeCli) {
+            fake.register_herdr(
+                &["integration", "status"],
+                Err(CliError::Failed {
+                    program: "herdr".to_string(),
+                    args: Vec::new(),
+                    code: Some(1),
+                    stderr: r#"{"error":{"code":"integration_unavailable","message":"no socket"}}"#
+                        .to_string(),
+                }),
+            );
+        }
+
+        fn split_ok(fake: &FakeCli, pane: &str) {
+            fake.register_herdr(
+                &["pane", "split", "--cwd", REPO, "--direction", "right", "--no-focus"],
+                Ok(format!(
+                    r#"{{"id":"cli:pane:split","result":{{"pane":{{"pane_id":"{pane}"}},"type":"pane_info"}}}}"#
+                )),
+            );
+        }
+
+        fn start_ok(fake: &FakeCli, agent: &str, kind: &str, pane: &str) {
+            fake.register_herdr(
+                &["agent", "start", agent, "--kind", kind, "--pane", pane],
+                Ok(r#"{"id":"cli:agent:start","result":{"type":"agent_started"}}"#.to_string()),
+            );
+        }
+
+        fn built_in(intent: Intent, change: &str) -> String {
+            crate::launch::prompt_text(intent, change, Path::new(OPENSPEC), &BTreeMap::new())
+        }
+
+        fn prompt_ok(fake: &FakeCli, agent: &str, text: &str) {
+            fake.register_herdr(&["agent", "prompt", agent, text], Ok(String::new()));
+        }
+
+        fn launch(change: &str, intent: Intent) -> Request {
+            Request::Launch {
+                change: change.to_string(),
+                agent: crate::state::agent_name(change),
+                intent,
+            }
+        }
+
+        /// The argument vectors the fake was called with, joined for comparison
+        /// the way the wiring tests' own invocation log reads.
+        fn log(fake: &FakeCli) -> Vec<String> {
+            fake.calls()
+                .into_iter()
+                .map(|(_, args)| args.join(" "))
+                .collect()
+        }
+
+        #[test]
+        fn the_first_launch_reads_the_status_and_the_second_does_not() {
+            let state = ScratchDir::new();
+            let fake = FakeCli::new();
+            status_ok(&fake, &status(&["codex"]));
+            split_ok(&fake, "wD:pJ");
+            start_ok(&fake, "c-2fa-support", "codex", "wD:pJ");
+            prompt_ok(
+                &fake,
+                "c-2fa-support",
+                &built_in(Intent::Apply, "2fa-support"),
+            );
+
+            let settings = settings(&state, None, None);
+            let mut cached = None;
+            for _ in 0..2 {
+                handle(
+                    &fake,
+                    &settings,
+                    &mut cached,
+                    launch("2fa-support", Intent::Apply),
+                );
+            }
+
+            let log = log(&fake);
+            assert_eq!(
+                log.iter().filter(|l| *l == "integration status").count(),
+                1,
+                "{log:?}"
+            );
+            assert_eq!(log[0], "integration status", "{log:?}");
+            assert!(log[1].starts_with("pane split"), "{log:?}");
+            assert_eq!(
+                log.len(),
+                7,
+                "one status plus two launches of three: {log:?}"
+            );
+            assert!(
+                log[4..].iter().all(|l| l != "integration status"),
+                "the second launch reads no status: {log:?}"
+            );
+        }
+
+        #[test]
+        fn focus_never_reads_the_status() {
+            let state = ScratchDir::new();
+            let fake = FakeCli::new();
+            fake.register_herdr(&["agent", "focus", "wD:pJ"], Ok(String::new()));
+
+            let mut cached = None;
+            handle(
+                &fake,
+                &settings(&state, None, None),
+                &mut cached,
+                Request::Focus {
+                    pane_id: "wD:pJ".to_string(),
+                },
+            );
+
+            assert_eq!(log(&fake), vec!["agent focus wD:pJ".to_string()]);
+            assert!(cached.is_none(), "g costs no resolution at all");
+        }
+
+        #[test]
+        fn g_still_works_with_no_binary() {
+            let state = ScratchDir::new();
+            let fake = FakeCli::new();
+            fake.register_herdr(&["agent", "focus", "wD:pJ"], Ok(String::new()));
+
+            let mut with_none = settings(&state, None, None);
+            with_none.openspec_bin = None;
+            let mut cached = None;
+            let outcome = handle(
+                &fake,
+                &with_none,
+                &mut cached,
+                Request::Focus {
+                    pane_id: "wD:pJ".to_string(),
+                },
+            );
+
+            assert_eq!(log(&fake), vec!["agent focus wD:pJ".to_string()]);
+            assert_eq!(outcome.problems, Vec::<String>::new());
+
+            // The same settings refuse a launch before any Herdr call at all.
+            let refused = handle(&fake, &with_none, &mut cached, launch("x", Intent::Apply));
+            assert_eq!(refused.named, None);
+            assert_eq!(refused.problems.len(), 1, "{:?}", refused.problems);
+            assert!(
+                refused.problems[0].contains("openspec"),
+                "{:?}",
+                refused.problems
+            );
+            assert_eq!(log(&fake).len(), 1, "no second Herdr call");
+        }
+
+        #[test]
+        fn a_failed_status_call_still_launches_the_configured_kind() {
+            let state = ScratchDir::new();
+            let fake = FakeCli::new();
+            status_failed(&fake);
+            split_ok(&fake, "wD:pJ");
+            start_ok(&fake, "c-2fa-support", "codex", "wD:pJ");
+            prompt_ok(
+                &fake,
+                "c-2fa-support",
+                &built_in(Intent::Apply, "2fa-support"),
+            );
+
+            let mut cached = None;
+            let outcome = handle(
+                &fake,
+                &settings(&state, Some("codex"), None),
+                &mut cached,
+                launch("2fa-support", Intent::Apply),
+            );
+
+            assert!(log(&fake)[2].contains("--kind codex"), "{:?}", log(&fake));
+            assert_eq!(outcome.problems.len(), 1, "{:?}", outcome.problems);
+            assert!(
+                outcome.problems[0].contains("integration_unavailable")
+                    && outcome.problems[0].contains("no socket"),
+                "{:?}",
+                outcome.problems
+            );
+        }
+
+        #[test]
+        fn a_failed_status_call_with_nothing_configured_reaches_claude_with_two_problems() {
+            let state = ScratchDir::new();
+            let fake = FakeCli::new();
+            status_failed(&fake);
+            split_ok(&fake, "wD:pJ");
+            start_ok(&fake, "c-2fa-support", "claude", "wD:pJ");
+            prompt_ok(
+                &fake,
+                "c-2fa-support",
+                &built_in(Intent::Apply, "2fa-support"),
+            );
+
+            let mut cached = None;
+            let outcome = handle(
+                &fake,
+                &settings(&state, None, None),
+                &mut cached,
+                launch("2fa-support", Intent::Apply),
+            );
+
+            assert!(log(&fake)[2].contains("--kind claude"), "{:?}", log(&fake));
+            assert_eq!(outcome.problems.len(), 2, "{:?}", outcome.problems);
+            assert!(
+                outcome.problems[0].contains("integration_unavailable"),
+                "the read failure occurred first: {:?}",
+                outcome.problems
+            );
+            assert!(
+                outcome.problems[1].contains("last resort"),
+                "{:?}",
+                outcome.problems
+            );
+            assert_eq!(
+                outcome.named,
+                Some(("c-2fa-support".to_string(), "2fa-support".to_string()))
+            );
+        }
+
+        #[test]
+        fn unparseable_output_is_not_a_failed_call() {
+            let state = ScratchDir::new();
+            for lines in [3usize, 17] {
+                let text = vec!["this is not an integration line"; lines].join("\n");
+                let fake = FakeCli::new();
+                status_ok(&fake, &text);
+                split_ok(&fake, "wD:pJ");
+                start_ok(&fake, "c-2fa-support", "claude", "wD:pJ");
+                prompt_ok(
+                    &fake,
+                    "c-2fa-support",
+                    &built_in(Intent::Apply, "2fa-support"),
+                );
+
+                let mut cached = None;
+                let outcome = handle(
+                    &fake,
+                    &settings(&state, None, None),
+                    &mut cached,
+                    launch("2fa-support", Intent::Apply),
+                );
+
+                assert_eq!(
+                    cached,
+                    Some(Choice::Use {
+                        kind: "claude".to_string(),
+                        source: Source::LastResort,
+                    }),
+                    "{lines} lines"
+                );
+                assert_eq!(
+                    outcome.problems.len(),
+                    2,
+                    "{lines} lines: the bound does not grow with the input: {:?}",
+                    outcome.problems
+                );
+                assert!(
+                    outcome.problems[0].contains(&lines.to_string()),
+                    "{lines} lines: the summary names how many: {:?}",
+                    outcome.problems
+                );
+                assert!(outcome.problems[1].contains("last resort"), "{lines} lines");
+                assert_eq!(
+                    crate::integration::parse(&text).1.len(),
+                    lines,
+                    "{lines} lines: parse itself still returns one problem per line"
+                );
+            }
+        }
+
+        #[test]
+        fn two_installed_integrations_stop_the_launch_with_one_problem_and_no_pane() {
+            let fake = FakeCli::new();
+            status_ok(&fake, &status(&["claude", "codex"]));
+            let state = ScratchDir::new();
+            let before = snapshot(state.path());
+
+            let mut with_state = settings(&state, None, None);
+            with_state.state_dir = Some(state.path().to_path_buf());
+            let mut cached = None;
+            let outcome = handle(
+                &fake,
+                &with_state,
+                &mut cached,
+                launch("2fa-support", Intent::Apply),
+            );
+
+            assert_eq!(log(&fake), vec!["integration status".to_string()]);
+            assert_eq!(outcome.named, None);
+            assert_eq!(outcome.problems.len(), 1, "{:?}", outcome.problems);
+            let problem = &outcome.problems[0];
+            assert!(problem.contains("claude"), "{problem}");
+            assert!(problem.contains("codex"), "{problem}");
+            assert!(problem.contains("agent_kind"), "{problem}");
+            assert_eq!(before, snapshot(state.path()));
+        }
+
+        #[test]
+        fn a_configured_kind_suppresses_the_stop_entirely() {
+            let state = ScratchDir::new();
+            let fake = FakeCli::new();
+            status_ok(&fake, &status(&["claude", "codex"]));
+            split_ok(&fake, "wD:pJ");
+            start_ok(&fake, "c-2fa-support", "codex", "wD:pJ");
+            prompt_ok(
+                &fake,
+                "c-2fa-support",
+                &built_in(Intent::Apply, "2fa-support"),
+            );
+
+            let mut cached = None;
+            let outcome = handle(
+                &fake,
+                &settings(&state, Some("codex"), None),
+                &mut cached,
+                launch("2fa-support", Intent::Apply),
+            );
+
+            assert_eq!(log(&fake).len(), 4, "{:?}", log(&fake));
+            assert_eq!(outcome.problems, Vec::<String>::new());
+        }
+
+        #[test]
+        fn the_three_calls_appear_in_order_behind_the_status_read() {
+            let state = ScratchDir::new();
+            let fake = FakeCli::new();
+            status_ok(&fake, &status(&["claude", "codex"]));
+            split_ok(&fake, "wD:pJ");
+            start_ok(&fake, "c-2fa-support", "codex", "wD:pJ");
+            prompt_ok(
+                &fake,
+                "c-2fa-support",
+                &built_in(Intent::Apply, "2fa-support"),
+            );
+
+            let mut cached = None;
+            handle(
+                &fake,
+                &settings(&state, Some("codex"), None),
+                &mut cached,
+                launch("2fa-support", Intent::Apply),
+            );
+
+            let log = log(&fake);
+            assert_eq!(
+                log,
+                vec![
+                    "integration status".to_string(),
+                    format!("pane split --cwd {REPO} --direction right --no-focus"),
+                    "agent start c-2fa-support --kind codex --pane wD:pJ".to_string(),
+                    format!(
+                        "agent prompt c-2fa-support {}",
+                        built_in(Intent::Apply, "2fa-support")
+                    ),
+                ]
+            );
+            let prompt = &log[3];
+            assert!(prompt.contains(OPENSPEC), "{prompt}");
+            assert!(!prompt.contains('"'), "{prompt}");
+        }
+
+        #[test]
+        fn each_intent_sends_its_own_command_and_nothing_else() {
+            let state = ScratchDir::new();
+            let fake = FakeCli::new();
+            status_ok(&fake, &status(&["codex"]));
+            split_ok(&fake, "wD:pJ");
+            start_ok(&fake, "add-auth", "codex", "wD:pJ");
+            for intent in [Intent::Apply, Intent::Continue, Intent::Archive] {
+                prompt_ok(&fake, "add-auth", &built_in(intent, "add-auth"));
+            }
+
+            let settings = settings(&state, None, None);
+            let mut cached = None;
+            for intent in [Intent::Apply, Intent::Continue, Intent::Archive] {
+                handle(&fake, &settings, &mut cached, launch("add-auth", intent));
+            }
+
+            let log = log(&fake);
+            assert_eq!(
+                log.iter().filter(|l| *l == "integration status").count(),
+                1,
+                "the resolution is cached for the session: {log:?}"
+            );
+            let prompts: Vec<&String> = log
+                .iter()
+                .filter(|l| l.starts_with("agent prompt"))
+                .collect();
+            assert_eq!(prompts.len(), 3, "{log:?}");
+            for (intent, prompt) in [Intent::Apply, Intent::Continue, Intent::Archive]
+                .into_iter()
+                .zip(prompts)
+            {
+                assert_eq!(
+                    *prompt,
+                    format!("agent prompt add-auth {}", built_in(intent, "add-auth")),
+                    "{intent:?}"
+                );
+                assert!(!prompt.contains('"'), "{prompt}");
+            }
+
+            // The split and start entries are byte-identical across all three
+            // runs, so the intent changes the prompt and nothing else.
+            let splits: Vec<&String> = log.iter().filter(|l| l.starts_with("pane split")).collect();
+            let starts: Vec<&String> = log
+                .iter()
+                .filter(|l| l.starts_with("agent start"))
+                .collect();
+            assert_eq!(splits.len(), 3);
+            assert_eq!(starts.len(), 3);
+            assert!(splits.windows(2).all(|w| w[0] == w[1]), "{splits:?}");
+            assert!(starts.windows(2).all(|w| w[0] == w[1]), "{starts:?}");
+        }
+
+        #[test]
+        fn a_per_kind_override_is_keyed_by_the_resolved_kind() {
+            let state = ScratchDir::new();
+            let fake = FakeCli::new();
+            status_ok(&fake, &status(&["codex"]));
+            split_ok(&fake, "wD:pJ");
+            start_ok(&fake, "c-2fa-support", "codex", "wD:pJ");
+            prompt_ok(
+                &fake,
+                "c-2fa-support",
+                "work on 2fa-support using /opt/bin/openspec",
+            );
+
+            let mut with_override = settings(&state, None, None);
+            with_override.prompts.insert(
+                "codex".to_string(),
+                [(
+                    "apply".to_string(),
+                    "work on {change} using {openspec}".to_string(),
+                )]
+                .into_iter()
+                .collect(),
+            );
+            let mut cached = None;
+            handle(
+                &fake,
+                &with_override,
+                &mut cached,
+                launch("2fa-support", Intent::Apply),
+            );
+
+            assert_eq!(
+                log(&fake)[3],
+                "agent prompt c-2fa-support work on 2fa-support using /opt/bin/openspec"
+            );
+        }
+
+        /// The maximum: no combination produces a fifth entry.
+        #[test]
+        fn two_resolution_problems_a_failed_recording_and_a_failed_prompt_are_all_four_reported() {
+            let state = ScratchDir::new();
+            let fake = FakeCli::new();
+            status_failed(&fake);
+            split_ok(&fake, "wD:pJ");
+            start_ok(&fake, "c-2fa-support", "claude", "wD:pJ");
+            fake.register_herdr(
+                &[
+                    "agent",
+                    "prompt",
+                    "c-2fa-support",
+                    &built_in(Intent::Apply, "2fa-support"),
+                ],
+                Err(CliError::Failed {
+                    program: "herdr".to_string(),
+                    args: Vec::new(),
+                    code: Some(1),
+                    stderr: r#"{"error":{"code":"agent_blocked","message":"agent is blocked"}}"#
+                        .to_string(),
+                }),
+            );
+
+            // A state directory that cannot be created: an existing regular file.
+            let scratch = ScratchDir::new();
+            let blocked = scratch.path().join("not-a-dir");
+            std::fs::write(&blocked, b"x").expect("plant a regular file");
+
+            let mut with_state = settings(&state, None, None);
+            with_state.state_dir = Some(blocked.clone());
+            let mut cached = None;
+            let outcome = handle(
+                &fake,
+                &with_state,
+                &mut cached,
+                launch("2fa-support", Intent::Apply),
+            );
+
+            assert_eq!(outcome.problems.len(), 4, "{:?}", outcome.problems);
+            assert!(outcome.problems[0].contains("integration_unavailable"));
+            assert!(outcome.problems[1].contains("last resort"));
+            assert!(
+                outcome.problems[2].contains(&blocked.display().to_string()),
+                "{:?}",
+                outcome.problems
+            );
+            assert!(outcome.problems[3].contains("agent_blocked"));
+            assert_eq!(
+                outcome.named,
+                Some(("c-2fa-support".to_string(), "2fa-support".to_string()))
+            );
+            assert!(log(&fake)[2].contains("--kind claude"), "{:?}", log(&fake));
+        }
+
+        /// A clean launch following a four-problem one leaves nothing behind:
+        /// the resolution is reported on the resolution that produced it and
+        /// not replayed, and the outcome replaces the vector wholesale.
+        #[test]
+        fn a_success_clears_both_entries() {
+            let fake = FakeCli::new();
+            status_failed(&fake);
+            split_ok(&fake, "wD:pJ");
+            start_ok(&fake, "c-2fa-support", "claude", "wD:pJ");
+            let prompt = built_in(Intent::Apply, "2fa-support");
+            fake.register_herdr(
+                &["agent", "prompt", "c-2fa-support", &prompt],
+                Err(CliError::Failed {
+                    program: "herdr".to_string(),
+                    args: Vec::new(),
+                    code: Some(1),
+                    stderr: r#"{"error":{"code":"agent_blocked","message":"agent is blocked"}}"#
+                        .to_string(),
+                }),
+            );
+
+            let scratch = ScratchDir::new();
+            let blocked = scratch.path().join("state");
+            std::fs::write(&blocked, b"x").expect("plant a regular file");
+
+            let mut with_state = settings(&scratch, None, None);
+            with_state.state_dir = Some(blocked.clone());
+            let mut cached = None;
+            let first = handle(
+                &fake,
+                &with_state,
+                &mut cached,
+                launch("2fa-support", Intent::Apply),
+            );
+            assert_eq!(first.problems.len(), 4, "{:?}", first.problems);
+
+            // Clear both plants: the state directory can now be created, and
+            // the prompt now succeeds.
+            std::fs::remove_file(&blocked).expect("remove the blocking file");
+            let fake = FakeCli::new();
+            split_ok(&fake, "wD:pJ");
+            start_ok(&fake, "c-2fa-support", "claude", "wD:pJ");
+            prompt_ok(&fake, "c-2fa-support", &prompt);
+
+            let second = handle(
+                &fake,
+                &with_state,
+                &mut cached,
+                launch("2fa-support", Intent::Apply),
+            );
+            assert_eq!(
+                second,
+                Outcome {
+                    named: Some(("c-2fa-support".to_string(), "2fa-support".to_string())),
+                    problems: Vec::new(),
+                }
+            );
+            assert!(
+                log(&fake).iter().all(|l| l != "integration status"),
+                "the cached choice is reused, so its problems are not replayed: {:?}",
+                log(&fake)
+            );
+        }
+
+        /// A recorded kind outranks the installed evidence and carries the
+        /// absent-integration warning on a configured kind's terms.
+        #[test]
+        fn a_recorded_kind_outranks_the_evidence() {
+            let state = ScratchDir::new();
+            let fake = FakeCli::new();
+            status_ok(&fake, &status(&["claude", "codex"]));
+            split_ok(&fake, "wD:pJ");
+            start_ok(&fake, "c-2fa-support", "gemini", "wD:pJ");
+            prompt_ok(
+                &fake,
+                "c-2fa-support",
+                &built_in(Intent::Apply, "2fa-support"),
+            );
+
+            let mut cached = None;
+            let outcome = handle(
+                &fake,
+                &settings(&state, None, Some("gemini")),
+                &mut cached,
+                launch("2fa-support", Intent::Apply),
+            );
+
+            assert!(log(&fake)[2].contains("--kind gemini"), "{:?}", log(&fake));
+            assert_eq!(outcome.problems.len(), 1, "{:?}", outcome.problems);
+            assert!(
+                outcome.problems[0].contains("gemini"),
+                "{:?}",
+                outcome.problems
+            );
+        }
+
+        /// An archived change launches on exactly an active one's terms: the
+        /// worker makes no judgement about which it is.
+        #[test]
+        fn an_archived_change_launches_on_the_same_terms() {
+            let state = ScratchDir::new();
+            let fake = FakeCli::new();
+            status_ok(&fake, &status(&["codex"]));
+            split_ok(&fake, "wD:pJ");
+            start_ok(&fake, "add-auth", "codex", "wD:pJ");
+            prompt_ok(&fake, "add-auth", &built_in(Intent::Apply, "add-auth"));
+
+            let mut cached = None;
+            let outcome = handle(
+                &fake,
+                &settings(&state, None, None),
+                &mut cached,
+                launch("add-auth", Intent::Apply),
+            );
+
+            assert_eq!(
+                log(&fake)[3],
+                format!(
+                    "agent prompt add-auth {}",
+                    built_in(Intent::Apply, "add-auth")
+                )
+            );
+            assert_eq!(
+                outcome.named,
+                Some(("add-auth".to_string(), "add-auth".to_string()))
+            );
+        }
+
+        /// A non-UTF-8 repository root is passed lossily rather than failing
+        /// the launch.
+        #[test]
+        fn a_non_utf8_root_still_produces_the_same_four_entries() {
+            let state = ScratchDir::new();
+            use std::ffi::OsStr;
+            use std::os::unix::ffi::OsStrExt;
+
+            let root = PathBuf::from(OsStr::from_bytes(b"/repo/\xff"));
+            let rendered = root.to_string_lossy().into_owned();
+            let fake = FakeCli::new();
+            status_ok(&fake, &status(&["codex"]));
+            fake.register_herdr(
+                &["pane", "split", "--cwd", &rendered, "--direction", "right", "--no-focus"],
+                Ok(r#"{"id":"cli:pane:split","result":{"pane":{"pane_id":"wD:pJ"},"type":"pane_info"}}"#.to_string()),
+            );
+            start_ok(&fake, "c-2fa-support", "codex", "wD:pJ");
+            prompt_ok(
+                &fake,
+                "c-2fa-support",
+                &built_in(Intent::Apply, "2fa-support"),
+            );
+
+            let mut with_root = settings(&state, None, None);
+            with_root.repo = root;
+            let mut cached = None;
+            handle(
+                &fake,
+                &with_root,
+                &mut cached,
+                launch("2fa-support", Intent::Apply),
+            );
+
+            let log = log(&fake);
+            assert_eq!(log.len(), 4, "{log:?}");
+            assert!(log[1].contains('\u{FFFD}'), "{log:?}");
+        }
+    }
+
     mod seam {
         use crate::cli::FakeCli;
         use crate::launch::{Intent, Launcher, Outcome, Request};
@@ -1993,6 +2863,33 @@ mod tests {
         /// `Receiver`, handed to the test directly, so this seam's own `drain` always answers
         /// `None`; the third receives from a channel whose `Sender` the worker thread owns and
         /// drops only when its body returns.
+        /// A `Settings` for the seam tests: the configured kind wins the
+        /// precedence outright, so these tests exercise the worker's lifecycle
+        /// rather than the resolution. `repo` stands in for the repository —
+        /// the launcher never touches it on disk, only passes its path as
+        /// `--cwd`.
+        fn settings_for_test(repo: PathBuf, state_dir: Option<PathBuf>) -> crate::launch::Settings {
+            crate::launch::Settings {
+                repo,
+                configured_kind: Some("codex".to_string()),
+                recorded_kind: None,
+                prompts: std::collections::BTreeMap::new(),
+                openspec_bin: Some(PathBuf::from("/opt/bin/openspec")),
+                state_dir,
+            }
+        }
+
+        /// The measured seventeen-line `integration status` answer, registered
+        /// for every seam test whose worker reaches a `Request::Launch`: the
+        /// resolution runs once per session, before `pane split`, whatever the
+        /// precedence then decides.
+        fn status_ok(fake: &crate::cli::FakeCli) {
+            fake.register_herdr(
+                &["integration", "status"],
+                Ok(crate::integration::tests::MEASURED.to_string()),
+            );
+        }
+
         fn launcher_for_test(
             cli: std::sync::Arc<dyn crate::cli::HerdrCli>,
         ) -> (
@@ -2007,11 +2904,7 @@ mod tests {
                 let _exit_tx = exit_tx;
                 super::super::worker_body(
                     cli,
-                    PathBuf::from("/repo"),
-                    Some("codex".to_string()),
-                    None,
-                    Some(PathBuf::from("/opt/bin/openspec")),
-                    std::collections::BTreeMap::new(),
+                    settings_for_test(PathBuf::from("/repo"), None),
                     request_rx,
                     result_tx,
                 );
@@ -2087,14 +2980,8 @@ mod tests {
             let cli: std::sync::Arc<dyn crate::cli::HerdrCli> = std::sync::Arc::new(GatedCli {
                 release_rx: std::sync::Mutex::new(Some(release_rx)),
             });
-            let mut launcher = super::super::start(
-                cli,
-                PathBuf::from("/repo"),
-                Some("codex".to_string()),
-                None,
-                Some(PathBuf::from("/opt/bin/openspec")),
-                std::collections::BTreeMap::new(),
-            );
+            let mut launcher =
+                super::super::start(cli, settings_for_test(PathBuf::from("/repo"), None));
             launcher.request(Request::Launch {
                 change: "add-auth".to_string(),
                 agent: "add-auth".to_string(),
@@ -2227,14 +3114,8 @@ mod tests {
                 Ok(r#"{"id":"cli:agent:focus","result":{}}"#.to_string()),
             );
             let cli: std::sync::Arc<dyn crate::cli::HerdrCli> = std::sync::Arc::new(fake);
-            let mut launcher = super::super::start(
-                cli,
-                PathBuf::from("/repo"),
-                Some("codex".to_string()),
-                None,
-                Some(PathBuf::from("/opt/bin/openspec")),
-                std::collections::BTreeMap::new(),
-            );
+            let mut launcher =
+                super::super::start(cli, settings_for_test(PathBuf::from("/repo"), None));
             launcher.request(Request::Focus {
                 pane_id: "wD:pJ".to_string(),
             });
@@ -2253,6 +3134,7 @@ mod tests {
         #[test]
         fn the_launcher_writes_only_the_state_directory() {
             let fake = FakeCli::new();
+            status_ok(&fake);
             fake.register_herdr(
                 &["pane", "split", "--cwd", "/repo", "--direction", "right", "--no-focus"],
                 Ok(r#"{"id":"cli:pane:split","result":{"pane":{"pane_id":"wD:pJ","tab_id":"t","workspace_id":"w"}},"type":"pane_info"}"#.to_string()),
@@ -2297,11 +3179,7 @@ mod tests {
 
             let mut launcher = super::super::start(
                 cli,
-                PathBuf::from("/repo"),
-                Some("codex".to_string()),
-                Some(state.path().to_path_buf()),
-                Some(PathBuf::from("/opt/bin/openspec")),
-                std::collections::BTreeMap::new(),
+                settings_for_test(PathBuf::from("/repo"), Some(state.path().to_path_buf())),
             );
             launcher.request(Request::Launch {
                 change: "2fa-support".to_string(),

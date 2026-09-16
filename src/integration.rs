@@ -218,7 +218,7 @@ pub fn resolve(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// The seventeen-line `herdr integration status` output measured on the
@@ -226,7 +226,7 @@ mod tests {
     /// run-time path, so the corpus travels with the binary and a missing
     /// fixture is a compile error rather than a skipped test. `crate::tasks`'
     /// own corpora established the pattern.
-    const MEASURED: &str = include_str!("../tests/fixtures/integration-status.txt");
+    pub(crate) const MEASURED: &str = include_str!("../tests/fixtures/integration-status.txt");
 
     /// The measured corpus, parsed — the fixture every `resolve` test below
     /// that names "the seventeen measured integrations" uses.
