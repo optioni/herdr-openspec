@@ -78,13 +78,13 @@
 
 <!-- kind: operational -->
 
-- [ ] 8.1 CHECK: Inspect the intended verification commands and affected tiers — `tasks`, `ui::markdown`, `ui::tasks`, `ui::detail`, `ui::view`, and `ui::app` unit tests, the new `tests/task_corpus.rs` tier, and the `TASKSEAM`, `TASKWIDTHS`, `MDSEAM`, `MDWIDTHS`, `DETAILWIDTHS`, `WIDTHS`, `COLWIDTH`, and `NOIO-VIEW` gate scripts.
-- [ ] 8.2 VERIFY: `cargo fmt --all -- --check` — clean.
-- [ ] 8.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
-- [ ] 8.4 VERIFY: `make gates` — every script exits 0.
-- [ ] 8.5 VERIFY: `cargo test --all-features` — green, at or above the 1,458 lib tests HEAD carries plus this change's, and `tests/task_corpus.rs` reporting a non-zero swept-file count.
-- [ ] 8.6 VERIFY: `make coverage` — both the 80% total floor and the production-slice floor hold with no exclusion added.
-- [ ] 8.7 VERIFY: `openspec validate task-item-bodies --strict` — passes.
+- [x] 8.1 CHECK: Inspect the intended verification commands and affected tiers — `tasks`, `ui::markdown`, `ui::tasks`, `ui::detail`, `ui::view`, and `ui::app` unit tests, the new `tests/task_corpus.rs` tier, and the `TASKSEAM`, `TASKWIDTHS`, `MDSEAM`, `MDWIDTHS`, `DETAILWIDTHS`, `WIDTHS`, `COLWIDTH`, and `NOIO-VIEW` gate scripts.
+- [x] 8.2 VERIFY: `cargo fmt --all -- --check` — clean.
+- [x] 8.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
+- [x] 8.4 VERIFY: `make gates` — every script exits 0.
+- [x] 8.5 VERIFY: `cargo test --all-features` — green, at or above the 1,458 lib tests HEAD carries plus this change's, and `tests/task_corpus.rs` reporting a non-zero swept-file count.
+- [x] 8.6 VERIFY: `make coverage` — both the 80% total floor and the production-slice floor hold with no exclusion added.
+- [x] 8.7 VERIFY: `openspec validate task-item-bodies --strict` — passes.
 
 ## Ordering
 
