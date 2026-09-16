@@ -53,9 +53,9 @@ actions to appear — Herdr re-reads the manifest only then.
 | `Space` | Fold or unfold a section — the list section at the list route, the artifact section at the detail route |
 | `r` | Force a full refresh — re-read every change from disk and re-ask the CLI about each one |
 | `?` | Open or close the help overlay, from either route — it lists every key and gesture the pane binds |
-| `a` | Launch an agent with `/opsx:apply`. Inert — no call, no problem — with no change selected; refused with a reason (shown as a problem row) when the derived name is already running for this change |
-| `c` | Launch an agent with `/opsx:continue`, on the same terms as `a` |
-| `s` | Launch an agent with `/opsx:archive`, on the same terms as `a` |
+| `a` | Launch an agent to **apply** the change: it is told to run `openspec instructions apply --change <change> --json` and follow what it returns. Inert — no call, no problem — with no change selected; refused with a reason (shown as a problem row) when the derived name is already running for this change, or when no `openspec` binary was found (file mode) |
+| `c` | Launch an agent to **continue** the change — create the next artifact `openspec status` reports as ready — on the same terms as `a` |
+| `s` | Launch an agent to **archive** the change, on the same terms as `a` |
 | `g` | Focus the running agent for this change. Inert — no call, no problem — on a change with no attributed agent |
 | `q` | Quit |
 | `Ctrl-C` | Quit |
@@ -85,7 +85,8 @@ back to `$HOME/.config/herdr/plugins/config/herdr-openspec`.
 | Key | Default | Meaning |
 |---|---|---|
 | `openspec_bin` | auto-detected | Path to the `openspec` binary |
-| `agent_kind` | `claude` | Herdr agent kind launched by `a` / `c` / `s`; does not affect `g`, which focuses whatever agent is already attributed regardless of kind |
+| `agent_kind` | none — resolved from evidence | Herdr agent kind launched by `a` / `c` / `s`. An **override**, not a defaulted value: set it and it always wins. Unset, the plugin resolves the kind by precedence — a kind recorded under `HERDR_PLUGIN_STATE_DIR`, then the single agent integration `herdr integration status` reports as installed, then a problem row naming the candidates when it reports several, and `claude` only as a last resort when it reports none. A blank value is reported as a problem rather than ignored. Does not affect `g`, which focuses whatever agent is already attributed regardless of kind |
+| `[prompts.<kind>]` | none | Per-kind overrides for the text `a` / `c` / `s` send, keyed by the resolved kind and then by the intent name `apply`, `continue`, or `archive`. `{openspec}` and `{change}` are substituted at every occurrence; any other brace-delimited text is left verbatim. A malformed or blank entry is skipped with one problem and the built-in text is used for that intent |
 | `archived_count` | `5` | **Accepted and parsed, but has no effect on the list.** The archived section folds instead — `Space` toggles it, and an open one shows the whole archive. A malformed value is still reported as a problem row; the key is kept so no existing `config.toml` becomes invalid |
 
 The OpenSpec CLI is optional. When it is present the dashboard uses it as the

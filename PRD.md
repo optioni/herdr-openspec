@@ -37,7 +37,8 @@ baked into the code; those are read from configuration or the OpenSpec CLI.
 3. **Know which agent is on which change.** Where the association can be
    established honestly, show it — including when an agent is blocked and waiting.
 4. **Start work on a change in one keystroke.** Launch an agent pane in the right
-   directory with the right `/opsx:*` command already sent.
+   directory, under the client the reader actually set up, with the right
+   instruction already sent.
 5. **Never fail closed.** A missing OpenSpec CLI, an unknown schema, or an
    unreachable Herdr socket degrades the view; it does not replace it with an error.
 
@@ -49,7 +50,7 @@ baked into the code; those are read from configuration or the OpenSpec CLI.
   phase, stays with the OpenSpec orchestrator agents. This plugin launches single
   changes on request; it does not drive a batch.
 - **Authoring changes.** Creating proposals and artifacts stays in the agent, via
-  the existing `/opsx:*` commands.
+  the OpenSpec CLI and whatever workflow commands that agent already has.
 - **Windows support.** macOS and Linux only, matching the manifest's `platforms`.
 
 ## User stories
@@ -72,8 +73,9 @@ baked into the code; those are read from configuration or the OpenSpec CLI.
 
 **Acting**
 
-- As someone ready to start a change, I press one key and get a Claude pane in the
-  repository root with `/opsx:apply <change>` already sent.
+- As someone ready to start a change, I press one key and get an agent pane — my
+  own coding agent, not a guess at it — in the repository root, already told to
+  run `openspec instructions apply --change <change> --json` and follow it.
 - As someone whose agent is already running, I press one key and jump to its pane.
 
 **Degraded**

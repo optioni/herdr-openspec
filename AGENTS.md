@@ -171,12 +171,31 @@ now serves all three.
 Each polled agent is attributed to a change (name-equality against a
 `HERDR_PLUGIN_STATE_DIR`-recorded mapping, falling back to a count of
 unattributed agents rather than a guess) and badged in the list; `a`/`c`/`s`
-launch an agent onto the selected change with `/opsx:apply`/`continue`/`archive`
-through a fourth collaborator, the launcher (`src/launch.rs`, also outside
-`src/ui/`, the crate's third worker thread), and `g` focuses the agent already
-running for it — both inert with no problem recorded when nothing applies, both
-refused with a reason rendered as a problem row when the derived name is
-already live. Two more binary subcommands, `open` and `open-tab` (`src/open.rs`,
+launch an agent onto the selected change through a fourth collaborator, the
+launcher (`src/launch.rs`, also outside `src/ui/`, the crate's third worker
+thread), and `g` focuses the agent already running for it — both inert with no
+problem recorded when nothing applies, both refused with a reason rendered as a
+problem row when the derived name is already live, and `a`/`c`/`s` refused the
+same way in **file mode**, where the footer also drops their hint while `g`
+keeps its own.
+
+What they send is **not** a Claude Code slash command: `agent-client-choice`
+dropped those for **one** CLI-driven shape serving every kind, a short
+instruction to run the plugin's own resolved absolute `openspec` path — never the
+bare command, which a launched agent's own shell is measured not to resolve — and
+follow what it returns, overridable per kind from `config.toml`'s
+`[prompts.<kind>]`. The **kind** is no longer `Config::agent_kind` read directly
+either: `src/integration.rs` — a fifteenth `pub mod`, pure and outside `src/ui/`
+on exactly `src/specs.rs`' terms — parses `herdr integration status`' plain text
+(there is no `--json` form) and resolves the kind by a five-step precedence:
+`config.toml`, then `settings.toml`'s one read key under
+`HERDR_PLUGIN_STATE_DIR`, then a sole installed integration, then a refusal
+naming the candidates rather than a guess between them, then `claude` as a last
+resort. That read happens **lazily, once per session, on the launcher's own
+worker thread** — on the first `a`/`c`/`s` press and never at startup, never from
+`src/ui/`, and never for `g` — and the resolved choice is cached for the process.
+A future change that resolves the kind on the render path breaks that rule; the
+worker is where blocking is allowed. Two more binary subcommands, `open` and `open-tab` (`src/open.rs`,
 the crate's third `HerdrCli` consumer and the fifth file on the seam gates'
 `ALLOWED` list), open or focus the dashboard pane from Herdr's action menu —
 `herdr-plugin.toml` declares both `[[actions]]` and a second, tab-placed
@@ -371,15 +390,24 @@ unreachable and the tests become integration tests by accident.
   very `node` it needs, so the probe chain reaches steps 3 and 4 exactly when the
   child's inherited `PATH` cannot exec it — `RealHerdrCli` keeps both prohibitions.
   Parsing, merging, and decisions live on the testable side of that seam.
-  `src/tasks.rs` and `src/specs.rs` are that side's pure classifiers: markdown
-  checkboxes to groups and counts, and a delta spec's operation headings and a
-  scenario clause's keyword to `DeltaOp` and `Clause`. Both live outside
-  `src/ui/` — `specs` deliberately, so that adding it moves neither `NOIO-VIEW`'s
+  `src/tasks.rs`, `src/specs.rs`, and `src/integration.rs` are that side's pure
+  classifiers: markdown
+  checkboxes to groups and counts, a delta spec's operation headings and a
+  scenario clause's keyword to `DeltaOp` and `Clause`, and `herdr integration
+  status`' plain text to an ordered list of kinds plus the five-step agent-kind
+  precedence. All three live outside
+  `src/ui/` — `specs` and `integration` deliberately, so that adding either moves
+  neither `NOIO-VIEW`'s
   "ten pure files" nor `COLWIDTH`'s "nine pure view files", counts four documents
   carry. The cost of that placement is that **no `make gates` script sweeps
-  `src/specs.rs` at all**, so its freedom from I/O is an eleventh
-  `tests/doc_contract.rs` claim over its production slice instead, falsifiable by
-  a planted `use std::fs;` above the `#[cfg(test)]` line. `clause_of` calls
+  `src/specs.rs` or `src/integration.rs` at all**, so each one's freedom from I/O
+  is its own `tests/doc_contract.rs` claim over its production slice instead —
+  the eleventh and the fourteenth — falsifiable by
+  a planted `use std::fs;` above the `#[cfg(test)]` line. `integration`'s needle
+  set additionally forbids the render crate's own types, which `LAUNCHSEAM` does
+  not cover; the `integration status` **call** lives in `src/launch.rs`'s worker
+  body, below its single `thread::spawn`, and `src/integration.rs` names no CLI
+  handle at all. `clause_of` calls
   `tasks::role_of` rather than restating its token table, so the two classifiers
   cannot disagree about what `WHEN` is.
   A pure view file may call **out** to `specs`, which is the one exception to

@@ -91,7 +91,7 @@ binding, not its only one — `NOBLOCK` leg 2 covers it identically.
 | `specs` | Recognise a delta spec's operation headings and a scenario clause's keyword |
 | `integration` | Parse `herdr integration status`' plain text and resolve the agent kind by the five-step precedence |
 | `agents` | Poll `herdr agent list`, parse its envelope into agent values, and attribute live Herdr agents to changes |
-| `launch` | Split a pane, start an agent, send the `/opsx:*` prompt |
+| `launch` | Split a pane, resolve the agent kind once per session, start an agent, send the CLI-driven prompt |
 | `watch` | The recursive `notify` watch, the debounce, and classifying a touched path to a per-change `Selection` |
 | `refresh` | The worker thread and the non-blocking `Refresher` seam it answers through |
 | `open` | The `open` and `open-tab` subcommands that open or focus the dashboard pane through `herdr plugin pane`; the crate's third `HerdrCli` consumer |
@@ -233,14 +233,48 @@ the first usable candidate and probing no further:
    starts, pane or action alike, no subprocess required. That directory is
    the same one `herdr plugin config-dir herdr-openspec` reports for a human,
    and is also the fallback path the plugin computes for itself when run
-   outside a Herdr-started process. `config.toml` also holds `agent_kind` and
-   `archived_count` — the latter still parsed, still defaulting to `5`, and
+   outside a Herdr-started process. `config.toml` also holds `agent_kind`,
+   `[prompts.<kind>]`, and
+   `archived_count` — the last still parsed, still defaulting to `5`, and
    still reporting a malformed value on `Config::problems`, but **inert**: it
    limits nothing that is rendered, since the archived section's fold replaced
-   the cap it used to impose. The agent-name mapping lives separately, under
-   `HERDR_PLUGIN_STATE_DIR` — see Herdr integration → Attributing an agent —
-   because the plugin writes it and must not write into the directory the
-   user hand-edits
+   the cap it used to impose.
+
+   `agent_kind` is an **override** with **no default**: absent when unset, and
+   the launcher then resolves the kind by the precedence Launch flow states. A
+   blank value yields `None` *and* reports one problem, because a blank string in
+   a hand-edited file is a reader who meant to set something.
+
+   `[prompts.<kind>]` is an optional table of per-kind prompt overrides, read as
+   `BTreeMap<String, BTreeMap<String, String>>` — kind, then intent name, then
+   text:
+
+   ```toml
+   [prompts.codex]
+   apply = "work on {change} using {openspec}"
+   archive = "archive {change}"
+   ```
+
+   Only the three intent names `apply`, `continue`, and `archive` are read from a
+   kind's sub-table; any other key is ignored without comment, on the top-level
+   unrecognised-key rule's own terms. `{openspec}` and `{change}` are substituted
+   at every occurrence and any other brace-delimited text is left verbatim, so an
+   override written for a later placeholder degrades to literal text rather than
+   to a failed launch. Malformed entries degrade **per entry**: a `prompts` value
+   that is not a table, a kind whose value is not a table, an intent whose value
+   is not a string, and a blank override each cost exactly one problem and one
+   setting, while every well-formed entry in the same file still reaches `Config`.
+
+   Two files live separately, under `HERDR_PLUGIN_STATE_DIR` — see Herdr
+   integration → Attributing an agent — because the plugin writes there and must
+   not write into the directory the user hand-edits: `agent-names.toml`, which it
+   writes, and `settings.toml`, from which it **reads exactly one key**,
+   `agent_kind`, as step 2 of the kind precedence. Nothing in this crate writes
+   `settings.toml`; `settings-window` will. An absent directory, an absent file
+   and an empty file each yield no recorded kind and no problem, while
+   unparseable TOML, a non-string value and a blank value each yield none with
+   exactly one problem, and every other key is ignored without comment so the
+   file that change grows stays readable here
 2. `openspec` on `PATH`
 3. `<nvm root>/versions/node/<version>/bin/openspec`, where the nvm root is
    `NVM_DIR` when it is set to a non-blank value and `$HOME/.nvm` otherwise,
@@ -657,9 +691,9 @@ agent editing `tasks.md` in another pane.
 | `Space` | **Route-dependent**, exactly as `Next` and `Prev` are (`foldable-spec-sections`). At the **list** route: toggle the list section the cursor is on or in, moving the cursor to that section's header; inert over an empty visible list; opening an archived section that is not yet resolved requests the refresh that resolves it, while a resolved one costs no further cycle. At the **detail** route: toggle the artifact section the detail cursor is on or in, moving `detail.scroll` to that section's header row; inert, with no problem recorded, when the selected artifact is not foldable — one section or none — and when no frame has been drawn yet. It touches the other region in neither direction. While filtering, `Space` types itself into the query like every other printable key |
 | `r` | Force a full refresh: re-read every change from files, and re-ask the CLI about every one. While filtering, `r` types itself into the query instead, like every other printable key |
 | `?` | Open the help overlay when it is closed, close it when it is open — at either route, and without moving it (`help-overlay`). Accepted under both no modifier and `Shift`, because terminals disagree about whether `Shift` is reported alongside a shifted character. While the overlay is open it covers the body and swallows every key but its own few; while filtering, `?` types itself into the query instead, like every other printable key |
-| `a` | Launch an agent with `/opsx:apply`. Inert — no call, no problem — with no change selected; refused with a reason when the derived name is already running for this change (see Launch flow, Degraded states) |
-| `c` | Launch an agent with `/opsx:continue`, on the same terms as `a` |
-| `s` | Launch an agent with `/opsx:archive`, on the same terms as `a` |
+| `a` | Launch an agent to **apply** the change — it is told to run `openspec instructions apply --change <change> --json` and follow what it returns. Inert — no call, no problem — with no change selected; refused with a reason when the derived name is already running for this change, or when no `openspec` binary was found (see Launch flow, Degraded states) |
+| `c` | Launch an agent to **continue** the change — create the next artifact `openspec status` reports as ready — on the same terms as `a` |
+| `s` | Launch an agent to **archive** the change, on the same terms as `a` |
 | `g` | Focus the running agent for this change (`herdr agent focus`); a change with no attributed agent leaves `g` inert — no call, no problem |
 | `q` | Quit — except while filtering, where it types a `q` instead |
 | `Ctrl-C` | Quit |
@@ -882,8 +916,13 @@ order, stopping at the first failure:
 ```
 herdr pane split --cwd <repo> --direction right --no-focus
 herdr agent start <derived-name> --kind <kind> --pane <pane_id>
-herdr agent prompt <derived-name> "/opsx:apply <change>"
+herdr agent prompt <derived-name> "Run: <openspec> instructions apply --change <change> --json. Follow the instruction it returns to implement this OpenSpec change."
 ```
+
+Exactly one further call, `herdr integration status`, precedes the **first**
+launch of a session and no other: it resolves the `<kind>` call 2 carries, its
+answer is cached for the rest of the process, and it is not part of the launch
+sequence. A `g` press issues neither it nor these three.
 
 `--direction` is **required**, not optional, and no pane argument is given: the
 split always targets the currently focused pane. The call's response is an
@@ -900,17 +939,30 @@ before any agent is started (see Degraded states). `<derived-name>` is the
 raw change name — a change name is not always a legal Herdr agent name — and it
 is what both `agent start` and `agent prompt` name **positionally**, as the
 agent to act on. The **prompt text itself** names `<change>`, the real change
-name, not the derived name: `/opsx:apply <change>` (or `/opsx:continue`/
-`/opsx:archive` for `c`/`s`) is an OpenSpec slash-command the launched agent
-reads, and OpenSpec knows the change by its real name, never by a Herdr-legal
-agent identifier that may be truncated or hashed. The prompt is one
+name, not the derived name, because OpenSpec knows a change by its real name and
+never by a Herdr-legal agent identifier that may be truncated or hashed. It also
+names `<openspec>`, the **resolved absolute path** the plugin's own four-step
+probe found — never the bare command: measured, a fresh interactive `zsh` with a
+reset `PATH` reports `openspec not found` even where the probe succeeds, because
+nvm is lazy-loaded, so a bare command would fail for the agent even when the
+plugin found one. One CLI-driven shape serves every agent kind, `claude`
+included: the text depends on the intent, the change and the path only, never on
+the kind, so adding a client requires no mapping at all. `config.toml`'s
+`[prompts.<kind>]` table overrides one intent's text for one kind, substituting
+`{openspec}` and `{change}` at every occurrence and leaving any other
+brace-delimited text verbatim. The prompt is one
 **positional** argument, passed to the program directly with no shell and no
 `--wait` flag: the plugin does not wait for the agent to act on it. A failed
 call at any of the three carries Herdr's own reported reason (its stderr JSON
 error envelope's `code` and `message`, on the same terms "Agent status by
 polling" above already documents) rather than a generic failure.
 
-`<kind>` comes from plugin configuration (`agent_kind`, default `claude`);
+`<kind>` is `integration::resolve`'s answer, not `Config::agent_kind` read
+directly — a five-step precedence over `config.toml`'s `agent_kind`, the kind
+recorded in `settings.toml` under `HERDR_PLUGIN_STATE_DIR`, and the integrations
+`herdr integration status` reports as installed, resolved lazily on the
+launcher's own worker thread on the first launch key of a session and cached for
+the rest of the process (see Degraded states for each way it degrades);
 Herdr supports more than twenty agent kinds. `g` focuses the pane an
 attributed agent already runs in — `herdr agent focus <pane_id>` — one call,
 resolving `<pane_id>` from the same three-tier attribution above, never a

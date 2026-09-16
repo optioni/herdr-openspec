@@ -365,25 +365,25 @@
 ## 13. Documentation
 <!-- kind: operational -->
 
-- [ ] 13.1 Rewrite in `README.md`: the `a`/`c`/`s` rows of the Keys table and the `agent_kind`
+- [x] 13.1 Rewrite in `README.md`: the `a`/`c`/`s` rows of the Keys table and the `agent_kind`
   row of the configuration table at line 88 (audience: plugin users) — **four** rows naming
   `/opsx:apply` and a `claude` default that no longer exist. Replaces four stale rows rather
   than adding beside them.
-- [ ] 13.2 Rewrite in `SPEC.md`: the `a`/`c`/`s` Keys rows, the `launch` row of the module
+- [x] 13.2 Rewrite in `SPEC.md`: the `a`/`c`/`s` Keys rows, the `launch` row of the module
   table, and the Launch-flow prose showing `herdr agent prompt <name> "/opsx:apply <change>"`
   (audience: maintainers) — `grep -n opsx SPEC.md` prints **seven lines across six sites**
   (93, 659, 660, 661, 884, 902–903, the last a single wrapped prose site), every one now false.
-- [ ] 13.3 Add to `SPEC.md`: the `[prompts.<kind>]` config format, `settings.toml`'s one read
+- [x] 13.3 Add to `SPEC.md`: the `[prompts.<kind>]` config format, `settings.toml`'s one read
   key, and the two new doc-conformance bullets from 11.2 and 11.3, in the `config.toml`,
   state-directory, and § Doc-conformance checks sections respectively (audience: maintainers) —
   the on-disk contract and the bound claims a future change must not break.
-- [ ] 13.4 Rewrite in `AGENTS.md`: the "Current repo state" sentence describing `a`/`c`/`s` as
+- [x] 13.4 Rewrite in `AGENTS.md`: the "Current repo state" sentence describing `a`/`c`/`s` as
   sending `/opsx:*`, the architecture bullet's file inventory to name `src/integration.rs` and
   the lazy once-per-session `integration status` read, and the claim count at `AGENTS.md:289`
   from "thirteen further claims" to fifteen (audience: every future session) — a durable seam
   rule a future change would otherwise get wrong by resolving the kind on the render path.
   Rewrites existing sentences; net addition under ten lines.
-- [ ] 13.5 Rewrite in `PRD.md`: the Non-Goals bullet at line 52 naming `/opsx:*` as the
+- [x] 13.5 Rewrite in `PRD.md`: the Non-Goals bullet at line 52 naming `/opsx:*` as the
   authoring route (audience: maintainers) — the non-goal still holds, but its example command
   is one this change removes.
 
