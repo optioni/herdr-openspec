@@ -29,7 +29,8 @@
      | Filter | Selected at HEAD |
      |---|---|
      | `integration::` | 0 — the module does not exist; this is the RED state |
-     | `launch::tests::decide` | 10 |
+     | `decide` | 10 |
+     | `wiring` | 29 |
      | `launch::tests::prompt` | 2 |
      | `launch::` | 45 |
      | `config::` | 24 |
@@ -38,8 +39,16 @@
      | `ui::list::` | 48 |
      | `ui::app::` | 169 |
      | `ui::tests::` | 62 |
-     | `ui::tests::wiring` | 29 |
      | whole `--lib` suite | 1491 |
+
+     Spelling, measured: a bare leaf token (`decide`, `wiring`) is a substring of the full
+     path at any nesting, so it survives both a `mod tests` rename and a file move, and is
+     preferred where it selects exactly the intended set. Where no bare token isolates the set
+     it is not used — `prompt` selects **9** against `launch::tests::prompt`'s **2** — and where
+     a group is a whole file the source-file prefix is used (`config::`, `state::`, `ui::view::`).
+     The spelling is not the mechanism, though: `cargo test` exits 0 on an empty selection and
+     has no flag to change that, so the recorded count is the only thing that makes a zero
+     visible, and it also catches a bare token that starts over-selecting later.
 
      EVERY group gate below must report a selected count STRICTLY GREATER than its baseline,
      because this change only adds tests. A count equal to the baseline means the new tests did
@@ -185,7 +194,11 @@
   `ui::app::apply_launch_action` (`src/ui/app.rs:1355`) so the crate compiles.
 - [ ] 6.4 CHECK: Re-inspect `decide`'s signature against that consumer and confirm `in_flight`
   is still the sixth argument, per design.md → Decisions 6.
-- [ ] 6.5 Run the group tests — `cargo test --lib -- launch::tests::decide ui::app::` — green,
+- [ ] 6.5 CHANGE: Update `src/launch.rs:70`'s doc comment, which says `decide` is "a pure total
+  function of its six arguments", and `src/launch.rs:18`'s `Intent` doc comment, the one
+  remaining `/opsx:` site no other task names. Both are production prose that this change
+  falsifies and no gate reads.
+- [ ] 6.6 Run the group tests — `cargo test --lib -- decide ui::app::` — green,
   selecting more than the **179** baseline (10 + 169); state that no refactor was needed if none
   was.
 
@@ -228,8 +241,11 @@
   `35 files searched (>= 25)`; plant `// planted: fn _p(_c: &dyn crate::cli::HerdrCli) {}`
   appended to `src/ui/view.rs` → exit **1**, one `LAUNCHSEAM FAIL (leg 3)` line naming it;
   `git checkout -- src/ui/view.rs` → exit **0**.
-- [ ] 7.10 REFACTOR: Clean up while tests stay green, or state that no refactor was needed.
-- [ ] 7.11 Run the group tests — `cargo test --lib -- launch:: ui::tests::` — green, selecting
+- [ ] 7.10 CHANGE: Update `src/launch.rs:55-61`'s `Outcome` doc comment, which states the
+  `problems` bound as "at most two", to the bound design.md → Decisions 11 now fixes at four.
+  Production prose no gate reads, falsified by this change.
+- [ ] 7.11 REFACTOR: Clean up while tests stay green, or state that no refactor was needed.
+- [ ] 7.12 Run the group tests — `cargo test --lib -- launch:: ui::tests::` — green, selecting
   more than the **107** baseline (45 + 62).
 
 ## 8. The view layer: the footer, the problem rows, and the stale descriptions

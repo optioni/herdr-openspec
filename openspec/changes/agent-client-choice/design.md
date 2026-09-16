@@ -138,6 +138,9 @@ maintains is untouched and needs no new reconciliation.
   mid-session restarts the pane, which is already true of every other configuration value
   ("Configuration SHALL be read once per process").
 - **Index rebuild:** none.
+- **Exit path:** unchanged. `launch::SETTLE_BUDGET` stays 35 s, between `agent start`'s measured
+  30 s and `cli::RUN_DEADLINE`'s 60 s, although a first launch now costs a fourth subprocess
+  call ahead of `agent start` — measured at under 10 ms, so the margin holds. See Risks.
 - **Authorization:** none — a terminal plugin with no multi-user surface.
 - **Observability:** every degraded path produces a `! `-prefixed problem row, and
   `SPEC.md`'s degraded-states table gains rows for the unreadable status, the ambiguous

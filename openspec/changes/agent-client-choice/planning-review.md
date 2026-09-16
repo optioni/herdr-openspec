@@ -63,6 +63,10 @@ The reviewers edited nothing.
 | 31 | SUGGESTION | B | `design.md` presented the worker's below-the-`thread::spawn` placement as gate-enforced. `NOBLOCK`'s `BLOCK3_RE` matches channel receives, joins and parks — not `cli.run`, which already blocks above the spawn at `src/launch.rs:267` today. | Restated as a sound convention rather than a check, at the point the design claims it. | `design.md` → Boundaries |
 | 32 | SUGGESTION | B | Task 11.2's needle set omitted `ratatui`. `LAUNCHSEAM` covers `HerdrCli`, but no `make gates` script sweeps `src/integration.rs` at all, so `ratatui` was covered by nothing. | Added to the claim's needle set. | `tasks.md` 11.2 |
 
+| 33 | SUGGESTION | B | The repaired filters used `<module>::tests::…`, which hardcodes the very test-module name a future rename would move. | Measured alternatives and adopted a bare leaf token where it selects exactly the intended set (`decide` → 10, `wiring` → 29), kept the qualified form where no bare token isolates it (`prompt` → **9** against `launch::tests::prompt`'s **2**), and recorded that the count — not the spelling — is the mechanism, since `cargo test` exits 0 on an empty selection with no flag to change it. | `tasks.md` header and gates |
+| 34 | SUGGESTION | B | Three production doc comments this change falsifies were owned by no task and read by no gate: `src/launch.rs:18`'s `Intent` comment (the one remaining `/opsx:` site), `:55-61`'s `Outcome` "at most two" bound, and `:70`'s "six arguments". | Tasks added in the groups that change each. | `tasks.md` 6.5, 7.10 |
+| 35 | SUGGESTION | B | The `SETTLE_BUDGET` exposure was recorded in Risks but not in Persistence and Rollout, where the exit path belongs. | One line added there, cross-referencing Risks. | `design.md` → Persistence and Rollout |
+
 
 ## Verified Clean
 
@@ -78,6 +82,9 @@ Recorded because each is a failure mode that was actively looked for and not fou
   design.md → Boundaries and the three negative controls, which D reproduced independently in a
   scratch copy.
 - **Kind markers**: 15 groups, 15 valid markers, evidence task first in every group.
+- **No task invents a boundary the Test Boundaries table omits** (reviewer B, having walked
+  tasks 0.1, 1.1, 4.x, 7.x, 9.x and 11.2); the two gaps found were omissions in the table
+  itself, repaired as #29.
 - **Seam compliance** (reviewer B, against `scripts/gates/noblock.sh` and
   `scripts/gates/launchseam.sh`): the new module keeps `LAUNCHSEAM`'s `ALLOWED` at five files,
   `NOBLOCK`'s Guards D and E for `src/launch.rs` survive — `fn drain`'s last occurrence stays
