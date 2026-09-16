@@ -101,24 +101,24 @@ grep -c "fn mouse_table_claims\|fn compare_mouse_claims" tests/doc_contract.rs; 
 ## 3. Row extraction: zones, payload tokens, and a closed gesture vocabulary
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: Write failing tests for `an_unrecognised_gesture_phrase_is_an_error`,
+- [x] 3.1 RED: Write failing tests for `an_unrecognised_gesture_phrase_is_an_error`,
       `a_mistyped_zone_token_is_named`, `a_zone_less_row_is_rejected_unless_it_is_the_catch_all`,
       `a_second_catch_all_is_an_error`, and `a_gutted_mouse_table_fails_as_a_broken_control`,
       each driving the extractor with a synthetic table string.
-- [ ] 3.2 GREEN: Add `documented_mouse_rows(spec_md) -> Result<Vec<Row>, String>` returning each
+- [x] 3.2 GREEN: Add `documented_mouse_rows(spec_md) -> Result<Vec<Row>, String>` returning each
       row's gesture kinds, zone set, overlay state, outcomes, and its own source text. Add it
       **beside** `documented_mouse_actions` without altering that function or its callers — the
       real `SPEC.md` has no zone tokens until group 4, so a strict parse wired in here would
       break this group's own gate and `documented_mouse_actions_fails_on_a_missing_table`.
-- [ ] 3.3 GREEN: Accept one **or more** backticked `Zone` tokens per row, erroring by row and
+- [x] 3.3 GREEN: Accept one **or more** backticked `Zone` tokens per row, erroring by row and
       token on any that names no real variant (per design.md → Decision 4).
-- [ ] 3.4 GREEN: Add the closed gesture vocabulary as a `[(&str, &[MouseEventKind])]` table in
+- [x] 3.4 GREEN: Add the closed gesture vocabulary as a `[(&str, &[MouseEventKind])]` table in
       the check's own source, covering the real table's five phrases — `Wheel down`, `Wheel up`,
       `Left click`, `Left drag`, `Anything else` — pinned to length 5, erroring by row and
       phrase on anything unlisted.
-- [ ] 3.5 GREEN: Accept a zone-less row only as the single `Ignore`-only catch-all, erroring on
+- [x] 3.5 GREEN: Accept a zone-less row only as the single `Ignore`-only catch-all, erroring on
       any other zone-less row and on a second catch-all, naming both rows in that case.
-- [ ] 3.6 Run `cargo test --test doc_contract` — green, no regressions.
+- [x] 3.6 Run `cargo test --test doc_contract` — green, no regressions.
 
 ## 4. `SPEC.md`'s mouse table names its zones, targets, and the overlay wheel
 <!-- kind: operational -->

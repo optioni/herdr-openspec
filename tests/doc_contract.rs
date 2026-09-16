@@ -1916,10 +1916,18 @@ fn documented_mouse_actions(spec_md: &str) -> Result<BTreeSet<String>, String> {
 /// one markdown table row (where the names are backticked, and the backticks
 /// simply fall outside the match) and on `mouse_action`'s own body alike.
 fn backticked_action_variants(text: &str) -> Vec<String> {
+    qualified_names(text, "Action::")
+}
+
+/// Every `<prefix><Name>` in `text`, as the bare names — the file's one way of
+/// lifting a typed name out of prose, now serving `Action::`, `Zone::`,
+/// `Target::` and `SelectPhase::` alike rather than four near-copies of one
+/// scan.
+fn qualified_names(text: &str, prefix: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut rest = text;
-    while let Some(idx) = rest.find("Action::") {
-        rest = &rest[idx + "Action::".len()..];
+    while let Some(idx) = rest.find(prefix) {
+        rest = &rest[idx + prefix.len()..];
         let end = rest
             .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
             .unwrap_or(rest.len());
@@ -1929,6 +1937,219 @@ fn backticked_action_variants(text: &str) -> Vec<String> {
         rest = &rest[end..];
     }
     out
+}
+
+/// The six `Zone` variant names, pinned and closed. A backticked `Zone` token
+/// outside this list is a typo, and is reported as one rather than left to
+/// surface two legs later as an unexplained vacuity
+/// (`doc-conformance` -> "The documented set").
+const ZONE_VARIANTS: [&str; 6] = [
+    "ListRow",
+    "List",
+    "DetailTab",
+    "DetailRow",
+    "Detail",
+    "Outside",
+];
+
+/// The token a row carries to say it describes the **overlay-open** pass, where
+/// `mouse_action` returns before consulting `ui::layout::zone` at all and there
+/// is no zone for the row to name (`design.md` -> Decision 6).
+const OVERLAY_TOKEN: &str = "`help.open`";
+
+/// The **closed** gesture vocabulary: a leading phrase of the Gesture cell
+/// mapped to the `MouseEventKind` values it stands for (`design.md` ->
+/// Decision 5). Pinned by length, and a phrase outside it is a hard error
+/// naming the row — semantic parsing of the cell's English is not attempted,
+/// because its failure mode is silent.
+const MOUSE_GESTURES: [(&str, &[MouseEventKind]); 5] = [
+    ("Wheel down", &[MouseEventKind::ScrollDown]),
+    ("Wheel up", &[MouseEventKind::ScrollUp]),
+    ("Left click", &[MouseEventKind::Down(MouseButton::Left)]),
+    ("Left drag", &[MouseEventKind::Drag(MouseButton::Left)]),
+    ("Anything else", &MOUSE_KINDS),
+];
+
+/// One row of `SPEC.md` -> Keys' mouse table, on the same four axes a [`Claim`]
+/// carries, plus its own source text so a failure can quote the row back.
+///
+/// A row's claims are the **cross product** of its gestures, its zones and its
+/// outcomes. The catch-all is the exception: it names no zone, its only outcome
+/// is `Ignore`, and it claims the remainder rather than a cross product.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MouseRow {
+    /// The row's own line, quoted back in a failure message.
+    text: String,
+    /// Axis 1: the gesture kinds the row's Gesture cell resolves to, as
+    /// [`kind_name`] spells them.
+    kinds: Vec<&'static str>,
+    /// Axis 2: whether the row describes the overlay-open pass.
+    help_open: bool,
+    /// Axis 3: the `Zone` variants the row covers. Empty only for the catch-all
+    /// and for an overlay-open row.
+    zones: Vec<&'static str>,
+    /// Axis 4: the outcomes, in `Click(Change)` form.
+    outcomes: Vec<String>,
+    /// Whether this is **the** catch-all: zone-less, overlay-agnostic, and
+    /// `Ignore`-only.
+    catch_all: bool,
+}
+
+/// The mouse table's own contiguous `|` lines, header and separator included.
+///
+/// The table is located by its own header row, `| Gesture | Action |`, inside
+/// the `### Keys` section — never by position, and never by scanning the whole
+/// document. `Err` names what was missing, so a deleted or gutted table fails
+/// loudly rather than yielding an empty set that compares equal to another one.
+fn mouse_table_lines(spec_md: &str) -> Result<Vec<&str>, String> {
+    let keys = section(spec_md, "### Keys")?;
+    let start = keys.find("| Gesture | Action |").ok_or_else(|| {
+        "SPEC.md -> Keys holds no mouse table (no `| Gesture | Action |` header row)".to_string()
+    })?;
+    let lines: Vec<&str> = keys[start..]
+        .lines()
+        .take_while(|line| line.starts_with('|'))
+        .collect();
+    if lines.len() < 3 {
+        return Err(format!(
+            "SPEC.md -> Keys' mouse table has {} row(s) - a header, a separator, and at \
+             least one binding are the minimum",
+            lines.len()
+        ));
+    }
+    Ok(lines)
+}
+
+/// One binding row, parsed onto the four claim axes.
+fn parse_mouse_row(line: &str) -> Result<MouseRow, String> {
+    let cells: Vec<&str> = line.split('|').collect();
+    if cells.len() < 4 {
+        return Err(format!(
+            "SPEC.md -> Keys' mouse table row {line:?} does not carry a Gesture cell and an \
+             Action cell"
+        ));
+    }
+    let gesture = cells[1].trim();
+    let kinds = MOUSE_GESTURES
+        .iter()
+        .find(|(phrase, _)| gesture.starts_with(phrase))
+        .map(|(_, kinds)| kinds.iter().copied().map(kind_name).collect::<Vec<_>>())
+        .ok_or_else(|| {
+            let listed: Vec<&str> = MOUSE_GESTURES.iter().map(|(phrase, _)| *phrase).collect();
+            format!(
+                "SPEC.md -> Keys' mouse table row {line:?} opens with a gesture phrase the \
+                 closed vocabulary does not list: {gesture:?}. The five listed phrases are \
+                 {listed:?} - add the phrase to MOUSE_GESTURES or reword the row, never \
+                 leave it unmatched, which would drop the row from both directions of the \
+                 assertion"
+            )
+        })?;
+
+    let mut zones: Vec<&'static str> = Vec::new();
+    for token in qualified_names(line, "Zone::") {
+        let variant = ZONE_VARIANTS
+            .iter()
+            .find(|known| **known == token)
+            .ok_or_else(|| {
+                format!(
+                    "SPEC.md -> Keys' mouse table row {line:?} names `Zone::{token}`, which is \
+                     no `Zone` variant - the six are {ZONE_VARIANTS:?}"
+                )
+            })?;
+        if !zones.contains(variant) {
+            zones.push(variant);
+        }
+    }
+
+    let variants = backticked_action_variants(line);
+    if variants.is_empty() {
+        return Err(format!(
+            "SPEC.md -> Keys' mouse table row {line:?} names no `Action::` variant in \
+             backticks - the extraction rule this check depends on is not being followed"
+        ));
+    }
+    let mut outcomes: Vec<String> = Vec::new();
+    for variant in variants {
+        let prefix = match variant.as_str() {
+            "Click" => Some("Target::"),
+            "Select" => Some("SelectPhase::"),
+            _ => None,
+        };
+        match prefix {
+            None => {
+                if !outcomes.contains(&variant) {
+                    outcomes.push(variant);
+                }
+            }
+            Some(prefix) => {
+                let payloads = qualified_names(line, prefix);
+                if payloads.is_empty() {
+                    return Err(format!(
+                        "SPEC.md -> Keys' mouse table row {line:?} names `Action::{variant}` \
+                         and no `{prefix}` constructor - one `{variant}` row is told from \
+                         another only by the payload constructor it carries"
+                    ));
+                }
+                for payload in payloads {
+                    let outcome = format!("{variant}({payload})");
+                    if !outcomes.contains(&outcome) {
+                        outcomes.push(outcome);
+                    }
+                }
+            }
+        }
+    }
+
+    let help_open = line.contains(OVERLAY_TOKEN);
+    let catch_all = zones.is_empty() && !help_open && outcomes == ["Ignore"];
+    Ok(MouseRow {
+        text: line.to_string(),
+        kinds,
+        help_open,
+        zones,
+        outcomes,
+        catch_all,
+    })
+}
+
+/// `SPEC.md` -> Keys' mouse table, as rows on the claim's own four axes.
+///
+/// Added **beside** [`documented_mouse_actions`] rather than replacing it: this
+/// parse is strict where that one is lenient, and the two answer different
+/// questions — leg 1 wants the row-free vocabulary of the whole table.
+fn documented_mouse_rows(spec_md: &str) -> Result<Vec<MouseRow>, String> {
+    let lines = mouse_table_lines(spec_md)?;
+    let rows: Vec<MouseRow> = lines
+        .into_iter()
+        .skip(2)
+        .map(parse_mouse_row)
+        .collect::<Result<_, _>>()?;
+
+    let catch_alls: Vec<&str> = rows
+        .iter()
+        .filter(|row| row.catch_all)
+        .map(|row| row.text.as_str())
+        .collect();
+    if catch_alls.len() != 1 {
+        return Err(format!(
+            "SPEC.md -> Keys' mouse table must carry exactly one catch-all row - the one \
+             naming no `Zone` and whose only outcome is `Action::Ignore` - and carries {}: \
+             {catch_alls:?}",
+            catch_alls.len()
+        ));
+    }
+
+    for row in &rows {
+        if row.zones.is_empty() && !row.catch_all && !row.help_open {
+            return Err(format!(
+                "SPEC.md -> Keys' mouse table row {:?} names no `Zone` - only the single \
+                 `Ignore`-only catch-all, and a row naming the overlay-open state with \
+                 {OVERLAY_TOKEN}, may omit one",
+                row.text
+            ));
+        }
+    }
+    Ok(rows)
 }
 
 /// `mouse_action`'s own body, cut from `src/ui/driver.rs`'s **production slice**:
@@ -2087,6 +2308,132 @@ fn documented_mouse_actions_fails_on_a_missing_table() {
     let unnamed = "### Keys\n\n| Gesture | Action |\n|---|---|\n| Wheel down | scrolls |\n";
     let err = documented_mouse_actions(unnamed).expect_err("no variant named is an error");
     assert!(err.contains("names no `Action::` variant"), "{err}");
+}
+
+/// A synthetic `### Keys` section carrying `rows` as its mouse table, for the
+/// row extractor's own controls. The file's established idiom: every parser here
+/// is a pure `&str -> Result` fed hand-written and malformed inputs, so a
+/// planted defect is an argument rather than a doctored tree.
+fn mouse_table(rows: &[&str]) -> String {
+    let mut out = String::from("### Keys\n\n| Gesture | Action |\n|---|---|\n");
+    for row in rows {
+        out.push_str(row);
+        out.push('\n');
+    }
+    out.push_str("\nProse after the table.\n\n### Next\n");
+    out
+}
+
+#[test]
+fn an_unrecognised_gesture_phrase_is_an_error() {
+    // `design.md` -> Decision 5: the gesture vocabulary is closed, and a phrase
+    // outside it is a hard error naming the row. A row silently skipped would
+    // drop out of **both** directions of the assertion, so a typo would weaken
+    // the check rather than fail it.
+    let doc = mouse_table(&[
+        "| Left quadruple-click on a change row | `Action::Click` naming `Target::Change` in \
+         `Zone::ListRow` |",
+        "| Anything else | `Action::Ignore` |",
+    ]);
+    let err = documented_mouse_rows(&doc).expect_err("an unlisted phrase is an error");
+    assert!(err.contains("Left quadruple-click"), "{err}");
+    assert!(err.contains("gesture"), "{err}");
+}
+
+#[test]
+fn a_mistyped_zone_token_is_named() {
+    let doc = mouse_table(&[
+        "| Left click on a change row | `Action::Click` naming `Target::Change` in \
+         `Zone::DetailRows` |",
+        "| Anything else | `Action::Ignore` |",
+    ]);
+    let err = documented_mouse_rows(&doc).expect_err("a mistyped Zone token is an error");
+    assert!(err.contains("DetailRows"), "{err}");
+    assert!(err.contains("no `Zone` variant"), "{err}");
+    // Not the vacuity message, which would point the reader at the wrong problem.
+    assert!(!err.contains("vacuous"), "{err}");
+}
+
+#[test]
+fn a_zone_less_row_is_rejected_unless_it_is_the_catch_all() {
+    let doc = mouse_table(&[
+        "| Left click on an artifact tab cell | `Action::SelectTab` for that cell's own \
+         position |",
+        "| Anything else | `Action::Ignore` |",
+    ]);
+    let err = documented_mouse_rows(&doc).expect_err("a zone-less binding row is an error");
+    assert!(err.contains("artifact tab cell"), "{err}");
+    assert!(err.contains("catch-all"), "{err}");
+
+    // The two rows that may omit a zone: the catch-all, and a row that names the
+    // overlay-open state instead, where `mouse_action` resolves no zone at all.
+    let ok = mouse_table(&[
+        "| Left click on an artifact tab cell | `Action::SelectTab` in `Zone::DetailTab` |",
+        "| Left click outside the band while `help.open` | `Action::ToggleHelp` |",
+        "| Anything else | `Action::Ignore` |",
+    ]);
+    let rows = documented_mouse_rows(&ok).expect("both omissions are legal");
+    assert_eq!(rows.len(), 3, "{rows:?}");
+    assert!(
+        rows[1].help_open,
+        "the overlay row carries the overlay axis"
+    );
+    assert!(!rows[0].help_open && !rows[2].help_open);
+}
+
+#[test]
+fn a_second_catch_all_is_an_error() {
+    let two = mouse_table(&[
+        "| Left click on a change row | `Action::Click` naming `Target::Change` in \
+         `Zone::ListRow` |",
+        "| Anything else - a right press | `Action::Ignore` |",
+        "| Anything else - a middle press | `Action::Ignore` |",
+    ]);
+    let err = documented_mouse_rows(&two).expect_err("a second catch-all is an error");
+    assert!(err.contains("a right press"), "naming both rows: {err}");
+    assert!(err.contains("a middle press"), "naming both rows: {err}");
+
+    // And none at all is an error too: the catch-all is what absorbs the
+    // `Ignore` claims, so a table without one cannot cover the observed set.
+    let none = mouse_table(&[
+        "| Left click on a change row | `Action::Click` naming `Target::Change` in \
+         `Zone::ListRow` |",
+    ]);
+    let err = documented_mouse_rows(&none).expect_err("no catch-all is an error");
+    assert!(err.contains("catch-all"), "{err}");
+}
+
+#[test]
+fn a_gutted_mouse_table_fails_as_a_broken_control() {
+    // Exactly `documented_mouse_actions`' own rule: an empty documented set is
+    // never compared against an observed one and allowed to pass.
+    let empty = "### Keys\n\n| Gesture | Action |\n|---|---|\n\nProse.\n";
+    let err = documented_mouse_rows(empty).expect_err("header and separator only");
+    assert!(err.contains("row"), "{err}");
+
+    let no_header = "### Keys\n\n| Key | Action |\n|---|---|\n| `q` | Quit |\n";
+    let err = documented_mouse_rows(no_header).expect_err("no mouse table");
+    assert!(err.contains("no mouse table"), "{err}");
+
+    assert!(documented_mouse_rows("## Overview\n\nnothing here\n").is_err());
+}
+
+#[test]
+fn the_gesture_vocabulary_is_closed_and_covers_the_real_table() {
+    // `design.md` -> Decision 5: pinned by length, so a sixth phrase is a
+    // deliberate edit. The five are the ones `SPEC.md`'s own table uses.
+    assert_eq!(MOUSE_GESTURES.len(), 5, "{MOUSE_GESTURES:?}");
+    let phrases: BTreeSet<&str> = MOUSE_GESTURES.iter().map(|(p, _)| *p).collect();
+    assert_eq!(
+        phrases,
+        BTreeSet::from([
+            "Wheel down",
+            "Wheel up",
+            "Left click",
+            "Left drag",
+            "Anything else"
+        ])
+    );
 }
 
 #[test]
