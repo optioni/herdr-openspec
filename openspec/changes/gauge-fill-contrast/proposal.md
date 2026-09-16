@@ -11,7 +11,17 @@ empty from `{░, ▒}`. Every edge in the bar is therefore a single 25-point st
 | group boundary, empty half `░`→`▒` | 25 points | where one task group ends |
 
 The one thing a reader wants at a glance is drawn at exactly the same visual weight as the ten
-or twenty things they don't. `mouse-text-selection` at 25/47, eleven groups, 48-column gauge:
+or twenty things they don't.
+
+This bites about **half** the time, and the half is worth stating rather than glossing: the two
+alternations are in phase, so the group straddling the fill edge decides both sides of it. Where
+that group's index is **odd** the edge is `▓`→`▒`, the 25-point step above. Where it is **even**
+the edge is `█`→`░`, a 75-point step that is already the strongest edge in the bar. Exactly one
+group is usually in progress, so which case a change falls in is essentially arbitrary — and a
+gauge whose headline edge is legible only on a coin flip is the defect, not a gauge that is
+always wrong. `mouse-text-selection` at 25/47, eleven groups, straddling on group 5 (odd), drawn
+here at a 48-column gauge for illustration — the mandated interiors give `g` of 66 at 78 columns
+and 46 at 58:
 
 ```
 ████▓▓▓▓███▓▓▓▓▓████████▓▒▒░░░░▒▒▒░░░░▒▒▒░░░░░░░   the fill edge is in there somewhere
@@ -31,6 +41,11 @@ or twenty things they don't. `mouse-text-selection` at 25/47, eleven groups, 48-
   ```
   ████▒▒▒▒███▒▒▒▒▒████████▒⠌⠌⢕⢕⢕⢕⠌⠌⠌⢕⢕⢕⢕⠌⠌⠌⢕⢕⢕⢕⢕⢕⢕
   ```
+
+  Both illustrations are drawn at 48 columns to sit side by side; neither mandated interior
+  gives that `g`. Rendered at the real widths the same fixture gives
+  `█████▒▒▒▒▒▒████▒▒▒▒▒▒▒███████████▒▒⠌⠌⢕⢕⢕⢕⢕⢕⠌⠌⠌⠌⢕⢕⢕⢕⢕⢕⠌⠌⠌⠌⢕⢕⢕⢕⢕⢕⢕⢕⢕` at 78 and
+  `███▒▒▒▒███▒▒▒▒▒████████▒⠌⠌⢕⢕⢕⢕⠌⠌⠌⢕⢕⢕⢕⠌⠌⠌⢕⢕⢕⢕⢕⢕` at 58.
 
 - **Both halves keep their boundaries.** Because the halves are categorically distinct, marking
   groups in the filled half no longer competes with the fill edge — which is what the previous
@@ -57,8 +72,10 @@ Not **BREAKING**: no manifest, config-format, or keybinding change.
   groups and segmented by nothing, so the unsegmented `█`/`░` pair is already right for it.
 - **No change to the legibility floor, the cumulative-flooring partition, the empty-group index
   rule, or the no-separator-characters decision.** All four are carried unchanged.
-- **Not a fix for the East Asian Width exposure.** It is recorded accurately and left standing;
-  see the design for why closing it costs the thing this change exists to buy.
+- **Not a fix for the East Asian Width exposure** — though it is not inert either, and both
+  requirements say so. Drawing the whole empty half from one width class removes the
+  **raggedness** a CJK-locale terminal showed; the **mis-proportion** stays, is recorded, and is
+  not compensated. Closing it entirely costs the thing this change exists to buy; see the design.
 - **No new dependency.** Braille patterns are plain `char` literals.
 
 ## Capabilities
@@ -69,17 +86,26 @@ None.
 
 ### Modified Capabilities
 
-- `tasks-progress-bar`: the segmentation glyph table becomes two character families rather than
-  one lightness scale, with the East Asian Width consequence recorded in the requirement.
+- `tasks-progress-bar`, two requirements:
+  - *The gauge is segmented by group, proportionally, and only when a segment is legible* —
+    the segmentation glyph table becomes two character families rather than one lightness
+    scale, with the East Asian Width consequence recorded in the requirement.
+  - *The progress bar's grammar* — its own glyph-width paragraph names `▓` and carries the
+    same "all four Ambiguous" claim, so it goes stale and stays false unless it moves with
+    the table. It gains a scenario asserting every glyph the bar can draw measures one column
+    through `layout::columns`, which is the check that was missing when the claim first went
+    wrong.
 
 ## Impact
 
 - **Code:** `src/ui/tasks.rs` only — `segmented_gauge`'s substitution table. `gauge_of`,
   `progress_bar`, and every other function are untouched. Tests in `src/ui/tasks.rs` and
   `src/ui/view.rs` assert `▓`/`▒` presence directly and move with it.
-- **Docs:** `SPEC.md:406`'s glyph sentence and the matching paragraph in `CLAUDE.md`, both of
-  which name the retiring `▓` and both of which carry the incorrect "all four are Ambiguous"
-  claim.
+- **Docs:** `SPEC.md:404-410`'s glyph paragraph and `AGENTS.md:141-145` (`CLAUDE.md` is a
+  symlink to it), both of which name the retiring `▓` and both of which carry the incorrect
+  "all four are Ambiguous" claim. The same claim appears a third time, in
+  `openspec/specs/tasks-progress-bar/spec.md:65-70`, which is why the grammar requirement is
+  modified above rather than left for the archive to carry forward.
 - **Roadmap:** **unplanned**. `openspec/IMPLEMENTATION-ORDER.md` has no row for it;
   `tasks-emphasis` introduced the segmented gauge and this is its first revision, prompted by
   reading the pane rather than by the roadmap.

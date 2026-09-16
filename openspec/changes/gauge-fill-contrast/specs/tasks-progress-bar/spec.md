@@ -1,5 +1,176 @@
 ## MODIFIED Requirements
 
+### Requirement: The progress bar's grammar
+
+`ui::tasks::progress_bar(progress: &tasks::Progress, groups: &[tasks::Progress], width: u16)
+-> String` SHALL produce the single line that leads the tracked-tasks tab's content, in the
+full form
+
+```
+<gauge> <count cell> <percent cell>
+```
+
+with exactly one space between the three fields and no padding on either end, so a region
+draws it left to right and leaves the rest of its row untouched, exactly as
+`markdown-render` does.
+
+- The **count cell** SHALL be `ui::list::progress_cell(progress)` — `[<completed>/<total>]`,
+  or the three characters `[-]` when `total == 0`. It SHALL be that one function and not a
+  second formatting of the same pair, so the bar, the detail header (`detail-header`), and
+  the list row (`change-rows`) can never disagree about a change's progress.
+- The **percent cell** SHALL be `<n>%` where `n` is `completed * 100 / total` in integer
+  arithmetic, truncating rather than rounding, computed in `u128` so the product cannot
+  overflow for any `usize` pair. It SHALL be absent entirely when `total == 0`.
+- The **gauge** SHALL be a bare run of exactly `g` characters, `filled` of them filled and
+  `g - filled` of them empty, where `g` is whatever width remains after the other fields and
+  their separating spaces, and `filled = g * completed / total` in integer arithmetic
+  computed in `u128`, so the product cannot overflow for any `usize` pair and no value of
+  `g`. It SHALL carry no surrounding brackets: the count cell already carries a bracket pair
+  and a second one beside it reads as noise. Which **glyph** each of the `g` positions is
+  drawn with is the segmentation requirement below; where that requirement does not segment —
+  and in particular whenever `groups` is empty — the filled glyph SHALL be `█` (U+2588) and
+  the empty one `░` (U+2591), exactly as before this change.
+
+`groups` SHALL be one `Progress` per task group, in document order, as `tasks-checklist`
+states each of its two callers derives them — and on the **foldable** path, which is the path
+every real `tasks.md` takes, that slice SHALL be populated from `detail.sections`' own
+`progress` values rather than left empty. It SHALL affect **only** which glyph each position is drawn
+with — never `g`, never `filled`, never either cell, and never the drop-whole order. An
+**empty slice** SHALL therefore produce a byte-identical line to the one this capability
+produced before this change, at every width and for every `Progress`, which is what the
+detail header and the non-foldable path both rely on.
+
+The returned string SHALL be at most `width` **display columns**, measured by
+`layout::columns` as `responsive-layout` defines it, and SHALL be exactly `width` columns in
+the full form. Every character the bar can hold SHALL measure one column as `layout::columns`
+reports it — `█` (U+2588) and `░` (U+2591), the three further glyphs the segmentation
+requirement below introduces, `▒` (U+2592), `⢕` (U+2895) and `⠌` (U+280C), and the ASCII of
+the count and percent cells — so this restatement changes no rendered output at any width.
+
+Their East Asian Width properties are **not** uniform, and the consequence SHALL be recorded
+rather than discovered. Measured against UCD 16.0.0, `█` and `▒` are **Ambiguous** while `░`,
+`⢕` and `⠌` are **Neutral**. `unicode-width`'s default — and therefore ratatui's, and
+therefore `layout::columns`' — resolves Ambiguous to 1, so the arithmetic above is correct
+against the very measure `Buffer::set_string` consumes; a terminal configured for a CJK
+locale nonetheless paints the Ambiguous glyphs at two columns and the Neutral ones at one,
+leaving the gauge **mis-proportioned**. That is an accepted, uncompensated exposure on
+exactly the terms `markdown-render` already records for its own glyphs.
+
+It is not created here. This requirement previously named the set `█`, `░`, `▓`, `▒` and
+asserted they were "all East Asian Width **Ambiguous**" — which was **false as written**,
+since `░` U+2591 is Neutral, and so misdescribed the failure as well as miscounted it: the
+gauge did not double uniformly in that terminal, it went **ragged**, its Ambiguous positions
+painting at two columns beside Neutral `░` at one. The segmentation requirement below removes
+the raggedness by drawing the whole empty half from one width class, and keeps the
+mis-proportion. The restatement of the measure is made because the crate now has exactly one
+unit for a rendered length, and a requirement still counting `char`s would be the one place a
+reader could not tell which measure was meant. The cell-dropping order below is likewise
+unchanged and now evaluated in columns.
+
+`ui::tasks` SHALL reach the measure only through `layout::columns` and
+`layout::truncate_columns`; `progress_bar` SHALL name no `char` count of its own.
+
+The line SHALL be rendered as one segment carrying `Face::plain()`, so `ui::view::style_for`
+needs no new `Face`-to-`Style` mapping and `ui::tasks` needs no `ratatui` type. Segmentation
+SHALL be carried by the **glyphs**, not by a face: a segment per group would be a per-group
+style the palette would then have to name, and the glyph alternation already says the whole
+of what a boundary means.
+
+The progress the bar renders SHALL be the selected `Change`'s own `progress` field — the
+value `change-artifacts` computed and `change-merge` may have replaced with the CLI's — and
+SHALL NOT be recounted from the rendered source. `tasks-checklist` renders the parse; this
+capability renders the count, and the two SHALL NOT be two different numbers for the same
+change on the same frame.
+
+**The arithmetic is `u128`, not a saturating `u64` multiply.** This requirement previously
+specified a saturating multiply, which silently produced the wrong quotient rather than the
+wrong magnitude: `u64::MAX.saturating_mul(g)` saturates to `u64::MAX`, and `u64::MAX /
+u64::MAX == 1`, so at `Progress { completed: usize::MAX, total: usize::MAX }` the gauge
+rendered **one** filled cell and the percent cell read **1%** for a change this capability
+calls complete — at `g == 12`, and equally at the 68- and 48-column gauges this bar draws at
+its own two mandated interior widths. `usize::MAX * 100` and `usize::MAX * g` both fit in
+`u128` for every `u16` `g`, so widening removes the saturation rather than special-casing
+around it, and the formula above is then literally true instead of contradicting the
+completeness requirement below. For every `Progress` a repository of task files can produce
+the quotient is unchanged, so no rendered output moves except at that one saturating input.
+
+#### Scenario: The full grammar at both mandated interior widths
+
+- **WHEN** `progress_bar` is called with `Progress { completed: 4, total: 9 }` at width
+  `78` and at width `58`
+- **THEN** the 78-column result is exactly 78 display columns: a 68-column gauge, a space,
+  `[4/9]`, a space, and `44%`
+- **AND** the 58-column result is exactly 58 display columns: a 48-column gauge, a space,
+  `[4/9]`, a space, and `44%`
+- **AND** the 68-column gauge holds exactly 30 `█` and 38 `░`, and the 48-column
+  gauge exactly 21 `█` and 27 `░`, so the fill is `g * completed / total` truncated
+- **AND** the two results are **byte-identical** to the ones this requirement produced before
+  display-column measurement, which is the discriminating claim: it fails if the gauge run's
+  length was recomputed against a different measure, whereas comparing `layout::columns` to
+  `chars().count()` for an all-width-1 fixture is a tautology and could not
+
+#### Scenario: Every glyph the bar can draw measures one column
+
+- **WHEN** `layout::columns` is called on each of the five glyphs this requirement and the
+  segmentation requirement below name — `█`, `░`, `▒`, `⢕`, `⠌` — and on the whole gauge run
+  `progress_bar` returns at widths `78` and `58` for `Progress { completed: 25, total: 47 }`
+  with a multi-group slice that segments
+- **THEN** each glyph measures exactly `1`
+- **AND** at each width the gauge run's `layout::columns` equals its `chars().count()`, and
+  the full line measures exactly that width, so no glyph this change introduces widened the
+  row against the measure `Buffer::set_string` consumes
+- **AND** the segmented run holds at least one `█`, one `▒`, one `⢕` and one `⠌`, and the
+  same call made with an **empty** `groups` slice holds at least one `░`, so all five glyphs
+  are actually measured rather than the scenario passing on a run that reaches only the two
+  this capability already drew. Without this clause the scenario is **green before the change**
+  — the five glyphs are `char` literals and `layout::columns` measures them whether or not the
+  crate ever draws them — which is the difference between a guard and a decoration
+- **AND** the assertion is made through `layout::columns` rather than a hardcoded `1`, so a
+  future measure change that disagrees with the buffer fails here rather than in a rendered
+  frame
+
+#### Scenario: The bar reaches the buffer at both mandated frame widths
+
+- **WHEN** a `Dashboard` at `Route::Detail`, whose selected change's tracked-tasks tab is
+  selected, whose `progress` is `Progress { completed: 4, total: 9 }`, and whose
+  whose one section holds nine task lines, is rendered at 120x20 and at 60x20
+- **THEN** in the 120-column buffer row 4 columns 41 through 118 hold the 78-column bar,
+  ending `[4/9] 44%`
+- **AND** in the 60-column buffer row 4 columns 1 through 58 hold the 58-column bar,
+  ending `[4/9] 44%`
+- **AND** in each buffer row 5 is blank in the content area and row 6 holds the first
+  checklist line, so the bar and its separator took two rows from the checklist rather than
+  being drawn over it
+
+#### Scenario: The percentage truncates rather than rounds
+
+- **WHEN** `progress_bar` is called at width `78` and at width `58` with
+  `Progress { completed: 2, total: 3 }`, then `{ completed: 1, total: 3 }`, then
+  `{ completed: 0, total: 7 }`, then `{ completed: 7, total: 7 }`
+- **THEN** the percent cells read `66%`, `33%`, `0%`, and `100%` respectively at both widths
+- **AND** `66%` rather than `67%` proves the truncation, and the full form is still exactly
+  `width` display columns at every one of them
+
+#### Scenario: The bar measures at most its width at every width
+
+- **WHEN** `progress_bar` is called at every width from `0` through `130` with
+  `Progress { completed: 4, total: 9 }`, `{ completed: 0, total: 0 }`,
+  `{ completed: 0, total: usize::MAX }`, and `{ completed: usize::MAX, total: usize::MAX }`
+- **THEN** no call panics at any width for any of the four
+- **AND** at every width every result's `layout::columns` is at most that width, and equals
+  it whenever the full form was returned
+
+#### Scenario: A saturating `Progress` renders a full gauge and a full percentage
+
+- **WHEN** `progress_bar` is called with `Progress { completed: usize::MAX, total: usize::MAX }`
+  at widths `78` and `58`
+- **THEN** each result's gauge holds no `░` at all and its percent cell reads `100%`
+- **AND** against the previous saturating-`u64` arithmetic each gauge held exactly one `█`
+  and the percent cell read `1%`, which is the discriminating comparison: this scenario fails
+  against the implementation this requirement shipped with
+- **AND** `progress_bar` with `Progress { completed: 4, total: 9 }` at the same two widths is
+  byte-identical to before, so the widening moved exactly the saturating input and nothing else
+
 ### Requirement: The gauge is segmented by group, proportionally, and only when a segment is legible
 
 When `groups` holds **two or more** entries whose `total` is non-zero and the gauge is wide
@@ -33,9 +204,9 @@ no items SHALL contribute no span and SHALL NOT consume an index, so two groups 
 after empty ones are dropped still alternate — an empty group that took an index would give
 two neighbours the same shade and erase the boundary between them.
 
-Separator characters SHALL NOT be used. At the measured maximum of 22 groups, 21 separators
-would consume 21 of the narrow interior's ~47 gauge columns, leaving the gauge itself less
-than half the row.
+Separator characters SHALL NOT be used. At the measured maximum of 18 contributing groups, 17
+separators would consume 17 of the narrow interior's ~45 gauge columns, leaving the gauge
+itself well under half the row.
 
 **Spans are proportional to item count, by cumulative flooring.** With `n` contributing groups
 whose totals are `t_0 … t_{n-1}` and `T` their sum, group `i`'s span SHALL be the half-open
@@ -68,13 +239,21 @@ where and when there are boundaries to mark, and nowhere else in the crate.
 
 `g` is **not** `width - 11`. It is `width` less `columns(progress_cell)`, less
 `columns(percent_cell)`, less the two separating spaces — and both cells are data-dependent,
-so the deduction grows with the change's own task count. The archive's worst case is therefore
-tighter than a fixed 11 predicts: `archive/2026-09-06-agent-launch` carries **22** groups and
-**81** items, so its cells are `[81/81]` and `100%` — 7 and 4 columns — and at the 58-column
-interior `g` is `58 - 7 - 4 - 2 = 45` against a floor of `2 * 22 = 44`. It segments, with
-**one** column of headroom rather than three. A change with more groups, or a wider count cell
-at the same group count, falls below the floor and degrades to the pre-change gauge — which is
-a supported rendering, not a fallback.
+so the deduction grows with the change's own task count.
+
+`n` counts **contributing** groups, and the archive's worst case SHALL be measured that way
+rather than by counting `^## ` headings: a heading holding no checkbox items is not a group
+this rule sees, and five of `archive/2026-09-06-agent-launch`'s 22 headings are prose sections
+holding none. Measured over every archived `tasks.md` by contributing groups, the worst case is
+`archive/2026-09-07-degraded-states` — **18** contributing groups and **115** items, so its
+cells are `[115/115]` and `100%`, 9 and 4 columns, and at the 58-column interior `g` is
+`58 - 9 - 4 - 2 = 43` against a floor of `2 * 18 = 36`. It segments, with **seven** columns of
+headroom. The figure this requirement carried before — 22 groups, a floor of 44, and one column
+of headroom — counted headings rather than contributing groups and so overstated the floor by
+ten; it never changed a rendering, because a floor that is too high only ever skips
+segmentation, but it made the margin look a tenth of its real size. A change with more
+contributing groups, or a wider count cell at the same group count, falls below the floor and
+degrades to the pre-change gauge — which is a supported rendering, not a fallback.
 
 The **fill count SHALL NOT move.** Segmentation SHALL be expressed as a glyph substitution over
 the run `gauge_of(progress, g)` already returns: each position keeps whether it is filled or
@@ -151,8 +330,11 @@ repair.
   of 100 groups all holding zero items
 - **THEN** no call panics
 - **AND** at every width the returned line measures at most that width in display columns
-- **AND** wherever a gauge is drawn, its four glyphs' counts sum to exactly `g`, so no position
-  is unassigned or assigned twice
+- **AND** wherever a gauge is drawn, the counts of its **five** glyphs — `█`, `░`, `▒`, `⢕`
+  and `⠌` — sum to exactly `g`, so no position is unassigned or assigned twice. Five rather
+  than the table's four: this sweep deliberately reaches widths and slices where segmentation
+  is **skipped**, and there the run is the `█`/`░` pair `gauge_of` returns, so a sum over the
+  segmentation table alone is short by every `░` on that path
 - **AND** at every width the count of **filled** positions — `█` and `▒` together — is equal
   to the count of `█` in the same call made with an **empty** `groups` slice, so the
   substitution provably preserves the fill rather than being asserted to by construction
@@ -191,8 +373,12 @@ repair.
 - **THEN** at each width the gauge holds exactly one position at which a block glyph is
   followed by a braille glyph, and no position at which a braille glyph is followed by a block
   one
-- **AND** that transition falls at index `floor(g * 25 / 47)`, the same index at which `█`
-  becomes `░` in the same call made with an **empty** `groups` slice
+- **AND** the **first braille position** falls at index `floor(g * 25 / 47)` — so the
+  block-followed-by-braille adjacency named above sits at `floor(g * 25 / 47) - 1`, and the
+  assertion SHALL say which of the two it reads. At width `78`, `g` is 66 and those indices
+  are 35 and 34; at `58`, `g` is 46 and they are 24 and 23
+- **AND** that first braille position is the same index at which `█` becomes `░` in the same
+  call made with an **empty** `groups` slice
 - **AND** the gauge holds at least one `█`, one `▒`, one `⢕`, and one `⠌`, so the scenario
   exercises all four glyphs rather than passing on a slice that reaches only two
 
