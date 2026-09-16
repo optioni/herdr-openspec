@@ -2162,8 +2162,8 @@ use herdr_openspec::changes::{ArtifactRef, Change, ChangeSet, Origin};
 use herdr_openspec::state::Mapping;
 use herdr_openspec::tasks::Progress;
 use herdr_openspec::ui::app::{
-    Action, ArtifactSection, Dashboard, Detail, Filter, Help, Launch, Refresh, Route, Sections,
-    SelectPhase, Target, action_for,
+    Action, ArtifactSection, Dashboard, Detail, Filter, Granularity, Help, Launch, Refresh, Route,
+    Sections, SelectPhase, Selection, Target, action_for,
 };
 use herdr_openspec::ui::driver::mouse_action;
 use herdr_openspec::ui::help::{INVENTORY, Scope};
@@ -2314,6 +2314,15 @@ fn sweep_dashboard(route: Route, help_open: bool, fixture: SweepFixture) -> Dash
     Dashboard {
         selection: match fixture {
             SweepFixture::SelectionAbsent => None,
+            // A drag already in progress, anchored at the content's first cell.
+            // `mouse_action`'s clamp arm reads `selection.is_some()` and nothing
+            // else about it, so the span's own extent is not part of the fixture.
+            SweepFixture::SelectionPresent => Some(Selection {
+                anchor: (0, 0),
+                focus: (0, 0),
+                granularity: Granularity::Span,
+                problem: None,
+            }),
         },
         repo: Some(PathBuf::from("/repo")),
         searched_from: PathBuf::from("/repo"),
@@ -2410,9 +2419,18 @@ fn sweep_dashboard(route: Route, help_open: bool, fixture: SweepFixture) -> Dash
 enum SweepFixture {
     /// `selection: None` — the state the sweep has always run in.
     SelectionAbsent,
+    /// `selection: Some(..)` — a selection already in progress, which is the
+    /// only state `mouse_action`'s clamp arm is reachable from.
+    SelectionPresent,
 }
 
-const SWEEP_FIXTURES: [SweepFixture; 1] = [SweepFixture::SelectionAbsent];
+/// Pinned by length on exactly [`EXEMPT_ACTIONS`]' terms: a fixture added or
+/// dropped is a deliberate edit here, never a silent narrowing of what the
+/// sweep can observe.
+const SWEEP_FIXTURES: [SweepFixture; 2] = [
+    SweepFixture::SelectionAbsent,
+    SweepFixture::SelectionPresent,
+];
 
 /// One cell's worth of what `mouse_action` decided, on the four axes a
 /// documented row makes a statement about (`doc-conformance` -> "The claim").
@@ -2555,18 +2573,35 @@ fn outcome_name(action: Action) -> &'static str {
 /// rather than left to be rediscovered (`design.md` -> Decision 11): a point
 /// outside `area` is `Zone::Outside`, and while the overlay is open the zone is
 /// **not consulted at all**, because `mouse_action` returns before reaching it.
-fn sweep_mouse_claims(fixture: SweepFixture, help_open: bool) -> BTreeSet<Claim> {
-    // The wide frame once (route-free, licensed by the per-cell assertion
-    // above); the narrow frame at both routes, where `route` genuinely selects
-    // which single region exists.
-    let passes = [
-        (Route::List, 120u16, 40u16),
-        (Route::List, 60, 20),
-        (Route::Detail, 60, 20),
-    ];
+/// The frames one fixture is swept over.
+///
+/// The wide frame once (route-free, licensed by
+/// [`the_wide_layout_resolves_every_cell_route_free`]); the narrow frame at both
+/// routes, where `route` genuinely selects which single region exists.
+///
+/// **The second fixture is swept over the wide frame alone**, which is
+/// `design.md` -> Risks' own stated lever, applied because the measurement
+/// crossed its threshold: three passes per fixture put
+/// `cargo test --test doc_contract` at 182 s, past the roughly three minutes
+/// recorded there, and the wide frame at 120x40 already resolves all six `Zone`
+/// variants — so the narrow passes add cells to the selection-present fixture
+/// without adding a claim it could contribute. Trimming them costs no coverage
+/// and is asserted rather than assumed: [`every_zone_is_reached_by_every_fixture`]
+/// compares the two fixtures' zone sets.
+fn passes_for(fixture: SweepFixture) -> Vec<(Route, u16, u16)> {
+    match fixture {
+        SweepFixture::SelectionAbsent => vec![
+            (Route::List, 120, 40),
+            (Route::List, 60, 20),
+            (Route::Detail, 60, 20),
+        ],
+        SweepFixture::SelectionPresent => vec![(Route::List, 120, 40)],
+    }
+}
 
+fn sweep_mouse_claims(fixture: SweepFixture, help_open: bool) -> BTreeSet<Claim> {
     let mut claims = BTreeSet::new();
-    for (route, width, height) in passes {
+    for (route, width, height) in passes_for(fixture) {
         let dashboard = sweep_dashboard(route, help_open, fixture);
         let area = Rect::new(0, 0, width, height);
         for kind in MOUSE_KINDS {
@@ -3151,6 +3186,64 @@ fn the_overlay_state_is_its_own_axis() {
     assert!(
         open.contains(&claim("ScrollDown", true, None, "ScrollDown")),
         "the wheel scrolls the overlay from anywhere in the frame: {open:?}"
+    );
+}
+
+#[test]
+fn the_clamp_is_observed_under_a_selection_fixture() {
+    // `design.md` -> Decision 9. `mouse_action` is a total function of the whole
+    // `Dashboard`: its `Drag(MouseButton::Left)` arm returns `Select(Extend)`
+    // from every zone but `DetailRow` only while `dashboard.selection.is_some()`
+    // (`src/ui/driver.rs`), and the sweep's original fixture pins
+    // `selection: None`. So the clamp `SPEC.md`'s drag row documents is
+    // unobservable under that fixture alone, the two-way check would report that
+    // row vacuous, and it would be right to.
+    let clamp = claim("Drag(Left)", false, Some("List"), "Select(Extend)");
+
+    assert!(
+        mouse_claims(false).contains(&clamp),
+        "the clamp must be observable under some fixture the sweep runs"
+    );
+    assert!(
+        !swept_mouse_claims(SweepFixture::SelectionAbsent, false).contains(&clamp),
+        "the selection-absent fixture alone cannot reach the clamp - which is the \
+         state this check would have shipped in without the fixture axis"
+    );
+    assert_eq!(
+        SWEEP_FIXTURES.len(),
+        2,
+        "the fixture set is pinned by length on EXEMPT_ACTIONS' terms: at minimum \
+         one with no selection and one with a selection present"
+    );
+}
+
+#[test]
+fn every_zone_is_reached_by_every_fixture() {
+    // The licence for [`passes_for`]'s trim: the selection-present fixture is
+    // swept over the wide frame alone, and that is sound only because the wide
+    // frame already resolves every `Zone` variant the narrow passes would. This
+    // asserts it per fixture rather than inferring it from the layout's shape.
+    //
+    // If this goes red, the fix is to restore the narrow passes for that fixture
+    // — paying the wall time `design.md` -> Risks budgets for — and NOT to
+    // weaken this assertion.
+    let mut sets = Vec::new();
+    for fixture in SWEEP_FIXTURES {
+        let zones: BTreeSet<&str> = swept_mouse_claims(fixture, false)
+            .iter()
+            .filter_map(|c| c.zone)
+            .collect();
+        assert_eq!(
+            zones.len(),
+            6,
+            "{fixture:?} reaches {} of the six Zone variants: {zones:?}",
+            zones.len()
+        );
+        sets.push(zones);
+    }
+    assert!(
+        sets.windows(2).all(|w| w[0] == w[1]),
+        "every fixture must resolve the same six zones: {sets:?}"
     );
 }
 

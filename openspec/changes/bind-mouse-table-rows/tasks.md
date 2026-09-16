@@ -83,20 +83,20 @@ grep -c "fn mouse_table_claims\|fn compare_mouse_claims" tests/doc_contract.rs; 
 ## 2. The dashboard-fixture axis
 <!-- kind: behavior -->
 
-- [ ] 2.1 RED: Write a failing test `the_clamp_is_observed_under_a_selection_fixture`,
+- [x] 2.1 RED: Write a failing test `the_clamp_is_observed_under_a_selection_fixture`,
       asserting `(Drag(Left), overlay closed, Zone::List, Select(Extend))` is among the swept
       claims. It fails at HEAD because `sweep_dashboard` pins `selection: None`
       (`tests/doc_contract.rs:2314`), so that arm is unreachable.
-- [ ] 2.2 GREEN: Give the sweep an explicitly listed fixture set — at minimum selection-absent
+- [x] 2.2 GREEN: Give the sweep an explicitly listed fixture set — at minimum selection-absent
       and selection-present — and assert its length in the check's own source, on the terms
       `EXEMPT_ACTIONS` is pinned at two (per design.md → Decision 9).
-- [ ] 2.3 CHECK: Enumerate the claims the new fixture adds and record them in the commit
+- [x] 2.3 CHECK: Enumerate the claims the new fixture adds and record them in the commit
       message. They are claims the table must then cover, so group 4 writes rows against this
       list rather than against the pre-fixture set.
-- [ ] 2.4 VERIFY: Measure the resulting `cargo test --test doc_contract` wall time and record
+- [x] 2.4 VERIFY: Measure the resulting `cargo test --test doc_contract` wall time and record
       it in the commit message. If it exceeds roughly three minutes, apply design.md → Risks'
       stated lever (the second fixture on the wide frame only) and record the measurement.
-- [ ] 2.5 Run `cargo test --test doc_contract` — green, no regressions.
+- [x] 2.5 Run `cargo test --test doc_contract` — green, no regressions.
 
 ## 3. Row extraction: zones, payload tokens, and a closed gesture vocabulary
 <!-- kind: behavior -->
