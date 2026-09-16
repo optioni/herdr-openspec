@@ -652,10 +652,14 @@ Action keys, and their footer hints (`a/c/s launch  g focus`), are hidden when
 the Herdr socket is unreachable.
 
 The pane has a second input device. Every binding below is resolved by
-`ui::driver::mouse_action` against the frame just drawn, and every one of them
-has a key above that produces the same effect — nothing is mouse-only, so the
-pane stays fully usable over SSH in a terminal that reports no mouse
-(`mouse-input`).
+`ui::driver::mouse_action` against the frame just drawn. All but one of them
+has a key above that produces the same effect, which is what keeps the pane
+fully usable over SSH in a terminal that reports no mouse (`mouse-input`).
+**`Action::Select` is the one exemption this requirement has ever had**
+(`mouse-input`, `text-selection`): selecting a span of rendered text is a
+pointing gesture with no keyboard path to it, and getting text out of the
+pane was not a function of the pane before `text-selection` added it — every
+other gesture still names the key that already reached it.
 
 | Gesture | Action |
 |---|---|
@@ -668,10 +672,10 @@ pane stays fully usable over SSH in a terminal that reports no mouse
 | Left click on a section header | The same `Action::Click`, naming the section — fold it if open, unfold it if collapsed, and move the cursor to it, exactly as `Space` does |
 | Left click on an artifact tab cell | `Action::SelectTab` for that cell's own position, exactly as its digit key. It does not change the route |
 | Left click on an artifact-section header, when the selected artifact is foldable | `Action::Click` naming that row's own content-line index and section index — fold it if open, unfold it if collapsed, and move the detail cursor to it, exactly as `Space` does at `Route::Detail` (`foldable-spec-sections`) |
-| Left click on any other row of a foldable artifact's content | `Action::Click` naming that row's own content-line index — move the detail cursor to it and fold nothing, exactly as `j`/`k` do there (`foldable-spec-sections`) |
-| Left drag over the detail content area, on a row that is not a section header | `Action::Select` — extend a text selection there, foldable artifact or not (`text-selection`) |
+| Left click on any other row of the detail region's content area, foldable artifact or not | `Action::Select` at its arming phase, for that row's own content-line index and display column: the first of consecutive presses at one cell only records it, the second selects the word under it, the third the whole rendered row, and a press at a different cell restarts the count. It moves no cursor and folds nothing (`text-selection`) |
+| Left drag over the detail content area, on a row that is not a section header | `Action::Select` at its extending phase — follow the drag's focus there, foldable artifact or not, clamped to the content area rather than scrolling it (`text-selection`) |
 | Left click outside the help overlay's band while the overlay is open — above it, below it, or on the footer row | `Action::ToggleHelp` — close the overlay, and nothing else in the same event: the click that dismissed it does not also select the row under it (`help-overlay`) |
-| Anything else — a right or middle press, any release, any drag, pointer motion, a horizontal wheel, the footer row, a region's heading row, its padding row, or its gutter, a problem or message row, the detail content area when the selected artifact is not foldable, a content row past the last one a foldable artifact drew, or a point outside the frame | `Action::Ignore` |
+| Anything else — a right or middle press, any release, a drag that does not land on a non-header row of the detail region's content area, pointer motion, a horizontal wheel, the footer row, a region's heading row, its padding row, or its gutter, a problem or message row, a content row past the last one the detail region drew, or a point outside the frame | `Action::Ignore` |
 
 While the help overlay is open its own row above takes precedence over every
 other row in this table, and `ui::layout::zone` is not consulted at all: both
