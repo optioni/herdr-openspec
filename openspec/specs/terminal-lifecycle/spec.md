@@ -14,18 +14,27 @@ single terminal operation. The exit status and message that refusal produces bel
 
 ### Requirement: Terminal setup and teardown sit behind an injected seam
 
-The crate SHALL define `ui::terminal::TerminalOps`, a trait with exactly six fallible
+The crate SHALL define `ui::terminal::TerminalOps`, a trait with exactly seven fallible
 operations — `enable_raw`, `enter_alternate`, `enable_mouse`, `disable_mouse`,
-`leave_alternate`, `disable_raw` — each returning `Result<(), TerminalError>`.
+`leave_alternate`, `disable_raw`, and `write_clipboard(&str)` — each returning `Result<(), TerminalError>`.
 `ui::terminal::CrosstermOps` SHALL be the one implementation that touches a real terminal,
-and each of its six methods SHALL do nothing but call the corresponding `ratatui::crossterm`
-function or command and map its error. No decision, no ordering, and no state SHALL live
+and **six** of its seven methods SHALL do nothing but call the corresponding
+`ratatui::crossterm` function or command and map its error. The seventh,
+`write_clipboard`, SHALL write an **OSC 52** sequence to stdout directly, because
+crossterm models no clipboard command at all. It is the one method whose body is an
+escape sequence rather than a call, and it lives here for exactly the reason the other
+six do: `src/ui/terminal.rs` is the only file in the crate permitted to name a terminal
+escape, so confining the clipboard write here adds no new seam and no new exemption. No decision, no ordering, and no state SHALL live
 inside `CrosstermOps`: the ordering lives in `TerminalGuard`, which is what makes it testable
 without a terminal.
 
 `TerminalError` SHALL carry the failing operation's name and the underlying error's
 `Display` text, and SHALL NOT be `std::io::Error`, so that a test double can produce one
 without fabricating an I/O error.
+
+No other module SHALL name a crossterm terminal-mode function, and **no other module
+SHALL name the OSC 52 introducer**; a doc-conformance check SHALL bind that second
+confinement the way the first is bound.
 
 No other module SHALL name a crossterm terminal-mode function. `enable_raw_mode`,
 `disable_raw_mode`, `EnterAlternateScreen`, `LeaveAlternateScreen`, `EnableMouseCapture`,
@@ -61,6 +70,26 @@ crate, `tests/` included.
   rather than reporting a clean result
 - **AND** every test taking `&dyn TerminalOps` therefore receives the recording double,
   which returns `Ok(())` or a configured `TerminalError` and touches no terminal
+
+#### Scenario: The clipboard write is confined and reports its own failure
+
+- **WHEN** the crate is swept for the OSC 52 introducer, `tests/` included
+- **THEN** it appears in `src/ui/terminal.rs` and nowhere else
+- **AND** the sweep fails when that file is absent or names no such sequence, so the exclusion
+  cannot pass vacuously
+- **AND** a `write_clipboard` whose underlying write fails returns a `TerminalError` naming
+  `write_clipboard`, whose text the pane stores on `Selection::problem` and renders as a
+  **detail-region** problem row beside `detail.problems` — not on any list-region problem
+  list, every one of which is replaced wholesale by its own producer
+
+#### Scenario: A clipboard write changes no terminal mode
+
+- **WHEN** a guard is entered over a recording `TerminalOps`, `write_clipboard` is called
+  twice, and the guard is dropped
+- **THEN** the recorded mode operations are exactly the six a guard with no clipboard write
+  records, in the same order
+- **AND** the two writes appear between them without disturbing the mirrored entry and
+  teardown
 
 ### Requirement: The guard enters and leaves in a fixed, mirrored order
 

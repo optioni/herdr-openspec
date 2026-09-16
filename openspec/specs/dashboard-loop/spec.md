@@ -18,18 +18,21 @@ that region's capability; this specifies only the state, the dispatch, and the o
 ### Requirement: Key handling is a pure, total function over events
 
 `ui::app::action_for(event: &Event, filtering: bool) -> Action` SHALL map a terminal event
-and the current filter mode to one of exactly **twenty-four** actions — `Quit`,
+and the current filter mode to one of exactly **twenty-five** actions — `Quit`,
 `OpenDetail`, `Back`, `Next`, `Prev`, `SelectNext`, `SelectPrev`, `ScrollDown`, `ScrollUp`,
 `Click(Target)`, `SelectTab(usize)`, `NextTab`, `PrevTab`, `FilterStart`,
 `FilterPush(char)`, `FilterPop`, `Refresh`, `LaunchApply`, `LaunchContinue`, `LaunchArchive`,
-`FocusAgent`, `ToggleSection`, `ToggleHelp`, `Ignore` — and SHALL be total: every `Event`
+`FocusAgent`, `ToggleSection`, `ToggleHelp`, `Select`, `Ignore` — and SHALL be total: every `Event`
 value, including mouse, paste, focus-gained, focus-lost, and resize events, maps to one of
 them under either value of `filtering`, and none panics.
 
-`action_for` SHALL map **no key** to the five actions `mouse-input` adds. `SelectNext`,
+`action_for` SHALL map **no key** to the **six** actions `mouse-input` and
+`text-selection` add between them — `mouse-input`'s five, and `Select`. `SelectNext`,
 `SelectPrev`, `ScrollDown`, `ScrollUp`, and `Click(Target)` exist because a mouse event names
 the region or the row it landed on, where a key does not; `ui::driver::mouse_action` is the
-only producer of them, and `mouse-input` states what it produces. They are five flat variants
+only producer of them, and `mouse-input` states what it produces. `Select` is the sixth, and the one that can never gain a key: selecting rendered text is a
+pointing gesture, which is `mouse-input`'s single named mouse-only exemption. The first five
+are five flat variants
 rather than two carrying a direction or a region, for the same reason the four launch
 variants are flat: an enumerate-by-hand test must enumerate the same things the exhaustive
 `match` does.
@@ -38,8 +41,8 @@ The count moved from thirteen to seventeen when `agent-launch` landed, not from 
 thirteen: `HANDOFF.md`'s Phase 5 constraint 8 read the count off a stale doc comment in
 `src/ui/app.rs` that still said "the nine outcomes" after four had been added. It moved to
 **eighteen** with `ToggleSection`, `list-sections`' one addition, to
-**twenty-three** with `mouse-input`'s five, and moves to **twenty-four** here, with
-`help-overlay`'s one, `ToggleHelp`.
+**twenty-three** with `mouse-input`'s five, moved to **twenty-four** with `help-overlay`'s one, `ToggleHelp`,
+and moves to **twenty-five** here, with `text-selection`'s one, `Select`.
 
 `SelectTab`, `NextTab`, and `PrevTab` are `detail-view`'s additions; `artifact-tabs` states
 their keys and their effect. They are route-agnostic in the same sense `Next` and `Prev`
@@ -195,7 +198,7 @@ once, so none needs a delta of its own and none is left contradicting the overla
 archive. A capability added later that owns an action inherits it without being edited. When `help.open` is set,
 `apply` SHALL dispatch per `help-overlay`'s table instead: `Quit` quits, `ToggleHelp` and
 `Back` close the overlay, `Next`/`ScrollDown` and `Prev`/`ScrollUp` move `help.scroll` by one
-line, and **every one of the other seventeen actions changes nothing at all**. The four
+line, and **every one of the other eighteen actions changes nothing at all**. The four
 launch actions and `Refresh` being inert there is the load-bearing half of the overlay's
 read-only claim: a reader who opened the help to find out what `a` does must be able to press
 it without spawning an agent. `Quit` is the one action that still acts, because a modal that
@@ -376,13 +379,13 @@ is what restores that invariant, before the next draw rather than after it.
   `selected` `2`, `detail.tab` `1`, and `help.open` true is given each of `OpenDetail`,
   `SelectTab(3)`, `NextTab`, `PrevTab`, `FilterStart`, `FilterPush('a')`, `FilterPop`,
   `Refresh`, `LaunchApply`, `LaunchContinue`, `LaunchArchive`, `FocusAgent`, `ToggleSection`,
-  `SelectNext`, `SelectPrev`, `Click(Target::Change(0))`, and `Ignore` in turn
-- **THEN** the dashboard after all seventeen is equal, field for field, to the one before
+  `SelectNext`, `SelectPrev`, `Click(Target::Change(0))`, `Select`, and `Ignore` in turn
+- **THEN** the dashboard after all eighteen is equal, field for field, to the one before
   them, but for `refresh.requested` where `needs_archived_refresh()` holds — the blanket rule
   runs after every action and the overlay does not suppress it
 - **AND** in particular `launch.pending` is `None`, `launch.problems` is empty, no process was
   spawned, no file was read or written, and no clock was read
-- **AND** the same seventeen applied to the identical dashboard with `help.open` **false**
+- **AND** the same eighteen applied to the identical dashboard with `help.open` **false**
   change it in the ways the bullets above require, so the suppression is the overlay's and not
   the dashboard's
 
@@ -396,6 +399,14 @@ is what restores that invariant, before the next draw rather than after it.
   is not the detail region's and not the list's
 - **AND** a sixth action, `Back`, sets `help.open` false and `help.scroll` `0`, and a seventh,
   `Quit`, sets `quit` — both from inside the overlay
+
+#### Scenario: No key reaches `Select` at either filter mode
+
+- **WHEN** `action_for` is called with every key in the existing table, under `filtering`
+  false and again under `filtering` true
+- **THEN** none returns `Action::Select`, so the mouse-only exemption is real rather than
+  asserted
+- **AND** every other key returns exactly the action it returned before this change
 
 ### Requirement: The loop draws before it waits and stops when quit is set
 
@@ -859,9 +870,9 @@ button release, a resize, a focus change, a paste, and a timeout SHALL all still
 - **THEN** the press selects that row, exactly as it does with no motion events before it
 - **AND** the frame count is `2`: one before the first event, one after the press
 
-### Requirement: `Dashboard` carries fifteen fields, none defaulted and none elided
+### Requirement: `Dashboard` carries sixteen fields, none defaulted and none elided
 
-`ui::app::Dashboard` SHALL carry exactly **fifteen** fields: `repo: Option<PathBuf>` — the
+`ui::app::Dashboard` SHALL carry exactly **sixteen** fields: `repo: Option<PathBuf>` — the
 repository root when one was found; `searched_from: PathBuf` — the directory the walk began
 at, rendered by `change-rows`' no-repository state; `changes: changes::ChangeSet`;
 `route: Route`, an enum of `List` and `Detail`; `quit: bool`, set by the quit action;
@@ -877,8 +888,36 @@ detail region's state defined by `detail-scroll`, `artifact-tabs`, and `artifact
 `agent_names: state::Mapping`, the plugin-local agent-name mapping defined by
 `plugin-state` and consumed by `agent-attribution`'s first tier; `launch: Launch`, the
 launch tier's state defined by `agent-launch`; `file_mode: bool`, `degraded-states`'
-addition; and `help: Help`, the help overlay's layer state defined by `help-overlay`,
-`help-overlay`'s one addition to this type.
+addition; `help: Help`, the help overlay's layer state defined by `help-overlay`,
+`help-overlay`'s one addition to this type; and `selection: Option<Selection>`,
+`text-selection`'s one addition.
+
+`selection` is `None` when no span is selected and otherwise carries an anchor, a focus, and
+a granularity — armed, word, row, or span — and `problem: Option<String>`, the reason a
+clipboard write failed. The anchor and focus are each a line index into
+`ui::detail::content_lines` and a display column; the granularity is what lets consecutive presses at one
+cell arm, then select a word, then select a row without the pane naming a clock, which
+`NOBLOCK` forbids under `src/ui/`. It is **one** field
+rather than two because the pair is meaningless apart: an anchor with no focus selects
+nothing, and every read of either reads both. `Option` bounds it by construction — there is
+at most one selection, and clearing it is assigning `None` rather than remembering to reset
+two coordinates.
+
+It is a `Dashboard` field and a **sibling** of `detail` rather than an eighth `Detail` field,
+for the reason `help` is a sibling of `filter`: `Detail` is reloaded wholesale by
+`sync_detail` on a tab switch, a selection change, or an adopted refresh, and a selection
+that lived inside it would be silently discarded by a reload rather than deliberately
+cleared by one. The clearing is a rule `text-selection` states, not an accident of where the
+field sits. `problem` lives here rather than on any existing `!`-marked list because every one of those —
+`launch.problems`, `refresh.problems`, `changes.problems`, `refresh.startup`,
+`agents.problem` — is replaced wholesale on its own producer's cadence and would drop a reason
+before the reader saw it, and because this requirement pins `Dashboard` at sixteen fields, so a
+dedicated field is not available. It is created and cleared at exactly the moments the reason
+becomes and stops being true.
+
+It carries plain data — no trait, no handle, no thread — so the state value stays
+`Clone`, `PartialEq`, and constructible in a test, and it joins `NODEFAULT-UI`'s scanned sets
+on exactly `Filter`, `Refresh`, and `Launch`'s terms.
 
 `file_mode` is true exactly when the `openspec` binary probe resolved no usable binary, so the
 pane's change list is file-sourced for the whole session and no CLI result will ever correct
@@ -1012,9 +1051,9 @@ named on that run's own `TYPES` list, taking it to `Dashboard Filter Detail Sect
 its `SCAN_MIN` from 206 to 308, and `help::Binding` and
 `help::Group`, which need one further parameterisation of the same script with `HOMEFILE` set to
 `src/ui/help.rs`. `make gates` runs `scripts/gates/nodefault-ui.sh` **six** times today
-(`grep -c nodefault-ui.sh Makefile` = 6, lines 45-50); this change makes it **seven**. The reason is `Binding`'s: it is thirty-one `'static` literals, which is
+(`grep -c nodefault-ui.sh Makefile` = 6, lines 45-50); this change makes it **seven**. The reason is `Binding`'s: it is thirty-two `'static` literals, which is
 exactly the shape a `..Default::default()` rest is tempting in, and a field added to it later
-would otherwise silently become the empty string at thirty-one sites at once.
+would otherwise silently become the empty string at thirty-two sites at once.
 `change-model`'s existing gate does not reach any of these thirteen types: that gate is
 stated over `Change`, `ChangeSet`, `ArtifactRef`, and `Origin` in `src/changes.rs`, and none of
 these is one of those nor there.
@@ -1122,7 +1161,7 @@ its merge key; its subject is unchanged and only the type list and the field cou
   same-line grep with the brace-matching pass named above. The companion is kept for what it
   genuinely does, below
 - **AND** a compile-time companion exists: a test destructures a `Dashboard` with an
-  exhaustive pattern naming all **fifteen** fields and no `..`, a companion destructures a
+  exhaustive pattern naming all **sixteen** fields and no `..`, a companion destructures a
   `Sections` naming its one field and no `..`, a second destructures a `Filter`
   naming both, a third destructures a `Detail` naming all five and no `..`, a fourth
   destructures a `Refresh` naming all **three** and no `..`, a fifth destructures a `Launch`
@@ -1357,13 +1396,23 @@ its merge key; its subject is unchanged and only the type list and the field cou
   `#!/bin/sh` program returns a dashboard whose `file_mode` is `false`, so the flag is the
   probe's answer and not a constant
 
-#### Scenario: The fifteenth field is named at every construction site
+#### Scenario: Every field is named at every construction site
 
 - **WHEN** every `*.rs` file under `src/` is searched for a `..` inside a `Dashboard { … }` or
   a `Sections { … }` literal or pattern, brace-matched from the opening `{` to its partner
 - **THEN** there is no match, so no construction site elides `file_mode` or `sections`
-- **AND** the compile-time companion destructures a `Dashboard` naming all **fifteen** fields
-  with no `..`, so a fifteenth breaks the build at that site, and a further companion
+- **AND** the compile-time companion destructures a `Dashboard` naming all **sixteen** fields
+  with no `..`, so a seventeenth breaks the build at that site, and a further companion
   destructures a `Sections` naming its one field
 - **AND** `impl Default for Dashboard` and `impl Default for Sections` appear nowhere in the
   crate, derived or hand-written
+
+#### Scenario: `selection` starts empty and is cleared rather than reloaded
+
+- **WHEN** `ui::load` is called over a scratch repository, and separately `run_wired` is
+  driven over the same repository
+- **THEN** the returned `Dashboard`'s `selection` is `None` in both cases
+- **AND** a dashboard holding a selection, stepped with a tab switch, has `selection` `None`
+  afterwards and a freshly reloaded `detail`
+- **AND** the clearing happened at the site `text-selection` names, not as a side effect of
+  `sync_detail` replacing `Detail`, which would leave the rule untested

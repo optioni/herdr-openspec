@@ -398,6 +398,10 @@ The modifier each role SHALL carry:
 | `DeltaAdded` | none |
 | `DeltaModified` | none |
 | `DeltaRemoved` | none |
+| `Selected` | `REVERSED` |
+
+`text-selection` adds **one** row and alters none: `Selected` carries `REVERSED`, the only
+use of that modifier in the table.
 
 `CROSSED_OUT` is chosen over a colour or a bracketing glyph for the same reason every other
 row of this table carries a modifier: it is the terminal's own rendering of exactly this
@@ -507,6 +511,13 @@ a colour.
   no cell anywhere else that did not already carry it
 - **AND** in that same frame no cell carries a modifier the four label roles could have added,
   since they add none
+
+#### Scenario: `Selected` is the table's only reversed role
+
+- **WHEN** every `Role`'s modifier set is compared against the table above
+- **THEN** each matches, `Selected` included
+- **AND** `Selected` is the only role carrying `REVERSED` alone, so no existing role acquired
+  or lost a modifier in this change
 
 ### Requirement: Colour is added only where it carries a distinction a modifier cannot
 
@@ -724,7 +735,7 @@ value the parser cannot emit.
 - **AND** the discarded, uncoloured roles are exactly `Footer`, `RegionHeading`,
   `RegionHeadingFocused`, `RegionRule`, `ListRow`, `ListRowSelected`, `ListMessage`,
   `DetailSection`, `DetailSectionSelected`, `Strong`, `Emphasis`, `Quoted`, `Strikethrough`,
-  and `Muted` — asserted by name, so a role that silently loses its colour is caught here
+  and `Muted`, and `Selected` — asserted by name, so a role that silently loses its colour is caught here
   rather than passing as "uncoloured and therefore out of scope"
 - **AND** `Heading(3)` and `Heading(4)` are each alone in their group, because `BOLD`
   separates them from `TaskConfirm` and `TaskChange`; a table that dropped the `BOLD` from
@@ -760,6 +771,14 @@ region carries `Style::default()`; `ListProblem`'s red is reached only from `row
   scenario's first draft got wrong
 - **AND** neither assertion writes a colour literal: both compare against `palette::style`, as
   every render test outside `src/ui/palette.rs`'s own tests does
+
+#### Scenario: `Selected` joins the uncoloured set and shares a style with nothing
+
+- **WHEN** the uncoloured roles are collected as the scenario above collects them
+- **THEN** `Selected` is among them, because a selection inverts whatever is underneath and a
+  foreground of its own would erase that
+- **AND** it is alone in its group: `DetailSectionSelected` is `BOLD` and `REVERSED` together,
+  so the two are not equal and the licensed-share count is unchanged
 
 ### Requirement: `ui::view` takes every style it applies from the palette
 

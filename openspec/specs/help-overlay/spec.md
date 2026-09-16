@@ -87,101 +87,6 @@ one `Esc` away.
   the third, `route` is `List`; after the fourth, nothing has changed
 - **AND** `quit` is false after all four
 
-### Requirement: The overlay answers seven actions and every other one is inert
-
-While `help.open` is set, `Dashboard::apply` SHALL dispatch as follows, and this dispatch
-SHALL take precedence over the route dispatch and over the filter dispatch alike:
-
-| Action | Effect while the overlay is open |
-|---|---|
-| `Quit` | quit, exactly as when it is closed |
-| `ToggleHelp` | close the overlay and reset `help.scroll` to `0` |
-| `Back` | close the overlay and reset `help.scroll` to `0` |
-| `Next`, `ScrollDown` | move `help.scroll` down one line |
-| `Prev`, `ScrollUp` | move `help.scroll` up one line, saturating at `0` |
-| every other action | change nothing at all |
-
-"Every other action" is the closed remainder: `OpenDetail`, `SelectTab`, `NextTab`,
-`PrevTab`, `FilterStart`, `FilterPush`, `FilterPop`, `Refresh`, `LaunchApply`,
-`LaunchContinue`, `LaunchArchive`, `FocusAgent`, `ToggleSection`, `SelectNext`,
-`SelectPrev`, `Click`, and `Ignore`. Seventeen actions, and none of them does anything
-while the overlay is open. Seven answer — `Quit`, `ToggleHelp`, `Back`, `Next`, `Prev`,
-`ScrollDown`, `ScrollUp` — and seventeen plus seven is the twenty-four `Action` carries after
-this change, so the two lists are exhaustive between them with nothing counted twice.
-
-`LaunchApply`, `LaunchContinue`, `LaunchArchive`, and `FocusAgent` being inert is the
-load-bearing half of "read-only": `a`, `c`, `s`, and `g` reach Herdr and start a process,
-and a reader who opened the help to find out what `a` does must be able to press it
-without launching an agent. `Refresh` being inert is the same argument one step down —
-it starts no process but it does start a CLI cycle.
-
-`Quit` is the one exception, and it is deliberate: `q` and `Ctrl-C` SHALL close the pane
-from inside the overlay exactly as from outside it. A modal that traps the reader is a
-worse failure than one that lets a quit through, and both keys have a row in the
-inventory's `Pane` group saying so.
-
-The blanket rule `apply` runs after **every** action — setting `refresh.requested` when
-`Dashboard::needs_archived_refresh()` holds — SHALL continue to run while the overlay is
-open, unchanged. It is not an action's effect and the overlay does not suppress it.
-
-#### Scenario: The agent keys launch nothing while the overlay is open
-
-- **WHEN** a `Dashboard` with `agents.reachable` true, a selected change `add-auth`, and
-  `help.open` true is given `LaunchApply`, `LaunchContinue`, `LaunchArchive`,
-  `FocusAgent`, and `Refresh` in turn
-- **THEN** `launch.pending` is `None` and `launch.problems` is empty after all five
-- **AND** `refresh.requested` is false after all five, unless
-  `needs_archived_refresh()` holds, in which case it is true after every one of them and
-  for that reason alone
-- **AND** the whole dashboard but for that one flag is equal, field for field, to the one
-  before the five actions
-- **AND** `apply` reaches no collaborator by construction — it takes `&mut self` and an
-  `Action` and holds no handle — so this scenario's evidence is the field-for-field equality
-  above and the `NOIO-VIEW` sweep over `src/ui/app.rs`, not a spy that could never fire
-
-#### Scenario: Both quit keys still quit from inside the overlay
-
-- **WHEN** a `Dashboard` with `help.open` true is given `Quit`
-- **THEN** `quit` is true
-- **AND** the same holds for a dashboard whose `help.open` is true and whose
-  `filter.active` is also true, so no combination of layers traps the reader
-
-#### Scenario: The overlay swallows the seventeen inert actions
-
-- **WHEN** a `Dashboard` at `Route::List` with six active changes, `selected` `2`,
-  `detail.tab` `1`, and `help.open` true is given `OpenDetail`, `SelectTab(3)`,
-  `NextTab`, `PrevTab`, `FilterStart`, `FilterPush('a')`, `FilterPop`, `ToggleSection`,
-  `SelectNext`, `SelectPrev`, and `Click(Target::Change(0))` in turn
-- **THEN** `route` is still `List`, `selected` is still `2`, `detail.tab` is still `1`,
-  `filter.query` is still empty, `filter.active` is still false, and `sections` is
-  unchanged
-- **AND** `help.open` is still true and `help.scroll` is still `0` after all eleven
-
-#### Scenario: `j` and `k` scroll the overlay rather than the frame beneath
-
-- **WHEN** a `Dashboard` at `Route::Detail` with `detail.scroll` `4`, `selected` `1`, and
-  `help.open` true is given `Next`, `Next`, `Next`, then `Prev`
-- **THEN** `help.scroll` is `3` after the third and `2` after the fourth
-- **AND** `detail.scroll` is still `4` and `selected` is still `1` after all four
-- **AND** the same dashboard at `Route::List` given the same four actions moves
-  `help.scroll` identically and leaves `selected` at `1`, so the overlay's scroll is
-  route-agnostic where `Next` and `Prev` are not
-- **AND** `Prev` applied to a dashboard whose `help.scroll` is `0` leaves it `0` rather
-  than underflowing
-
-#### Scenario: The overlay lists the agent keys when the socket is unreachable
-
-- **WHEN** a `Dashboard` with `agents.reachable` **false** and `help.open` true is rendered at
-  120x40 and at 60x20, and again with `agents.reachable` **true**
-- **THEN** the two bands are byte-identical, cell for cell, style included, at both widths
-- **AND** both hold the `Agents` group with all four of `a`, `c`, `s`, and `g` and their
-  descriptions
-- **AND** this is the scenario the change's accepted footer cost rests on: the footer drops
-  `a/c/s launch` and `g focus` when the socket is unreachable and drops `g focus` at 60 columns
-  when it is reachable, and the argument for accepting both is that the overlay lists them
-  anyway. `INVENTORY` is `'static` and no render path consults `agents.reachable`, which is what
-  makes that true rather than hoped for
-
 ### Requirement: The overlay is a full-width band, vertically centred in the body
 
 `ui::help::render(frame, body, help)` SHALL draw the overlay into a rectangle
@@ -268,8 +173,8 @@ descriptions of every group align in one column. A binding row whose text exceed
 band's width SHALL be truncated by `ui::layout::truncate_columns`, never sliced by byte
 or by `char`.
 
-For the inventory `binding-inventory` mandates — six groups, thirty-one bindings —
-`content_rows` is therefore **42**: thirty-one binding rows, six heading rows, and five
+For the inventory `binding-inventory` mandates — six groups, thirty-two bindings —
+`content_rows` is therefore **43**: thirty-two binding rows, six heading rows, and five
 blanks.
 
 #### Scenario: The grammar renders at 120 columns
@@ -340,7 +245,7 @@ edge, in `palette::Role::ListSeparator`.
 
 It SHALL carry **no arrow glyphs**. `▲` and `▼` are East Asian Ambiguous and would widen
 the uncompensated CJK-locale exposure `SPEC.md` records, for information the numbers
-already carry: `1-37/42` says both that there is more below and exactly how much.
+already carry: `1-37/43` says both that there is more below and exactly how much.
 
 When the band is too **narrow** to hold an indicator — a band whose width is under the
 indicator's own display width plus two — the indicator SHALL be omitted and the bottom
@@ -350,23 +255,23 @@ indicator would not be.
 #### Scenario: The overlay scrolls at both mandated sizes
 
 - **WHEN** a dashboard with `help.open` true is rendered at 120x40, where the body is 39
-  rows, the band is 39 rows, and its interior is 37 against 42 content rows
-- **THEN** the bottom rule row's final columns read `1-37/42`, ending one column in from
+  rows, the band is 39 rows, and its interior is 37 against 43 content rows
+- **THEN** the bottom rule row's final columns read `1-37/43`, ending one column in from
   column 119
-- **AND** after ten `Next` actions and a redraw the offset is **clamped to 5** — 42
+- **AND** after ten `Next` actions and a redraw the offset is **clamped to 6** — 43
   content rows less a 37-row interior — so the interior's first row is content row 6 and
-  the indicator reads `6-42/42`, not the `11-47/42` an unclamped offset of ten would give
+  the indicator reads `7-43/43`, not the `11-47/43` an unclamped offset of ten would give
 - **AND** at 60x20 the body is 19 rows, the band is 19, its interior is 17, and the
-  indicator reads `1-17/42`, ending one column in from column 59
+  indicator reads `1-17/43`, ending one column in from column 59
 
 #### Scenario: A held key cannot run the window off the end
 
 - **WHEN** a dashboard with `help.open` true is given two hundred consecutive `Next`
   actions at 60x20, redrawing after each
-- **THEN** the last interior row is always content row 42 once the window has reached the
+- **THEN** the last interior row is always content row 43 once the window has reached the
   end, and never a blank row past it
 - **AND** `help.scroll` is clamped on every frame by
-  `ui::layout::scroll_offset(42, help.scroll, 17)` to a maximum of 25, so it is never used
+  `ui::layout::scroll_offset(43, help.scroll, 17)` to a maximum of 26, so it is never used
   unbounded — and it is `normalise_help_scroll` that applies it, which is why this
   60x20 `Route::List` fixture clamps at all where `normalise_scroll` would have returned
   early
@@ -376,9 +281,9 @@ indicator would not be.
 #### Scenario: No indicator when the content fits
 
 - **WHEN** a dashboard with `help.open` true is rendered at 120x60, where the body is 59
-  rows and the band is `42 + 2 = 44` rows with an interior of 42 against 42 content rows
+  rows and the band is `43 + 2 = 45` rows with an interior of 43 against 43 content rows
 - **THEN** the band's bottom row is `─` repeated to the band's width with no digits in it
-- **AND** every one of the 42 content rows is present in the buffer, so the whole
+- **AND** every one of the 43 content rows is present in the buffer, so the whole
   inventory is visible in one frame at a tall pane
 
 ### Requirement: The overlay degrades rather than panicking at any frame size
@@ -418,3 +323,108 @@ close the overlay or the pane, because they are handled in `apply` and not in th
 - **THEN** the first sets `quit`, and the second and third set `help.open` to false
 - **AND** none of the three panics, and none depends on anything the view computed, since
   `apply` never receives a `Rect`
+
+### Requirement: The overlay answers seven actions and ignores every other one
+
+While `help.open` is set, `Dashboard::apply` SHALL dispatch as follows, and this dispatch
+SHALL take precedence over the route dispatch and over the filter dispatch alike:
+
+| Action | Effect while the overlay is open |
+|---|---|
+| `Quit` | quit, exactly as when it is closed |
+| `ToggleHelp` | close the overlay and reset `help.scroll` to `0` |
+| `Back` | close the overlay and reset `help.scroll` to `0` |
+| `Next`, `ScrollDown` | move `help.scroll` down one line |
+| `Prev`, `ScrollUp` | move `help.scroll` up one line, saturating at `0` |
+| every other action | change nothing at all |
+
+"Every other action" is the closed remainder: `OpenDetail`, `SelectTab`, `NextTab`,
+`PrevTab`, `FilterStart`, `FilterPush`, `FilterPop`, `Refresh`, `LaunchApply`,
+`LaunchContinue`, `LaunchArchive`, `FocusAgent`, `ToggleSection`, `SelectNext`,
+`SelectPrev`, `Click`, and `Ignore`. Eighteen actions, and none of them does anything
+while the overlay is open. Seven answer — `Quit`, `ToggleHelp`, `Back`, `Next`, `Prev`,
+`ScrollDown`, `ScrollUp` — and eighteen plus seven is the twenty-five `Action` carries after
+this change, so the two lists are exhaustive between them with nothing counted twice.
+
+`LaunchApply`, `LaunchContinue`, `LaunchArchive`, and `FocusAgent` being inert is the
+load-bearing half of "read-only": `a`, `c`, `s`, and `g` reach Herdr and start a process,
+and a reader who opened the help to find out what `a` does must be able to press it
+without launching an agent. `Refresh` being inert is the same argument one step down —
+it starts no process but it does start a CLI cycle.
+
+`Quit` is the one exception, and it is deliberate: `q` and `Ctrl-C` SHALL close the pane
+from inside the overlay exactly as from outside it. A modal that traps the reader is a
+worse failure than one that lets a quit through, and both keys have a row in the
+inventory's `Pane` group saying so.
+
+The blanket rule `apply` runs after **every** action — setting `refresh.requested` when
+`Dashboard::needs_archived_refresh()` holds — SHALL continue to run while the overlay is
+open, unchanged. It is not an action's effect and the overlay does not suppress it.
+
+#### Scenario: The agent keys launch nothing while the overlay is open
+
+- **WHEN** a `Dashboard` with `agents.reachable` true, a selected change `add-auth`, and
+  `help.open` true is given `LaunchApply`, `LaunchContinue`, `LaunchArchive`,
+  `FocusAgent`, and `Refresh` in turn
+- **THEN** `launch.pending` is `None` and `launch.problems` is empty after all five
+- **AND** `refresh.requested` is false after all five, unless
+  `needs_archived_refresh()` holds, in which case it is true after every one of them and
+  for that reason alone
+- **AND** the whole dashboard but for that one flag is equal, field for field, to the one
+  before the five actions
+- **AND** `apply` reaches no collaborator by construction — it takes `&mut self` and an
+  `Action` and holds no handle — so this scenario's evidence is the field-for-field equality
+  above and the `NOIO-VIEW` sweep over `src/ui/app.rs`, not a spy that could never fire
+
+#### Scenario: Both quit keys still quit from inside the overlay
+
+- **WHEN** a `Dashboard` with `help.open` true is given `Quit`
+- **THEN** `quit` is true
+- **AND** the same holds for a dashboard whose `help.open` is true and whose
+  `filter.active` is also true, so no combination of layers traps the reader
+
+#### Scenario: The overlay swallows every inert action
+
+- **WHEN** a `Dashboard` at `Route::List` with six active changes, `selected` `2`,
+  `detail.tab` `1`, and `help.open` true is given `OpenDetail`, `SelectTab(3)`,
+  `NextTab`, `PrevTab`, `FilterStart`, `FilterPush('a')`, `FilterPop`, `ToggleSection`,
+  `SelectNext`, `SelectPrev`, and `Click(Target::Change(0))` in turn
+- **THEN** `route` is still `List`, `selected` is still `2`, `detail.tab` is still `1`,
+  `filter.query` is still empty, `filter.active` is still false, and `sections` is
+  unchanged
+- **AND** `help.open` is still true and `help.scroll` is still `0` after all eleven
+
+#### Scenario: `j` and `k` scroll the overlay rather than the frame beneath
+
+- **WHEN** a `Dashboard` at `Route::Detail` with `detail.scroll` `4`, `selected` `1`, and
+  `help.open` true is given `Next`, `Next`, `Next`, then `Prev`
+- **THEN** `help.scroll` is `3` after the third and `2` after the fourth
+- **AND** `detail.scroll` is still `4` and `selected` is still `1` after all four
+- **AND** the same dashboard at `Route::List` given the same four actions moves
+  `help.scroll` identically and leaves `selected` at `1`, so the overlay's scroll is
+  route-agnostic where `Next` and `Prev` are not
+- **AND** `Prev` applied to a dashboard whose `help.scroll` is `0` leaves it `0` rather
+  than underflowing
+
+#### Scenario: The overlay lists the agent keys when the socket is unreachable
+
+- **WHEN** a `Dashboard` with `agents.reachable` **false** and `help.open` true is rendered at
+  120x40 and at 60x20, and again with `agents.reachable` **true**
+- **THEN** the two bands are byte-identical, cell for cell, style included, at both widths
+- **AND** both hold the `Agents` group with all four of `a`, `c`, `s`, and `g` and their
+  descriptions
+- **AND** this is the scenario the change's accepted footer cost rests on: the footer drops
+  `a/c/s launch` and `g focus` when the socket is unreachable and drops `g focus` at 60 columns
+  when it is reachable, and the argument for accepting both is that the overlay lists them
+  anyway. `INVENTORY` is `'static` and no render path consults `agents.reachable`, which is what
+  makes that true rather than hoped for
+
+#### Scenario: `Action::Select` is inert while the overlay is open
+
+- **WHEN** `Dashboard::apply` is called with `Action::Select` at any phase while `help.open`
+  is set
+- **THEN** nothing changes: no selection is made, extended, or cleared, and nothing is copied
+- **AND** the inert list holds eighteen actions and the answered list seven, summing to the
+  twenty-five `Action` carries after this change
+- **AND** the mouse resolver never produces it there anyway, because a drag over the band
+  already resolves to `Action::Ignore`

@@ -136,14 +136,15 @@ pub enum Target {
     Section(SectionKey),
     /// An index into `Dashboard::visible()`.
     Change(usize),
-    /// An index into `ui::detail::content_lines`' own row list.
-    DetailLine(usize),
     /// A section header row: its content-line index and its section index.
     DetailHeader { line: usize, section: usize },
 }
 ```
 
-`DetailLine` and `DetailHeader` are `foldable-spec-sections`' two additions, and the enum is
+`DetailHeader` is what remains of `foldable-spec-sections`' two additions: `text-selection`
+**removes** `DetailLine`, because the press that used to move the detail cursor to a
+clicked line is now the press that arms a text selection, and a variant no resolver emits
+is a variant that rots. `Target` therefore carries **three** members, not four. The enum is
 reproduced here so one capability declares it rather than two declaring it differently. They
 address the **detail** region and are therefore **not** returned by `targets()`, which
 enumerates the list region's rows and nothing else; `mouse-input` states how they are
@@ -291,6 +292,15 @@ the defect present.
 - **AND** Presses of `a`, `c`, `s`, and `g` at `selected` 0 leave `launch.pending` `None` and
   `launch.problems` empty, because `selected_change()` is `None` and `launch::decide` returns
   `Decision::Nothing`
+
+#### Scenario: `Target` carries three members and no resolver emits a fourth
+
+- **WHEN** `ui::app::Target`'s membership is read
+- **THEN** it holds exactly `Section`, `Change`, and `DetailHeader`
+- **AND** `ui::driver::mouse_action` emits no `Target` outside that set at any point of any
+  frame, under either overlay state
+- **AND** nothing in the crate names `DetailLine`, so its removal is complete rather than
+  merely unreachable
 
 ### Requirement: `Space` toggles the section the cursor is on or in
 
