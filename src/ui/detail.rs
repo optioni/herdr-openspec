@@ -4528,13 +4528,21 @@ mod tests {
                 |r| matches!(r.kind, ContentKind::SectionHeader { section: s, .. } if s == section),
             )
             .unwrap_or_else(|| panic!("section {section}'s header row is drawn"));
-        rows[header + 1..]
+        // Bounded by the next header, then stripped of trailing blanks —
+        // not stopped at the first blank row. A group's own blocks draw a
+        // blank row either side of themselves *inside* a body, so a
+        // blank-terminated scan reports a body carrying a leading block as
+        // empty. The trailing blank that separates one section from the
+        // next is what the strip removes.
+        let mut body: Vec<String> = rows[header + 1..]
             .iter()
-            .take_while(|r| {
-                !matches!(r.kind, ContentKind::SectionHeader { .. }) && !r.text().trim().is_empty()
-            })
+            .take_while(|r| !matches!(r.kind, ContentKind::SectionHeader { .. }))
             .map(ContentRow::text)
-            .collect()
+            .collect();
+        while body.last().is_some_and(|t| t.trim().is_empty()) {
+            body.pop();
+        }
+        body
     }
 
     /// `artifact-folds` :: "A spec tab's bodies align under their headers at
@@ -4739,7 +4747,27 @@ mod tests {
     #[test]
     fn a_depth_1_tracked_tasks_tab_indents_its_items_like_any_other_tab() {
         let (change, progress) = tracked_tasks_change();
-        let group_text = "- [x] 1.1 first\n- [ ] 1.2 second\n";
+        // The fixture carries a **block** row and an item **body** row
+        // beside its item rows, because the clause this test pins names
+        // all three ("item rows, their own body rows, and the group's
+        // blocks alike"). With items alone, a regression passing the full
+        // `width` to `group_body` and indenting afterwards — the defect
+        // the reduced width exists to prevent — would still be caught for
+        // item rows and missed for exactly the rows the clause was added
+        // for.
+        // Both the block and the body carry an **unbreakable** run, so each
+        // hard-splits at the interior it was wrapped at. A prose body wraps
+        // at a word boundary, and the boundaries at 76 and 78 columns
+        // coincide — a fixture built from prose was measured passing with
+        // the full `width` planted in place of `body_width`, proving
+        // nothing. A hard split cannot coincide: it falls exactly at the
+        // column it was given.
+        let block_run = "B".repeat(90);
+        let body_run = "Y".repeat(90);
+        let group_text = format!(
+            "<!-- kind: behavior -->\n\n{block_run}\n\n- [x] 1.1 first\n      {body_run}\n- [ ] 1.2 second\n"
+        );
+        let group_text = group_text.as_str();
         let d = Detail {
             sections: vec![
                 ArtifactSection {
