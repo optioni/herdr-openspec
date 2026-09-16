@@ -112,16 +112,22 @@ None.
   `src/ui/markdown.rs` (the new
   `inline` entry point), `src/ui/tasks.rs`, `src/ui/detail.rs` (the tracked-tasks branch of
   the section walk).
-- **Sequencing:** this change and `section-body-indent` both carry an `artifact-folds` delta on
-  the **same** requirement, "A section header row names the file and shows its fold state", and
-  each currently holds the other's untouched original — so whichever archives second silently
-  reverts the first. `section-body-indent` is far smaller and lands first. **This change's
-  `artifact-folds` delta was written against pre-`section-body-indent` text and SHALL be
-  re-diffed against the archived requirement before its tasks are written**; in particular it
-  still carries the deleted sentence "Body rows SHALL NOT be indented by depth" verbatim, and
-  it narrows a tracked-tasks body to the items-only grammar that change widens. Recorded here
-  rather than only in `section-body-indent`'s own proposal, because that record disappears the
-  moment that change archives.
+- **Sequencing: settled.** This change and `section-body-indent` both carried an
+  `artifact-folds` delta on the **same** requirement, "A section header row names the file and
+  shows its fold state", and each held the other's untouched original — so whichever archived
+  second would silently have reverted the first. `section-body-indent` was the smaller and
+  landed first, archived `2026-09-16`, and **this change's `artifact-folds` delta has since
+  been re-diffed against the archived requirement**: it is now that requirement's live text
+  plus this change's own edits, carrying all 23 of its scenarios plus this change's 2. Four
+  places where the two rules meet were resolved in the re-diff rather than left to the merge:
+  a tracked-tasks body is obtained at `body_width`, not `width`, so a group's rows are
+  indented on the same terms as every other body; the no-exemption paragraph now names a
+  group's item bodies and blocks beside its items; "A depth-0 tracked-tasks tab is unmoved at
+  every width" no longer claims byte-identity, which this change falsifies by adding rows, and
+  claims the horizontal reading it was written for; and "A depth-1 tracked-tasks tab indents
+  its items" now names every row of a group's body rather than its item rows alone. What the
+  delta no longer carries is the deleted sentence "Body rows SHALL NOT be indented by depth",
+  which it held verbatim until the re-diff.
 - **Roadmap:** **unplanned**. `openspec/IMPLEMENTATION-ORDER.md` scoped `tasks-tab` as
   "render the task file as a checklist" and never distinguished the counter's model from the
   renderer's, so the roadmap had no row where this could have been anticipated.
