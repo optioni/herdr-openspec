@@ -61,24 +61,24 @@ grep -c "fn mouse_table_claims\|fn compare_mouse_claims" tests/doc_contract.rs; 
 ## 1. The sweep retains its claims
 <!-- kind: behavior -->
 
-- [ ] 1.1 RED: Write failing tests for `the_sweep_records_all_four_claim_axes` and
+- [x] 1.1 RED: Write failing tests for `the_sweep_records_all_four_claim_axes` and
       `the_overlay_state_is_its_own_axis`. Assert concretely, so a zone/action mix-up fails:
       `(ScrollDown, ListRow, SelectNext)` present, `(Down(Left), DetailTab, SelectTab)`
       present, and `(ScrollDown, ListRow, ScrollDown)` **absent** — a test that only asserts
       the return type is satisfied by the compiler and cannot go red.
-- [ ] 1.2 GREEN: Add `sweep_mouse_claims(fixture, help_open) -> BTreeSet<Claim>`, with the
+- [x] 1.2 GREEN: Add `sweep_mouse_claims(fixture, help_open) -> BTreeSet<Claim>`, with the
       outcome carrying the `Action` variant **plus its payload's constructor name** and the
       zone carrying its variant name only (per design.md → Decision 2). The zone is recovered
       by calling `ui::layout::zone` — `mouse_action` never returns it — and must mirror its
       precedence: `Zone::Outside` outside the frame, and no zone consulted at all while the
       overlay is open (per design.md → Decision 11). Cache per `(fixture, overlay)` on
       `swept_mouse_action_names`' existing `OnceLock` terms.
-- [ ] 1.3 REFACTOR: Re-express `swept_mouse_action_names` as a projection of the claim set so
+- [x] 1.3 REFACTOR: Re-express `swept_mouse_action_names` as a projection of the claim set so
       the two cannot disagree, keeping its signature and `BTreeSet<String>` return. Verify:
       `swept_action_names`, `select_is_the_only_mouse_only_action_by_name_and_count`, and
       `the_sweep_covers_the_mouse_under_both_overlay_states` all pass unedited — the last
       asserts both name sets by equality and is the one that will catch a wrong projection.
-- [ ] 1.4 Run `cargo test --test doc_contract` — green, no regressions.
+- [x] 1.4 Run `cargo test --test doc_contract` — green, no regressions.
 
 ## 2. The dashboard-fixture axis
 <!-- kind: behavior -->

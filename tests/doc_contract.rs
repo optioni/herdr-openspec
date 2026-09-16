@@ -2163,10 +2163,11 @@ use herdr_openspec::state::Mapping;
 use herdr_openspec::tasks::Progress;
 use herdr_openspec::ui::app::{
     Action, ArtifactSection, Dashboard, Detail, Filter, Help, Launch, Refresh, Route, Sections,
-    action_for,
+    SelectPhase, Target, action_for,
 };
 use herdr_openspec::ui::driver::mouse_action;
 use herdr_openspec::ui::help::{INVENTORY, Scope};
+use herdr_openspec::ui::layout::Zone;
 
 /// Every `Action` mapped to a stable name by an **exhaustive** `match` with no
 /// wildcard arm: a variant added later is a compile error here, in this test,
@@ -2309,9 +2310,11 @@ fn sweep_change(name: &str, origin: Origin, tabs: usize) -> Change {
 /// silently dropping the mouse's selection coverage from the whole sweep —
 /// the widen-the-fixture rule `the_sweep_covers_the_mouse_under_both_overlay_states`
 /// already states for the tab-switching case applies here identically.
-fn sweep_dashboard(route: Route, help_open: bool) -> Dashboard {
+fn sweep_dashboard(route: Route, help_open: bool, fixture: SweepFixture) -> Dashboard {
     Dashboard {
-        selection: None,
+        selection: match fixture {
+            SweepFixture::SelectionAbsent => None,
+        },
         repo: Some(PathBuf::from("/repo")),
         searched_from: PathBuf::from("/repo"),
         changes: ChangeSet {
@@ -2395,9 +2398,141 @@ fn sweep_dashboard(route: Route, help_open: bool) -> Dashboard {
     }
 }
 
-/// Step 3: every `MouseEventKind` the crate can receive — all fourteen
-/// inhabited values of an eight-variant enum over three buttons — at every cell
-/// of a 120x40 frame and of a 60x20 frame, under both overlay states.
+/// The **dashboard fixtures** the mouse sweep runs over, listed explicitly and
+/// pinned by length, on exactly the terms [`EXEMPT_ACTIONS`] is pinned at two.
+///
+/// `mouse_action` is a total function of a `Dashboard`, a `Rect` and a
+/// `MouseEvent` — the `Dashboard` included — so a binding that branches on
+/// dashboard state is unobservable under a fixture that pins that state. A row
+/// resting on such a precondition would be reported vacuous and the check would
+/// be right to. See `doc-conformance` -> "The dashboard-fixture axis".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum SweepFixture {
+    /// `selection: None` — the state the sweep has always run in.
+    SelectionAbsent,
+}
+
+const SWEEP_FIXTURES: [SweepFixture; 1] = [SweepFixture::SelectionAbsent];
+
+/// One cell's worth of what `mouse_action` decided, on the four axes a
+/// documented row makes a statement about (`doc-conformance` -> "The claim").
+///
+/// Axis 4 keeps the payload's **constructor name**, never the bare `Action`
+/// variant: `action_name` collapses every `Click(_)` to `"Click"`, and under
+/// that collapse three separate documented rows reduce to one claim and the
+/// vacuity direction cannot fire at all.
+///
+/// Every axis is a `&'static str` drawn from a closed vocabulary rather than an
+/// owned `String`, and deliberately: the sweep inserts one claim per cell of
+/// every frame, kind, overlay state and fixture — hundreds of thousands of them
+/// — and an allocation per axis per cell is the whole of the difference between
+/// a sweep that costs seconds and one that costs minutes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct Claim {
+    /// The `MouseEventKind` dispatched, as [`kind_name`] spells it.
+    kind: &'static str,
+    /// The overlay state, as its own axis rather than a sentinel in `zone`.
+    help_open: bool,
+    /// The `Zone` the cell resolved to, payload discarded — `None` while the
+    /// overlay is open, where `mouse_action` returns before consulting
+    /// `ui::layout::zone` at all (`design.md` -> Decision 6 and Decision 11).
+    zone: Option<&'static str>,
+    /// The `Action` variant together with its payload's constructor name where
+    /// it has one: `Click(Change)`, `Select(Begin)`, `SelectTab`, `Ignore`.
+    outcome: &'static str,
+}
+
+/// A [`Claim`] from its four axes, so a test and the comparator spell one the
+/// same way.
+fn claim(
+    kind: &'static str,
+    help_open: bool,
+    zone: Option<&'static str>,
+    outcome: &'static str,
+) -> Claim {
+    Claim {
+        kind,
+        help_open,
+        zone,
+        outcome,
+    }
+}
+
+/// Every `MouseEventKind` the crate can receive — all fourteen inhabited values
+/// of an eight-variant enum over three buttons.
+const MOUSE_KINDS: [MouseEventKind; 14] = [
+    MouseEventKind::Down(MouseButton::Left),
+    MouseEventKind::Down(MouseButton::Right),
+    MouseEventKind::Down(MouseButton::Middle),
+    MouseEventKind::Up(MouseButton::Left),
+    MouseEventKind::Up(MouseButton::Right),
+    MouseEventKind::Up(MouseButton::Middle),
+    MouseEventKind::Drag(MouseButton::Left),
+    MouseEventKind::Drag(MouseButton::Right),
+    MouseEventKind::Drag(MouseButton::Middle),
+    MouseEventKind::Moved,
+    MouseEventKind::ScrollDown,
+    MouseEventKind::ScrollUp,
+    MouseEventKind::ScrollLeft,
+    MouseEventKind::ScrollRight,
+];
+
+/// Axis 1's spelling, by an **exhaustive** match: a `MouseEventKind` variant or
+/// a `MouseButton` added later is a compile error here before it is an
+/// unclaimable gesture.
+fn kind_name(kind: MouseEventKind) -> &'static str {
+    match kind {
+        MouseEventKind::Down(MouseButton::Left) => "Down(Left)",
+        MouseEventKind::Down(MouseButton::Right) => "Down(Right)",
+        MouseEventKind::Down(MouseButton::Middle) => "Down(Middle)",
+        MouseEventKind::Up(MouseButton::Left) => "Up(Left)",
+        MouseEventKind::Up(MouseButton::Right) => "Up(Right)",
+        MouseEventKind::Up(MouseButton::Middle) => "Up(Middle)",
+        MouseEventKind::Drag(MouseButton::Left) => "Drag(Left)",
+        MouseEventKind::Drag(MouseButton::Right) => "Drag(Right)",
+        MouseEventKind::Drag(MouseButton::Middle) => "Drag(Middle)",
+        MouseEventKind::Moved => "Moved",
+        MouseEventKind::ScrollDown => "ScrollDown",
+        MouseEventKind::ScrollUp => "ScrollUp",
+        MouseEventKind::ScrollLeft => "ScrollLeft",
+        MouseEventKind::ScrollRight => "ScrollRight",
+    }
+}
+
+/// Axis 3's spelling, by an **exhaustive** match: a `Zone` variant added later
+/// is a compile error here.
+fn zone_name(zone: &Zone) -> &'static str {
+    match zone {
+        Zone::ListRow { .. } => "ListRow",
+        Zone::List => "List",
+        Zone::DetailTab { .. } => "DetailTab",
+        Zone::DetailRow { .. } => "DetailRow",
+        Zone::Detail => "Detail",
+        Zone::Outside => "Outside",
+    }
+}
+
+/// Axis 4's spelling: the `Action` variant plus its payload's constructor name
+/// where it has one, the geometry inside (`line`, `column`, `Rect`, the index)
+/// discarded. A **projection** of the value `mouse_action` already returned,
+/// never a second computation that could disagree with it.
+///
+/// The fall-through delegates to [`action_name`], whose match is exhaustive, so
+/// a new `Action` variant is still a compile error — there, rather than here.
+fn outcome_name(action: Action) -> &'static str {
+    match action {
+        Action::Click(Target::Section(_)) => "Click(Section)",
+        Action::Click(Target::Change(_)) => "Click(Change)",
+        Action::Click(Target::DetailHeader { .. }) => "Click(DetailHeader)",
+        Action::Select(SelectPhase::Begin { .. }) => "Select(Begin)",
+        Action::Select(SelectPhase::Extend { .. }) => "Select(Extend)",
+        other => action_name(other),
+    }
+}
+
+/// Step 3: every [`MOUSE_KINDS`] value at every cell of a 120x40 frame and of a
+/// 60x20 frame, under both overlay states and over every [`SWEEP_FIXTURES`]
+/// entry — retaining a [`Claim`] per cell rather than only the action's name.
 ///
 /// **The route dimension is this check's own addition, not the spec's.**
 /// `binding-inventory` mandates the two frames, the kinds, the fixture and the
@@ -2413,32 +2548,14 @@ fn sweep_dashboard(route: Route, help_open: bool) -> Dashboard {
 /// for that: it asserts the property per cell rather than trusting the layout
 /// function's shape.
 ///
-/// Cached per overlay state, on exactly [`swept_key_action_names`]'s terms.
-fn swept_mouse_action_names(help_open: bool) -> BTreeSet<String> {
-    static CLOSED: std::sync::OnceLock<BTreeSet<String>> = std::sync::OnceLock::new();
-    static OPEN: std::sync::OnceLock<BTreeSet<String>> = std::sync::OnceLock::new();
-    let cache = if help_open { &OPEN } else { &CLOSED };
-    cache.get_or_init(|| sweep_mouse_actions(help_open)).clone()
-}
-
-fn sweep_mouse_actions(help_open: bool) -> BTreeSet<String> {
-    let kinds = [
-        MouseEventKind::Down(MouseButton::Left),
-        MouseEventKind::Down(MouseButton::Right),
-        MouseEventKind::Down(MouseButton::Middle),
-        MouseEventKind::Up(MouseButton::Left),
-        MouseEventKind::Up(MouseButton::Right),
-        MouseEventKind::Up(MouseButton::Middle),
-        MouseEventKind::Drag(MouseButton::Left),
-        MouseEventKind::Drag(MouseButton::Right),
-        MouseEventKind::Drag(MouseButton::Middle),
-        MouseEventKind::Moved,
-        MouseEventKind::ScrollDown,
-        MouseEventKind::ScrollUp,
-        MouseEventKind::ScrollLeft,
-        MouseEventKind::ScrollRight,
-    ];
-
+/// **Where the zone comes from.** `mouse_action` returns an `Action` and never
+/// surfaces the `Zone` it resolved, so the claim's zone is recovered here by
+/// calling `ui::layout::zone` on the same arguments. That recomputation must
+/// mirror `mouse_action`'s own precedence, and the two rules are written out
+/// rather than left to be rediscovered (`design.md` -> Decision 11): a point
+/// outside `area` is `Zone::Outside`, and while the overlay is open the zone is
+/// **not consulted at all**, because `mouse_action` returns before reaching it.
+fn sweep_mouse_claims(fixture: SweepFixture, help_open: bool) -> BTreeSet<Claim> {
     // The wide frame once (route-free, licensed by the per-cell assertion
     // above); the narrow frame at both routes, where `route` genuinely selects
     // which single region exists.
@@ -2448,11 +2565,11 @@ fn sweep_mouse_actions(help_open: bool) -> BTreeSet<String> {
         (Route::Detail, 60, 20),
     ];
 
-    let mut names = BTreeSet::new();
+    let mut claims = BTreeSet::new();
     for (route, width, height) in passes {
-        let dashboard = sweep_dashboard(route, help_open);
+        let dashboard = sweep_dashboard(route, help_open, fixture);
         let area = Rect::new(0, 0, width, height);
-        for kind in kinds {
+        for kind in MOUSE_KINDS {
             for row in 0..height {
                 for column in 0..width {
                     let mouse = MouseEvent {
@@ -2461,12 +2578,65 @@ fn sweep_mouse_actions(help_open: bool) -> BTreeSet<String> {
                         row,
                         modifiers: KeyModifiers::NONE,
                     };
-                    names.insert(action_name(mouse_action(&dashboard, area, &mouse)).to_string());
+                    let zone = (!help_open).then(|| {
+                        zone_name(&herdr_openspec::ui::layout::zone(area, route, column, row))
+                    });
+                    claims.insert(Claim {
+                        kind: kind_name(kind),
+                        help_open,
+                        zone,
+                        outcome: outcome_name(mouse_action(&dashboard, area, &mouse)),
+                    });
                 }
             }
         }
     }
-    names
+    claims
+}
+
+/// [`sweep_mouse_claims`], computed once per test binary and cloned thereafter,
+/// on exactly [`swept_key_action_names`]' terms. Every `(fixture, overlay)`
+/// combination is filled on the first touch: the full check wants all of them,
+/// and one table keeps the expensive sweep to a single pass per combination.
+fn swept_mouse_claims(fixture: SweepFixture, help_open: bool) -> BTreeSet<Claim> {
+    static CACHE: std::sync::OnceLock<BTreeMap<(SweepFixture, bool), BTreeSet<Claim>>> =
+        std::sync::OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            let mut table = BTreeMap::new();
+            for entry in SWEEP_FIXTURES {
+                for open in [false, true] {
+                    table.insert((entry, open), sweep_mouse_claims(entry, open));
+                }
+            }
+            table
+        })
+        .get(&(fixture, help_open))
+        .expect("SWEEP_FIXTURES covers every fixture the sweep is asked for")
+        .clone()
+}
+
+/// The claims observed at one overlay state, over **every** fixture — the
+/// left-hand side of the two-way comparison.
+fn mouse_claims(help_open: bool) -> BTreeSet<Claim> {
+    let mut all = BTreeSet::new();
+    for fixture in SWEEP_FIXTURES {
+        all.extend(swept_mouse_claims(fixture, help_open));
+    }
+    all
+}
+
+/// The bare action names, as a **projection** of [`mouse_claims`] rather than a
+/// second sweep, so the two cannot disagree. Keeps its signature and its
+/// `BTreeSet<String>` return: three callers want a name-set view of this data.
+fn swept_mouse_action_names(help_open: bool) -> BTreeSet<String> {
+    mouse_claims(help_open)
+        .into_iter()
+        .map(|c| match c.outcome.split_once('(') {
+            Some((variant, _)) => variant.to_string(),
+            None => c.outcome.to_string(),
+        })
+        .collect()
 }
 
 /// Step 4's left-hand side: the swept union less the closed exemption set.
@@ -2925,6 +3095,63 @@ fn the_sweep_covers_the_mouse_under_both_overlay_states() {
     // The union names `ToggleHelp`, so the click-outside dismissal is bound here
     // and not only by its own scenarios.
     assert!(closed.union(&open).any(|n| n == "ToggleHelp"));
+}
+
+#[test]
+fn the_sweep_records_all_four_claim_axes() {
+    // What this protects: that the claim a cell contributes carries the zone it
+    // resolved to and the outcome `mouse_action` returned, correlated with each
+    // other. A sweep that recorded the right zones and the right outcomes but
+    // paired them wrongly would satisfy any assertion written over the two
+    // projections separately, which is why the third assertion below is an
+    // **absence**: `Zone::ListRow` under the wheel is `SelectNext`, never
+    // `ScrollDown`, and a zone/outcome mix-up says otherwise.
+    let claims = swept_mouse_claims(SweepFixture::SelectionAbsent, false);
+
+    assert!(
+        claims.contains(&claim("ScrollDown", false, Some("ListRow"), "SelectNext")),
+        "the wheel over a list row moves the list selection: {claims:?}"
+    );
+    assert!(
+        claims.contains(&claim("Down(Left)", false, Some("DetailTab"), "SelectTab")),
+        "a left press on a tab cell switches the tab: {claims:?}"
+    );
+    assert!(
+        !claims.contains(&claim("ScrollDown", false, Some("ListRow"), "ScrollDown")),
+        "the wheel over a list row must not be recorded as scrolling the detail \
+         region - the zone and the outcome have been paired wrongly"
+    );
+}
+
+#[test]
+fn the_overlay_state_is_its_own_axis() {
+    // `design.md` -> Decision 6: while the overlay is open `mouse_action`
+    // returns before consulting `ui::layout::zone` at all, so an open-overlay
+    // claim has no zone to carry. The axis is its own field rather than a
+    // sentinel written into the zone slot, so the two passes stay disjoint.
+    let open = swept_mouse_claims(SweepFixture::SelectionAbsent, true);
+    let closed = swept_mouse_claims(SweepFixture::SelectionAbsent, false);
+
+    assert!(
+        open.iter().all(|c| c.help_open && c.zone.is_none()),
+        "every open-overlay claim carries the overlay axis and no zone: {open:?}"
+    );
+    assert!(
+        closed.iter().all(|c| !c.help_open && c.zone.is_some()),
+        "every closed-overlay claim carries a zone: {closed:?}"
+    );
+    assert!(
+        open.contains(&claim("Down(Left)", true, None, "ToggleHelp")),
+        "the press outside the band dismisses the overlay: {open:?}"
+    );
+    assert!(
+        !closed.iter().any(|c| c.outcome == "ToggleHelp"),
+        "no closed-overlay cell produces ToggleHelp: {closed:?}"
+    );
+    assert!(
+        open.contains(&claim("ScrollDown", true, None, "ScrollDown")),
+        "the wheel scrolls the overlay from anywhere in the frame: {open:?}"
+    );
 }
 
 #[test]
