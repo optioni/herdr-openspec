@@ -321,6 +321,11 @@ mod tests {
             /// because `mouse_failure_still_returns_a_guard` asserts the
             /// detail text reaches `mouse_problem()` unchanged.
             failing: RefCell<BTreeMap<&'static str, String>>,
+            /// Every `text` a `write_clipboard` call carried, in call order —
+            /// `write_clipboard`'s own body discards it, so a test that must
+            /// prove the text reaches this double unchanged needs somewhere
+            /// to read it back from.
+            clipboard_writes: RefCell<Vec<String>>,
         }
 
         impl Recorder {
@@ -347,6 +352,11 @@ mod tests {
 
             fn note(&self, label: &'static str) {
                 self.calls.borrow_mut().push(label);
+            }
+
+            /// Every `text` a `write_clipboard` call carried, in call order.
+            fn clipboard_writes(&self) -> Vec<String> {
+                self.clipboard_writes.borrow().clone()
             }
 
             fn record(&self, op: &'static str) -> Result<(), TerminalError> {
@@ -381,7 +391,7 @@ mod tests {
                 self.record("disable_raw")
             }
             fn write_clipboard(&self, text: &str) -> Result<(), TerminalError> {
-                let _ = text;
+                self.clipboard_writes.borrow_mut().push(text.to_string());
                 self.record("write_clipboard")
             }
         }
@@ -681,6 +691,54 @@ mod tests {
                     "leave_alternate",
                     "disable_raw"
                 ]
+            );
+        }
+
+        #[test]
+        fn a_guard_delegates_write_clipboard_forwarding_text_and_errors_unchanged() {
+            // Closes a coverage gap: every test above drives `Recorder::write_clipboard`
+            // directly, the double's own body, never `TerminalGuard::write_clipboard` —
+            // the one-line delegate this test exists to exercise. Proves the delegate
+            // forwards the text unchanged, propagates an `Err` unchanged, and — like
+            // `a_clipboard_write_changes_no_terminal_mode` above — changes no terminal
+            // mode either way.
+            let rec = Recorder::default();
+            let guard = TerminalGuard::enter(&rec).expect("enter succeeds");
+
+            guard
+                .write_clipboard("selected text")
+                .expect("an unconfigured recorder succeeds");
+            assert_eq!(
+                rec.clipboard_writes(),
+                vec!["selected text".to_string()],
+                "the guard forwards the text unchanged rather than substituting its own"
+            );
+
+            rec.fail_with("write_clipboard", "clipboard unavailable");
+            let err = guard
+                .write_clipboard("second text")
+                .expect_err("a configured failure reaches the guard's caller");
+            assert_eq!(err.op, "write_clipboard");
+            assert!(err.detail.contains("clipboard unavailable"), "{err}");
+            assert_eq!(
+                rec.clipboard_writes(),
+                vec!["selected text".to_string(), "second text".to_string()],
+                "the failing write still reached the double, forwarded unchanged"
+            );
+
+            drop(guard);
+            assert_eq!(
+                rec.calls_without_capture()
+                    .into_iter()
+                    .filter(|op| *op != "write_clipboard")
+                    .collect::<Vec<_>>(),
+                vec![
+                    "enable_raw",
+                    "enter_alternate",
+                    "leave_alternate",
+                    "disable_raw"
+                ],
+                "neither write, ok or failing, changes a terminal mode"
             );
         }
     }

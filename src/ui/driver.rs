@@ -5601,6 +5601,64 @@ mod tests {
         );
     }
 
+    #[test]
+    fn anchor_holds_while_the_focus_follows() {
+        // `text-selection`: "Anchor holds while the focus follows" — a drag
+        // begun at one cell, extended to a second, and then to a third: the
+        // anchor is the first cell throughout and the focus is whichever cell
+        // came last, and the span the pair selects does not depend on which
+        // of the two came first.
+        let lines: String = (0..7)
+            .map(|i| format!("- line{i} {}\n", "x".repeat(45)))
+            .collect();
+        let dashboard = word_dashboard(&lines);
+        let area = WIDE;
+        let content = detail_content_area(area, Route::Detail);
+        let start = (content.x + 10, content.y + 4);
+        let mid = (content.x + 2, content.y + 6);
+        let end = (content.x + 30, content.y + 5);
+
+        let mut d = dashboard.clone();
+        let begin = mouse_action(&d, area, &left(start.0, start.1));
+        d.apply(begin);
+        assert_eq!(d.selection.as_ref().map(|s| s.anchor), Some((4, 10)));
+        assert_eq!(d.selection.as_ref().map(|s| s.focus), Some((4, 10)));
+
+        let extend_down = mouse_action(&d, area, &drag(mid.0, mid.1));
+        d.apply(extend_down);
+        assert_eq!(
+            d.selection.as_ref().map(|s| s.anchor),
+            Some((4, 10)),
+            "the anchor does not move while the focus follows"
+        );
+        assert_eq!(d.selection.as_ref().map(|s| s.focus), Some((6, 2)));
+
+        let extend_up = mouse_action(&d, area, &drag(end.0, end.1));
+        d.apply(extend_up);
+        assert_eq!(
+            d.selection.as_ref().map(|s| s.anchor),
+            Some((4, 10)),
+            "the anchor still has not moved, even after the drag reversed direction"
+        );
+        assert_eq!(d.selection.as_ref().map(|s| s.focus), Some((5, 30)));
+
+        // The selected span is computed from the pair in either order, so
+        // dragging upward across two points selects the same text as
+        // dragging downward across them.
+        let rows = crate::ui::detail::content_lines(
+            &d.detail,
+            d.selected_change(),
+            d.detail.drawn_width.expect("a frame has been drawn"),
+        );
+        let selection = d.selection.clone().expect("a selection is in progress");
+        let forward = crate::ui::detail::span_text(&rows, selection.anchor, selection.focus);
+        let backward = crate::ui::detail::span_text(&rows, selection.focus, selection.anchor);
+        assert_eq!(
+            forward, backward,
+            "the pair is order-independent regardless of which point is the anchor"
+        );
+    }
+
     /// A dashboard whose one selected, non-foldable artifact renders `text`
     /// verbatim as a bullet list — one word per line, so a press over a
     /// known column lands on a known word.
@@ -5806,11 +5864,42 @@ mod tests {
         read: crate::ui::app::ArtifactReader<'_>,
         write: crate::ui::app::ClipboardWriter<'_>,
     ) {
-        let mut queue: Vec<Result<Option<Event>, crate::ui::event::EventError>> = mouse_events
-            .into_iter()
-            .map(|mouse| Ok(Some(Event::Mouse(mouse))))
-            .collect();
-        queue.push(Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))));
+        drive_events(
+            dashboard,
+            mouse_events.into_iter().map(Event::Mouse).collect(),
+            read,
+            write,
+        );
+    }
+
+    /// The shared body behind [`drive_mouse_events`] and
+    /// `the_pane_is_still_complete_without_a_pointer`'s key-only session: a
+    /// full `run_loop` drive over the given events, `q` appended last, through
+    /// a real `TestBackend` terminal and every worker as `crate::*::none()`.
+    /// Generalised from mouse-only events because the latter needs a mixed
+    /// or key-only queue to prove the pane needs no mouse event at all.
+    fn drive_events(
+        dashboard: &mut Dashboard,
+        events: Vec<Event>,
+        read: crate::ui::app::ArtifactReader<'_>,
+        write: crate::ui::app::ClipboardWriter<'_>,
+    ) {
+        // `run_loop` breaks the instant `dashboard.quit` is set, which a
+        // previous call left `true` — this harness re-runs `run_loop` from
+        // scratch each time, so that leftover would end the loop before its
+        // own first real event's effect ever reached a second sync-and-draw
+        // pass (the one that matters for a tab switch: `sync_detail` runs
+        // only at the top of the *next* iteration, after the event that
+        // changed `detail.tab` was applied).
+        dashboard.quit = false;
+        let mut queue: Vec<Result<Option<Event>, crate::ui::event::EventError>> =
+            events.into_iter().map(|event| Ok(Some(event))).collect();
+        // `Ctrl-C` rather than a bare `q`: `action_for` types a bare `q` into
+        // the query while filtering, per `specs/list-filtering/spec.md`, so a
+        // caller here whose events leave filter mode active would otherwise
+        // starve the script rather than quit — `Ctrl-C` quits unconditionally
+        // at either mode.
+        queue.push(Ok(Some(press(KeyCode::Char('c'), KeyModifiers::CONTROL))));
         let mut events = Script::new(queue);
         let backend = TestBackend::new(WIDE.width, WIDE.height);
         let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
@@ -5907,6 +5996,61 @@ mod tests {
             2,
             "a fourth press changes nothing further and copies nothing again: {:?}",
             recorder.calls()
+        );
+    }
+
+    /// `specs/text-selection/spec.md` -> "A single press with no motion selects nothing": a
+    /// press followed by a release, with no intervening drag, arms the cell — recorded, so a
+    /// second press there can widen to the word — but highlights nothing and copies nothing.
+    #[test]
+    fn a_single_press_with_no_motion_selects_nothing() {
+        let mut d = word_content_dashboard();
+        let read = |_: &std::path::Path| Ok("- zone call\n".to_string());
+        let content = detail_content_area(WIDE, Route::Detail);
+        let point = (content.x + 2, content.y);
+        let recorder = ClipboardRecorder::ok();
+        let write = |t: &str| recorder.write(t);
+
+        drive_mouse_events(
+            &mut d,
+            vec![
+                left(point.0, point.1),
+                m(MouseEventKind::Up(MouseButton::Left), point.0, point.1),
+            ],
+            &read,
+            &write,
+        );
+
+        assert_eq!(
+            d.selection.as_ref().map(|s| s.granularity),
+            Some(Granularity::Armed),
+            "the press is recorded, arming the cell"
+        );
+        assert!(
+            recorder.calls().is_empty(),
+            "a press with no drag copies nothing: {:?}",
+            recorder.calls()
+        );
+        let rows = crate::ui::detail::content_lines(
+            &d.detail,
+            d.selected_change(),
+            d.detail.drawn_width.expect("a frame has been drawn"),
+        );
+        let selection = d.selection.clone().expect("the press was recorded");
+        assert_eq!(
+            view::highlight_span(&rows, &selection),
+            None,
+            "an armed selection highlights nothing"
+        );
+
+        // A second press at that same cell, with no drag before it, widens to
+        // the word — proving the first press really was recorded rather than
+        // dropped by the release.
+        drive_mouse_events(&mut d, vec![left(point.0, point.1)], &read, &write);
+        assert_eq!(
+            d.selection.as_ref().map(|s| s.granularity),
+            Some(Granularity::Word),
+            "a second press at the same cell widens to the word"
         );
     }
 
@@ -6122,6 +6266,36 @@ mod tests {
             assert_eq!(wheeled, keyed, "{wheel:?} against {key:?} at {route:?}");
         }
 
+        // A change-row click against `j`, and the second click that opens it
+        // against `Enter` — `text-selection`'s addition, closing the gap the
+        // three cases below left: `Click(Target::Change)` is the one `Click`
+        // sub-case this test did not yet prove against a key, though
+        // `a_detail_header_click_equals_space` already proves
+        // `Click(Target::DetailHeader)` against `Space` at `Route::Detail`.
+        let base = mouse_dashboard(4, 0);
+        // Interior row 0 is the `active` header; row 1 is the first change —
+        // the same row `selected` (starting on the header, at 0) reaches by
+        // moving one step, so `Next` and this click land on the same target.
+        let row = list_row(WIDE, Route::List, 1);
+        let click = mouse_action(&base, WIDE, &left(5, row));
+        assert_eq!(click, Action::Click(Target::Change(0)));
+
+        let mut clicked = base.clone();
+        let mut keyed = base.clone();
+        clicked.apply(click);
+        keyed.apply(Action::Next);
+        assert_eq!(clicked, keyed, "a click on the next row against `j`");
+
+        let second_click = mouse_action(&clicked, WIDE, &left(5, row));
+        let mut opened_by_click = clicked.clone();
+        let mut opened_by_key = clicked.clone();
+        opened_by_click.apply(second_click);
+        opened_by_key.apply(Action::OpenDetail);
+        assert_eq!(
+            opened_by_click, opened_by_key,
+            "a second click on the selected row against `Enter`"
+        );
+
         // A section toggle driven by a click against `Space`.
         let mut clicked = mouse_dashboard(3, 3);
         let mut spaced = mouse_dashboard(3, 3);
@@ -6149,6 +6323,183 @@ mod tests {
             false,
         ));
         assert_eq!(tab_clicked, tab_keyed);
+    }
+
+    #[test]
+    fn the_pane_is_still_complete_without_a_pointer() {
+        // `mouse-input`: "The pane is still complete without a pointer" — a
+        // full session driven by keys alone: list navigation, an archived
+        // fold, the filter, opening a change, switching between its two
+        // artifacts, folding the foldable one, an agent key, and the help
+        // overlay. `drive_events` sends only `Event::Key` — `mouse_action` is
+        // never called at all — and `dashboard.selection` stays `None`
+        // throughout, which is the one thing this session cannot reach:
+        // copying text has no keyboard path (`text-selection`).
+        let c0 = crate::changes::fixture::with_artifacts(
+            crate::changes::fixture::active("c0", 0, 1),
+            &[
+                ("proposal", &["/repo/openspec/changes/c0/proposal.md"]),
+                ("spec", &["/repo/openspec/changes/c0/spec.md"]),
+            ],
+        );
+        let a0 = crate::changes::fixture::archived(Some("2026-01-01"), "a0", 1, 1);
+        let mut d = dashboard_with_change("/repo", "unused", 0, 0);
+        d.changes = crate::changes::fixture::set(vec![c0], vec![a0], Vec::new());
+        d.agents.reachable = true;
+        d.sections.collapsed = std::collections::BTreeSet::from([SectionKey::Archived]);
+
+        let read = |path: &std::path::Path| {
+            if path.ends_with("spec.md") {
+                Ok("### Requirement: A\n\nBody A.\n\n### Requirement: B\n\nBody B.\n".to_string())
+            } else {
+                Ok("proposal body\n".to_string())
+            }
+        };
+        let recorder = ClipboardRecorder::ok();
+        let write = |t: &str| recorder.write(t);
+
+        // List navigation: move onto the archived header and unfold it with
+        // `Space`, exactly as `foldable-spec-sections` -> `Action::ToggleSection`
+        // does when a click drives it.
+        assert!(
+            d.sections.collapsed.contains(&SectionKey::Archived),
+            "archived starts collapsed"
+        );
+        d.selected = d
+            .targets()
+            .iter()
+            .position(|t| *t == Target::Section(SectionKey::Archived))
+            .expect("the archived header is drawn");
+        drive_events(
+            &mut d,
+            vec![press(KeyCode::Char(' '), KeyModifiers::NONE)],
+            &read,
+            &write,
+        );
+        assert!(
+            !d.sections.collapsed.contains(&SectionKey::Archived),
+            "`Space` unfolds the archived section from the keyboard alone"
+        );
+        assert_eq!(d.route, Route::List, "still at the list route");
+        assert_eq!(d.selection, None);
+
+        // The filter: start it, type a query, and cancel it with `Esc` — the
+        // layered dismissal clears both the mode and the query.
+        drive_events(
+            &mut d,
+            vec![
+                press(KeyCode::Char('/'), KeyModifiers::NONE),
+                press(KeyCode::Char('c'), KeyModifiers::NONE),
+                press(KeyCode::Char('0'), KeyModifiers::NONE),
+            ],
+            &read,
+            &write,
+        );
+        assert!(d.filter.active, "filter mode is active");
+        assert_eq!(d.filter.query, "c0");
+        drive_events(
+            &mut d,
+            vec![press(KeyCode::Esc, KeyModifiers::NONE)],
+            &read,
+            &write,
+        );
+        assert!(!d.filter.active, "`Esc` cancels filter mode");
+        assert_eq!(
+            d.filter.query, "",
+            "and clears the query, both from the keyboard"
+        );
+        assert_eq!(d.selection, None);
+
+        // Open `c0`'s detail, then switch from its first artifact to its
+        // second with a digit key.
+        d.selected = d
+            .targets()
+            .iter()
+            .position(|t| matches!(t, Target::Change(_)))
+            .expect("c0 is drawn");
+        drive_events(
+            &mut d,
+            vec![press(KeyCode::Enter, KeyModifiers::NONE)],
+            &read,
+            &write,
+        );
+        assert_eq!(d.route, Route::Detail, "`Enter` opens the detail route");
+        assert_eq!(d.detail.tab, 0);
+        assert_eq!(d.detail.sections.len(), 1, "the proposal is a single file");
+        assert!(!d.detail.foldable(), "one section is not foldable");
+        drive_events(
+            &mut d,
+            vec![press(KeyCode::Char('2'), KeyModifiers::NONE)],
+            &read,
+            &write,
+        );
+        assert_eq!(d.detail.tab, 1, "the digit key reaches the second artifact");
+        assert_eq!(
+            d.detail.sections.len(),
+            2,
+            "the spec's two `Requirement:` headings split it in two"
+        );
+        assert!(d.detail.foldable(), "two sections is foldable");
+
+        // Fold the first section from the keyboard, cursor already at line 0.
+        assert_eq!(d.detail.scroll, 0);
+        assert!(
+            d.detail.expanded.is_empty(),
+            "every section starts collapsed"
+        );
+        drive_events(
+            &mut d,
+            vec![press(KeyCode::Char(' '), KeyModifiers::NONE)],
+            &read,
+            &write,
+        );
+        assert!(
+            d.detail.expanded.contains(&0),
+            "`Space` opened the first section from the keyboard alone"
+        );
+
+        // An agent key: `a` launches with no mouse ever having named a change.
+        drive_events(
+            &mut d,
+            vec![press(KeyCode::Char('a'), KeyModifiers::NONE)],
+            &read,
+            &write,
+        );
+        assert!(
+            d.launch.in_flight,
+            "`a` reaches the launcher from the keyboard alone: {:?}",
+            d.launch
+        );
+        assert!(d.launch.problems.is_empty(), "{:?}", d.launch);
+
+        // The help overlay: open it and close it again, both with `?`.
+        drive_events(
+            &mut d,
+            vec![press(KeyCode::Char('?'), KeyModifiers::NONE)],
+            &read,
+            &write,
+        );
+        assert!(d.help.open, "`?` opened the overlay");
+        drive_events(
+            &mut d,
+            vec![press(KeyCode::Char('?'), KeyModifiers::NONE)],
+            &read,
+            &write,
+        );
+        assert!(!d.help.open, "`?` closed it again");
+
+        // Every step above drove the pane with keys alone: `mouse_action` was
+        // never called, and `Dashboard::selection` — the one field a mouse
+        // gesture reaches and a key does not — was never touched.
+        assert_eq!(
+            d.selection, None,
+            "no keyboard session can select or copy text"
+        );
+        assert!(
+            recorder.calls().is_empty(),
+            "nothing was ever written to the clipboard: {:?}",
+            recorder.calls()
+        );
     }
 
     #[test]

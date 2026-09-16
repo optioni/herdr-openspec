@@ -2803,6 +2803,66 @@ fn sweep_finds_the_bound_actions_and_exactly_two_exemptions() {
     assert_eq!(bound.len(), 23, "{bound:?}");
 }
 
+/// The names `mouse_action` produces under a label no key ever produces, but
+/// which `every_mouse_action_has_an_equal_key` (`src/ui/driver.rs`) proves
+/// reach an identical `Dashboard` through a differently-named key action
+/// instead: the four wheel outcomes, each equal to `Next`/`Prev` at the
+/// matching route, and `Click`, whose three targets are equal to `Next`
+/// (a change row), `OpenDetail` (a second click on the selected row), and
+/// `ToggleSection` (a section header or an artifact-section header) in turn.
+/// `SelectTab`, `ToggleHelp`, and `Ignore` need no entry here at all: a key
+/// produces those same variants directly, so `Dashboard::apply` being a pure
+/// function of the `Action` value already guarantees the same effect —
+/// nothing to prove beyond the two sets sharing the name.
+const PROVEN_EQUIVALENT_UNDER_A_DIFFERENT_NAME: [&str; 5] = [
+    "SelectNext",
+    "SelectPrev",
+    "ScrollDown",
+    "ScrollUp",
+    "Click",
+];
+
+#[test]
+fn select_is_the_only_mouse_only_action_by_name_and_count() {
+    // `specs/mouse-input/spec.md` -> "`Action::Select` is the only mouse-only
+    // action, by name and count". Two ways a mouse-produced name can fail to
+    // be mouse-only: a key produces the identical variant (`SelectTab`,
+    // `ToggleHelp`, `Ignore` — caught by `swept_key_action_names`), or a key
+    // produces a *different* variant proven to reach the same `Dashboard`
+    // (the five names above, proven in `src/ui/driver.rs`). What is left after
+    // removing both SHALL be exactly one name, `Select`, asserted by name and
+    // by length exactly as `EXEMPT_ACTIONS` is, so a second mouse-only action
+    // fails here rather than passing silently.
+    let mut mouse_only = swept_mouse_action_names(false);
+    mouse_only.extend(swept_mouse_action_names(true));
+    for name in swept_key_action_names() {
+        mouse_only.remove(&name);
+    }
+    for name in PROVEN_EQUIVALENT_UNDER_A_DIFFERENT_NAME {
+        mouse_only.remove(name);
+    }
+    assert_eq!(
+        mouse_only,
+        BTreeSet::from(["Select".to_string()]),
+        "the mouse-only set must hold exactly one name, Select: {mouse_only:?}"
+    );
+}
+
+#[test]
+fn no_key_reaches_select_at_either_filter_mode() {
+    // `specs/dashboard-loop/spec.md` -> "No key reaches `Select` at either
+    // filter mode". `swept_key_action_names` already calls `action_for` over
+    // every key this crate binds under both `filtering` states and merges the
+    // two into one set (`sweep_key_actions`) - this is the assertion that was
+    // missing: that `Select` never lands in it, so the mouse-only exemption is
+    // real rather than merely asserted in prose.
+    let names = swept_key_action_names();
+    assert!(
+        !names.contains("Select"),
+        "no key may produce Action::Select: {names:?}"
+    );
+}
+
 #[test]
 fn the_wide_layout_resolves_every_cell_route_free() {
     // What this protects: `swept_mouse_action_names` sweeps the **wide** frame
