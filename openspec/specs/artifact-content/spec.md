@@ -347,9 +347,11 @@ Each returned row's `line` SHALL be:
     and no separator;
 - where a section's body — and a non-foldable artifact's whole body — is rendered by
   `tasks-checklist`'s items-only grammar when the tracked-tasks condition above holds, and by
-  `ui::markdown::lines(&section.text, width)` in every other case: a `None` change, a
+  `ui::markdown::lines(&section.text, body_width)` in every other case: a `None` change, a
   `detail.tab` past the end of the artifact list, and a change carrying no artifacts at all
-  among them;
+  among them. `body_width` is `width - indent_cols` whenever `artifact-folds`' indent rule
+  indents that section's body, and `width` itself whenever it draws at column zero — which a
+  **non-foldable** artifact's single body always does, having no header row to align beneath;
 - and, when `detail.problems` is empty **and** `detail.sections` is empty, exactly one line
   reading `No content yet` — the state `SPEC.md`'s degraded-states table names for a missing
   artifact file — **passed through `ui::list::pad_or_truncate_right` at `width`**, on
@@ -598,12 +600,27 @@ now pins the **reversal**: the tab folds, and concatenation is gone.
 
 #### Scenario: A body row is never indented by its section's depth
 
-- **WHEN** the seven-section spec-glob dashboard is rendered at 120x40 and at 60x40 with
-  `detail.expanded` holding every index
+- **WHEN** the seven-section spec-glob dashboard is rendered at 60x40 with `detail.expanded`
+  holding every index — a content area of 58 columns, and the fixture's deepest body-bearing
+  section is depth 3, so its floor is `64 + 2 * 3 = 70` and 58 is below it
 - **THEN** the rows of `Requirement: Alpha`'s body — a depth-2 section — begin at column
   zero of the content area, with no leading spaces the source did not carry
 - **AND** its header row begins with exactly four spaces
 - **AND** every drawn row measures exactly the content area's width in display columns
+- **AND** the body is wrapped at the full 58 columns, the narrow interior's text column being
+  exactly what it was before `artifact-folds` gained its indent floor
+
+#### Scenario: A body row is indented by its section's depth once the floor is met
+
+- **WHEN** that same dashboard is rendered at 120x40 — a content area of 78 columns, which
+  clears the same floor of 70
+- **THEN** the rows of `Requirement: Alpha`'s body begin with exactly four spaces, flush
+  beneath their own header, and are wrapped at `78 - 4`
+- **AND** its header row still begins with exactly four spaces, the header's own indent being
+  unchanged by this rule
+- **AND** every drawn row measures exactly the content area's width in display columns
+- **AND** the two scenarios together are what make the floor observable from this capability:
+  one fixture, two widths, opposite outcomes
 
 ### Requirement: The content area names the selected change's own problems above the tab's
 
