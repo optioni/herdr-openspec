@@ -49,12 +49,12 @@
 
 <!-- kind: behavior -->
 
-- [ ] 5.1 RED: Write failing view tests for `an_open_tracked_tasks_section_draws_item_bodies_and_group_blocks` and `collapsing_a_tracked_tasks_section_hides_its_bodies_and_blocks_with_its_items`, rendered at 120x20 and 60x20, plus `a_foldable_tasks_tab_draws_its_groups_as_fold_headers` re-run as regression. Every row the first adds must carry `ContentKind::Body` and resolve to no section under `section_at`.
-- [ ] 5.2 GREEN: In `content_lines`' tracked-tasks branch, replace the `flat_map(|g| g.items)` flatten with a walk calling `group_body` per parsed group at `body_width`, so bodies and blocks reach the screen. `bar_lines` and the separator row keep the full `width` as `section-body-indent` left them.
-- [ ] 5.3 CHANGE: Update whichever existing `src/ui/app.rs`, `src/ui/detail.rs`, and `src/ui/view.rs` tests the new rows break. `src/ui/app.rs:3887` asserts no row contains `Intro prose.` on a tracked-tasks tab and is the known one; take the rest from a `cargo test --lib` run after 5.2 rather than predicting them.
-- [ ] 5.3a GREEN: `ui::tasks::lines` short-circuits to `No tasks yet` on `progress().total == 0` (`src/ui/tasks.rs:590`), which now discards a prose-only file's retained blocks. Draw the blocks beneath that row, or record in design.md why a file with no items renders none of its prose.
-- [ ] 5.4 CHECK: `/bin/sh scripts/gates/detailwidths.sh`, `/bin/sh scripts/gates/widths.sh`, `/bin/sh scripts/gates/colwidth.sh`, and `/bin/sh scripts/gates/noio-view.sh` — every `#[test]` in `src/ui/detail.rs` must name `58` and `78`, every one in `src/ui/view.rs` must name `60` and `120`, and neither file may gain a `.chars()` measurement or an I/O API.
-- [ ] 5.5 VERIFY: `cargo test --lib -- ui::detail ui::view ui::tasks ui::app` — green.
+- [x] 5.1 RED: Write failing view tests for `an_open_tracked_tasks_section_draws_item_bodies_and_group_blocks` and `collapsing_a_tracked_tasks_section_hides_its_bodies_and_blocks_with_its_items`, rendered at 120x20 and 60x20, plus `a_foldable_tasks_tab_draws_its_groups_as_fold_headers` re-run as regression. Every row the first adds must carry `ContentKind::Body` and resolve to no section under `section_at`.
+- [x] 5.2 GREEN: In `content_lines`' tracked-tasks branch, replace the `flat_map(|g| g.items)` flatten with a walk calling `group_body` per parsed group at `body_width`, so bodies and blocks reach the screen. `bar_lines` and the separator row keep the full `width` as `section-body-indent` left them.
+- [x] 5.3 CHANGE: Update whichever existing `src/ui/app.rs`, `src/ui/detail.rs`, and `src/ui/view.rs` tests the new rows break. `src/ui/app.rs:3887` asserts no row contains `Intro prose.` on a tracked-tasks tab and is the known one; take the rest from a `cargo test --lib` run after 5.2 rather than predicting them.
+- [x] 5.3a GREEN: `ui::tasks::lines` short-circuits to `No tasks yet` on `progress().total == 0` (`src/ui/tasks.rs:590`), which now discards a prose-only file's retained blocks. Draw the blocks beneath that row, or record in design.md why a file with no items renders none of its prose.
+- [x] 5.4 CHECK: `/bin/sh scripts/gates/detailwidths.sh`, `/bin/sh scripts/gates/widths.sh`, `/bin/sh scripts/gates/colwidth.sh`, and `/bin/sh scripts/gates/noio-view.sh` — every `#[test]` in `src/ui/detail.rs` must name `58` and `78`, every one in `src/ui/view.rs` must name `60` and `120`, and neither file may gain a `.chars()` measurement or an I/O API.
+- [x] 5.5 VERIFY: `cargo test --lib -- ui::detail ui::view ui::tasks ui::app` — green.
 
 ## 6. Change Review
 
