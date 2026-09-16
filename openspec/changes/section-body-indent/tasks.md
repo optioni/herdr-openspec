@@ -15,9 +15,29 @@
 
 <!-- kind: operational -->
 
-- [ ] 2.1 CHECK: Dispatch an independent reviewer (not a fork of the implementing session) against proposal.md, both delta specs, design.md, and tasks.md with the diff. Concentrate on: a width sweep that selects zero rows and passes vacuously; a body wrapped at `width` and then prefixed, which overflows an interior the region does not clip; the separator row or the progress bar wrongly indented; and either CHARACTERIZE baseline having been edited rather than kept.
-- [ ] 2.2 CHANGE: Fix every CRITICAL, resolve or accept each WARNING with a one-line reason, note SUGGESTIONs, and re-run affected tests.
-- [ ] 2.3 VERIFY: Confirm no blocking or unowned finding remains.
+- [x] 2.1 CHECK: Dispatch an independent reviewer (not a fork of the implementing session) against proposal.md, both delta specs, design.md, and tasks.md with the diff. Concentrate on: a width sweep that selects zero rows and passes vacuously; a body wrapped at `width` and then prefixed, which overflows an interior the region does not clip; the separator row or the progress bar wrongly indented; and either CHARACTERIZE baseline having been edited rather than kept.
+- [x] 2.2 CHANGE: Fix every CRITICAL, resolve or accept each WARNING with a one-line reason, note SUGGESTIONs, and re-run affected tests.
+- [x] 2.3 VERIFY: Confirm no blocking or unowned finding remains.
+
+### Change Review outcome
+
+One independent `outside-in-tdd-reviewer`, against the planning package and `git diff
+c70dc77..d5253ed -- src/`, with four planted-defect probes run in throwaway worktrees.
+**No CRITICAL.** Every WARNING and SUGGESTION was fixed rather than accepted:
+
+| # | Class | Finding | Repair |
+|---|---|---|---|
+| W1 | WARNING | `artifact-content`'s carried body bullet still said `ui::markdown::lines(&section.text, width)` while the `artifact-folds` delta and the code say `width - indent_cols` — two live normative clauses disagreeing, and this one archives. Planning-review WARNING-2's repair had been applied to one delta only. | Bullet amended to name `body_width` and both cases, including that a non-foldable artifact's single body always draws at `width`, having no header to align beneath. |
+| W2 | WARNING | The preamble clause had no falsifying test: every preamble fixture is depth 0, and planting `indent_cols = if indented && section.label.is_some()` passed all 1456 tests. | `a_preamble_is_indented_by_its_own_depth_like_any_other_body` — the `base = 1` shape, asserted at 78 and 58. The planted defect was re-run against it and fails. |
+| W3 | WARNING | The `!text.is_empty()` filter had no falsifying test: deleting it passed all 1456 tests. | `an_empty_texted_deeper_section_does_not_raise_the_floor` — a depth-1 body under two empty-texted deeper sections, asserted at 66 and 65. The planted defect was re-run against it and fails. |
+| S1 | SUGGESTION | `indent_columns`' doc claimed the `2 *` unit is "written once here"; three header sites still spell `"  ".repeat(depth)`. | Claim narrowed to the body indent, with the header sites named — an unbacked one-site claim is the thing that rots. |
+| S2 | SUGGESTION | The narrow leg asserted only "not indented", never the stated "wrapped at the full 58 columns". | Equality against `ui::markdown::lines(&text, 58)` added to the wide-interior test's narrow leg. |
+| S3 | SUGGESTION | The indented tracked-tasks path is safe only because `ui::tasks::items`' degraded branch needs `width <= 4`, which the floor makes unreachable — recorded nowhere. | Stated in `content_lines`' own comment beside the reduced width. |
+
+Also repaired outside the review: `WIDTHS` requires every `#[test]` in `src/ui/view.rs` to
+name both `60` and `120`, and splitting the `artifact-content` proving test left each half
+naming one frame. The planning package's gate list named `DETAILWIDTHS`, `COLWIDTH` and
+`NOIO-VIEW` but not this one (commit `d5253ed`).
 
 ## 3. Documentation
 
@@ -31,13 +51,13 @@
 
 <!-- kind: operational -->
 
-- [ ] 4.1 CHECK: Inspect the intended verification commands and affected tiers — `ui::detail` and `ui::view` unit tests, and the `DETAILWIDTHS`, `COLWIDTH`, and `NOIO-VIEW` gate scripts.
-- [ ] 4.2 VERIFY: `cargo fmt --all -- --check` — clean.
-- [ ] 4.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
-- [ ] 4.4 VERIFY: `make gates` — every script exits 0, `DETAILWIDTHS` reporting at least 70 tests all naming 58 and 78 (63 at HEAD plus the 7 this change adds to `src/ui/detail.rs`).
-- [ ] 4.5 VERIFY: `cargo test --all-features` — green.
-- [ ] 4.6 VERIFY: `make coverage` — both floors hold with no exclusion added.
-- [ ] 4.7 VERIFY: `openspec validate section-body-indent --strict` — passes.
+- [x] 4.1 CHECK: Inspect the intended verification commands and affected tiers — `ui::detail` and `ui::view` unit tests, and the `DETAILWIDTHS`, `COLWIDTH`, and `NOIO-VIEW` gate scripts.
+- [x] 4.2 VERIFY: `cargo fmt --all -- --check` — clean.
+- [x] 4.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
+- [x] 4.4 VERIFY: `make gates` — every script exits 0, `DETAILWIDTHS` reporting at least 70 tests all naming 58 and 78 (63 at HEAD plus the 7 this change adds to `src/ui/detail.rs`).
+- [x] 4.5 VERIFY: `cargo test --all-features` — green.
+- [x] 4.6 VERIFY: `make coverage` — both floors hold with no exclusion added.
+- [x] 4.7 VERIFY: `openspec validate section-body-indent --strict` — passes.
 
 ## Ordering
 

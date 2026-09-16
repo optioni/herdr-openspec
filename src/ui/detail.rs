@@ -481,9 +481,12 @@ fn separator_row(width: u16) -> ContentRow {
 /// its fold state"; design.md -> Decision 3 carries the derivation table).
 const BODY_INDENT_FLOOR: u16 = 64;
 
-/// The columns a body at `depth` is indented by: two per unit of depth, the
-/// same unit `unbadged_row` gives a header row, written once here so the
-/// header's indent and the body's cannot drift apart.
+/// The columns a body at `depth` is indented by: two per unit of depth — the
+/// same unit the header rows above compute as `"  ".repeat(depth)`. This is
+/// the one site the *body* indent is measured at, and deliberately not
+/// claimed to be the one site the unit itself lives at: the header grammar
+/// builds a `String` and this builds a column count, and three header sites
+/// still spell the pair of spaces themselves.
 fn indent_columns(depth: usize) -> u16 {
     u16::try_from(2 * depth).unwrap_or(u16::MAX)
 }
@@ -753,6 +756,14 @@ pub fn content_lines(
                 // progress bar above every header and the blank separator
                 // below this body do not — neither is a section's body, and
                 // the separator is already exactly `width` blank columns.
+                //
+                // `ui::tasks::items` is reached at the reduced width too, and
+                // its own degraded branch — the one that pads to the full
+                // width rather than drawing an item — needs `width <= 4`. The
+                // floor leaves at least `BODY_INDENT_FLOOR` columns, so that
+                // branch is unreachable from here; a future floor low enough
+                // to reach it would need a sweep over an indented
+                // tracked-tasks tab to say what it should draw.
                 let indent_cols = if indented {
                     indent_columns(section.depth)
                 } else {
@@ -4579,6 +4590,17 @@ mod tests {
                 );
             }
         }
+        // And wrapped at the full 58 columns, not at `58 - 6`: the narrow
+        // interior's text column is exactly what it was before the floor
+        // existed, which is the clause the drawn-at-column-zero check above
+        // does not reach on its own.
+        assert_eq!(
+            body_rows_under(&narrow, 3),
+            crate::ui::markdown::lines(&d.sections[3].text, 58)
+                .iter()
+                .map(crate::ui::markdown::Line::text)
+                .collect::<Vec<_>>()
+        );
     }
 
     /// `artifact-folds` :: "The indent is all-or-nothing across one render".
@@ -4815,5 +4837,130 @@ mod tests {
             assert_eq!(word_at(&rows, line, column), None, "column {column}");
         }
         assert_eq!(word_at(&rows, line, 6), Some((6, 13)));
+    }
+
+    /// `artifact-folds` :: the delta's preamble clause — "A `None`-labelled
+    /// **preamble** section SHALL be indented by its own `depth` like any
+    /// other body. That depth is `base`, which is not necessarily 0."
+    ///
+    /// Every preamble fixture this module had is at depth 0, where the clause
+    /// costs nothing: the Change Review measured that leaving a preamble at
+    /// column zero passes the whole library suite. This is the `base = 1`
+    /// shape a glob artifact resolving to more than one file produces, where
+    /// the clause is reachable.
+    #[test]
+    fn a_preamble_is_indented_by_its_own_depth_like_any_other_body() {
+        let d = Detail {
+            sections: vec![
+                ArtifactSection {
+                    label: Some("degraded-coverage".to_string()),
+                    text: String::new(),
+                    depth: 0,
+                    progress: None,
+                    operation: None,
+                },
+                // The file's text before its first heading: no header row of
+                // its own, always open, never a fold target — and at `base`,
+                // which is 1 here, not 0.
+                ArtifactSection {
+                    label: None,
+                    text: "Intro prose.\n".to_string(),
+                    depth: 1,
+                    progress: None,
+                    operation: None,
+                },
+                ArtifactSection {
+                    label: Some("ADDED Requirements".to_string()),
+                    text: "alpha\n".to_string(),
+                    depth: 1,
+                    progress: None,
+                    operation: None,
+                },
+            ],
+            scroll: 0,
+            tab: 0,
+            problems: Vec::new(),
+            loaded: None,
+            expanded: std::collections::BTreeSet::from([0, 1, 2]),
+            drawn_width: Some(78),
+        };
+        // This tab's deepest body-bearing section is depth 1, so its floor is
+        // `64 + 2 * 1 = 66`: 78 clears it and 58 does not.
+        for (width, indent) in [(78u16, "  "), (58, "")] {
+            let rows = content_lines(&d, None, width);
+            let preamble: Vec<String> = rows
+                .iter()
+                .map(ContentRow::text)
+                .filter(|t| t.trim() == "Intro prose.")
+                .collect();
+            assert_eq!(
+                preamble,
+                vec![format!("{indent}Intro prose.")],
+                "width {width}: the preamble's body"
+            );
+            // Its own header row is still absent — indenting a preamble does
+            // not give it one.
+            assert!(
+                !rows
+                    .iter()
+                    .any(|r| r.text().trim_end().ends_with("Intro prose.")
+                        && matches!(r.kind, ContentKind::SectionHeader { .. })),
+                "width {width}: the preamble grew a header row"
+            );
+        }
+    }
+
+    /// `artifact-folds` :: the delta's `max_depth` definition — the greatest
+    /// `depth` "among the sections of `detail.sections` whose own `text` is
+    /// non-empty".
+    ///
+    /// The Change Review measured that deleting the `!text.is_empty()` filter
+    /// passes the whole library suite: no fixture had its deepest section
+    /// empty-texted. Here the deepest section with a body is depth 1 — floor
+    /// 66 — while two deeper sections carry no text at all; dropping the
+    /// filter would read a max depth of 3, a floor of 70, and refuse the
+    /// indent at 66.
+    #[test]
+    fn an_empty_texted_deeper_section_does_not_raise_the_floor() {
+        let section = |label: &str, text: &str, depth: usize| ArtifactSection {
+            label: Some(label.to_string()),
+            text: text.to_string(),
+            depth,
+            progress: None,
+            operation: None,
+        };
+        let d = Detail {
+            sections: vec![
+                section("degraded-coverage", "", 0),
+                section("ADDED Requirements", "alpha\n", 1),
+                section("Requirement: One", "", 2),
+                section("Scenario: Two", "", 3),
+            ],
+            scroll: 0,
+            tab: 0,
+            problems: Vec::new(),
+            loaded: None,
+            expanded: std::collections::BTreeSet::from([0, 1, 2, 3]),
+            drawn_width: Some(78),
+        };
+        // 66 is this tab's own floor and 65 is below it; a max depth read over
+        // every section rather than the body-bearing ones would put the floor
+        // at 70 and leave both flush.
+        for (width, indent) in [(66u16, "  "), (65, "")] {
+            assert_eq!(
+                body_rows_under(&content_lines(&d, None, width), 1),
+                vec![format!("{indent}alpha")],
+                "width {width}: the floor is 64 + 2 * 1 = 66, not 64 + 2 * 3"
+            );
+        }
+
+        // The mandated pair, named explicitly per DETAILWIDTHS.
+        for (width, indent) in [(78u16, "  "), (58, "")] {
+            assert_eq!(
+                body_rows_under(&content_lines(&d, None, width), 1),
+                vec![format!("{indent}alpha")],
+                "width {width}"
+            );
+        }
     }
 }

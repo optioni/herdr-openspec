@@ -60,9 +60,11 @@ Each returned row's `line` SHALL be:
     and no separator;
 - where a section's body — and a non-foldable artifact's whole body — is rendered by
   `tasks-checklist`'s items-only grammar when the tracked-tasks condition above holds, and by
-  `ui::markdown::lines(&section.text, width)` in every other case: a `None` change, a
+  `ui::markdown::lines(&section.text, body_width)` in every other case: a `None` change, a
   `detail.tab` past the end of the artifact list, and a change carrying no artifacts at all
-  among them;
+  among them. `body_width` is `width - indent_cols` whenever `artifact-folds`' indent rule
+  indents that section's body, and `width` itself whenever it draws at column zero — which a
+  **non-foldable** artifact's single body always does, having no header row to align beneath;
 - and, when `detail.problems` is empty **and** `detail.sections` is empty, exactly one line
   reading `No content yet` — the state `SPEC.md`'s degraded-states table names for a missing
   artifact file — **passed through `ui::list::pad_or_truncate_right` at `width`**, on
