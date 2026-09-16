@@ -151,13 +151,20 @@ and an unfolded one render the same items through the same code:
 
   The **detail header** is not a caller: `detail-header` draws its gauge through
   `ui::tasks::gauge_of` directly and never through this function;
-- `ui::tasks::items(items: &[crate::tasks::Item], width)` — one or more lines per item, in
-  order, as specified below, with **no** progress bar, **no** heading line, and **no** blank
-  separator. It SHALL take **parsed items**, never a source string: `lines` already holds
-  `tasks::Group` values and would have to re-serialise each group to call a string-taking
-  form, which is the one thing this extraction exists to avoid. A folded tab reaches it
-  through `tasks::parse(&section.text)` on a section body that carries no heading of its own,
-  that heading having become the fold header;
+- `ui::tasks::group_body(group: &crate::tasks::Group, width)` — every row a group contributes
+  below its heading, in document order: its items, each item's own body rows, and its blocks
+  interleaved at the positions `task-groups` records for them, with **no** progress bar,
+  **no** heading line, and **no** blank separator between groups. It SHALL take a **parsed
+  group**, never a source string: `lines` already holds `tasks::Group` values and would have
+  to re-serialise each group to call a string-taking form, which is the one thing this
+  extraction exists to avoid. A folded tab reaches it through `tasks::parse(&section.text)`
+  on a section body that carries no heading of its own, that heading having become the fold
+  header.
+
+  This function was named `items` and took `&[crate::tasks::Item]`. It is **renamed** because
+  its subject changed: a group's rows are no longer only its items, and a function called
+  `items` that also draws fenced blocks would be a name that lies. Every caller — `lines`
+  here, and `artifact-content`'s walk in `ui::detail::content_lines` — moves with it;
 - `ui::tasks::lines(source, progress, width)` — the whole-tab grammar, which SHALL be
   `bar_lines(progress, &per_group, width)`, where `per_group` is `group.progress()` for each
   `tasks::Group` `tasks::parse(source)` returned, in document order, followed by, for each
@@ -166,20 +173,19 @@ and an unfolded one render the same items through the same code:
     reproduced from its `level`, a space, and its `text` verbatim, carrying
     `Face { heading: Some(level), .. }` so `ui::view::style_for` bolds it with no new
     `Face`-to-`Style` mapping;
-  - `items(&group.items, width)`;
+  - `group_body(group, width)`;
   - one blank line after every group but the last.
 
 `lines` SHALL be reached only for a **non-foldable** tracked-tasks tab, and **three** files
 reach it, not two: a task file holding no items, which renders `No tasks yet`; a task file
-with items but no heading at all; and — the case an earlier draft of this paragraph omitted,
-falsified in planning review against `src/ui/app.rs:1527` — a task file whose text **begins at
-its single `##` heading**, which therefore has no preamble, contributes one section, and does
-not split. That third file renders a `Face { heading }` line **and** label segments in one
-content area, so the two faces can meet; `view-palette` states why that needs no licence. A foldable
-one is rendered by `artifact-content`'s walk: `bar_lines` above every header, then
-`items` inside each open section. The three functions SHALL NOT each reimplement the
-item grammar: `lines` calls `items`, which is what makes "the folded and unfolded tabs
-render an item identically" true by construction rather than by two assertions agreeing.
+with items but no heading at all; and a task file whose text **begins at its single `##`
+heading**, which therefore has no preamble, contributes one section, and does not split. That
+third file renders a `Face { heading }` line **and** label segments in one content area, so
+the two faces can meet; `view-palette` states why that needs no licence. A foldable one is
+rendered by `artifact-content`'s walk: `bar_lines` above every header, then `group_body`
+inside each open section. The three functions SHALL NOT each reimplement the item grammar:
+`lines` calls `group_body`, which is what makes "the folded and unfolded tabs render an item
+identically" true by construction rather than by two assertions agreeing.
 
 A group heading is therefore rendered **either** as a `Face { heading }` line, when the tab
 is not foldable, **or** as `artifact-folds`' fold header row carrying the heading's text as
@@ -191,42 +197,74 @@ An item's line SHALL be a prefix followed by its text. The prefix is `item.inden
 then the three-character glyph `[✓]` when `item.checked` and `[ ]` when it is not, then one
 space.
 
+**An item's text SHALL be rendered through `ui::markdown::inline`, not as literal text.** The
+text is a fragment, so `markdown-render`'s fragment entry point is what renders it: inline
+emphasis, strong, code spans, links, and strikethrough set their faces, and no leading `#`,
+`-`, `>`, or digit run opens a block. The rendered rows SHALL be wrapped by that call at
+`width - hang` and laid out at the hanging indent defined below.
+
+This **retires** the rule that an item's text is unfaced, and with it the guarantee that
+`Line::text()` is byte-identical to what this capability produced before. That guarantee
+cannot survive facing and is deliberately given up: a fragment reading
+``add the `Recorder` implementation`` renders as `add the Recorder implementation`
+with a `code`-faced segment, its backticks consumed. The reason the guarantee is not worth
+keeping is the defect it would preserve — an item's text and its body are one sentence in the
+source, and rendering the first row with literal backticks beside a body row with a styled
+code span shows one sentence two ways.
+
 An item's rendered **rows** SHALL be faced by exactly one of two rules, chosen by
 `item.checked`:
 
-- **A checked item is de-emphasised whole.** Every row it produces — its first row and every
-  continuation row of a wrapped item — SHALL be one segment carrying
-  `Face { muted: true, ..Face::plain() }`, its prefix and its text alike, and SHALL NOT be
-  split at its label. A finished row reads as finished, `VERIFY:` included: leaving a bright
-  label on a completed task is the exact complaint this change exists to answer, so the
-  label's own role is **dropped** rather than dimmed alongside it.
+- **A checked item is de-emphasised whole.** Every row it produces — its first row, every
+  continuation row of a wrapped item, and every row of its **body** — SHALL be one segment
+  carrying `Face { muted: true, ..Face::plain() }`, its prefix and its text alike, and SHALL
+  NOT be split at its label or at any inline face. A finished row reads as finished,
+  `VERIFY:` and code spans included: the inline faces are **dropped** rather than dimmed
+  alongside it, on exactly the terms the label's own role already is, and for the same
+  reason — a finished task is not where the reader's eye belongs.
 - **An unchecked item is split at its label, when it has one.** `tasks::label_of(&item.text)`
-  decides: on `None` the row is one `Face::plain()` segment exactly as before this change; on
-  `Some(Label { start, len, role })` the item's **first** row SHALL carry exactly three
-  segments — the prefix concatenated with `item.text[..start]` under `Face::plain()`, then
-  `item.text[start..start + len]` under `Face { label: Some(role), ..Face::plain() }`, then
-  the remainder of that row's text under `Face::plain()`. A **continuation** row of a wrapped
-  item SHALL carry one `Face::plain()` segment: a label appears once, on the row it was
-  written on.
+  decides: on `None` the row carries whatever segments `ui::markdown::inline` returned for
+  it; on `Some(Label { start, len, role })` the label SHALL be applied to the **leading plain
+  segment** of the item's **first** row, splitting that one segment into the prefix
+  concatenated with the text before the label under `Face::plain()`, the label itself under
+  `Face { label: Some(role), ..Face::plain() }`, and the remainder of that segment under
+  `Face::plain()`, with every later segment of the row left exactly as `inline` faced it. A
+  **continuation** row of a wrapped item SHALL carry no label: a label appears once, on the
+  row it was written on.
+
+`tasks::label_of` returns byte offsets into the item's **plain** text, which no longer
+address the rendered row once inline spans fold. The label SHALL therefore be applied only
+when the first row's leading segment is `Face::plain()` and its text — after the prefix — is
+long enough to contain `start + len` on character boundaries. When it is not, the item SHALL
+render **unlabelled**, carrying the faces `inline` returned and no label anywhere. An
+emphasised label (`- [ ] **RED**: …`) is the reachable case: its leading segment is
+`strong`-faced, so it degrades to unlabelled. That is a **miss, never a wrong colour**, which
+is the error direction `task-labels` already chose; measured over this repository's archive,
+2,531 items carry a plain label and **0** carry an emphasised one.
 
 A segment SHALL be omitted rather than emitted empty: an item whose text is exactly its label
-produces two segments, not three, and one whose label starts at offset `0` with an empty
-prefix — unreachable, since the prefix always holds at least the glyph — would produce two.
-`Line::text()` SHALL therefore be **byte-identical** to what this capability produced before
-this change for every item, checked or not: this change splits rows into segments and faces
-them, and moves **no character**.
-
-The label SHALL be looked up against `item.text`, never against the rendered row, so a wrap
-that falls inside the label cannot half-style it: when `start + len` exceeds the first row's
-own text length, the item SHALL be treated as carrying no label at all and SHALL render as one
-`Face::plain()` segment. That case is reachable only at a width narrow enough to split
-`CHARACTERIZE:` itself, and degrading it to unlabelled is preferred to emitting a label
-segment whose text is `CHARACT`.
+produces one fewer segment than one with a remainder after it.
 
 `ui::tasks` SHALL call `tasks::label_of` and SHALL NOT reimplement the recognition rule, on
 exactly the terms it already calls `tasks::parse` rather than reimplementing the checkbox
-rule. A heading line SHALL keep carrying `Face { heading: Some(level), .. }` and SHALL be
-neither muted nor labelled.
+rule, and SHALL call `ui::markdown::inline` and `ui::markdown::lines` rather than
+reimplementing either. A heading line SHALL keep carrying `Face { heading: Some(level), .. }`
+and SHALL be neither muted nor labelled.
+
+**An item's body SHALL be rendered through `ui::markdown::lines`** — the block entry point,
+because a body is a document fragment that may hold fenced code, a table, a block quote, or a
+nested list — at `width - hang` columns, with every row it returns prefixed by
+`hang` spaces, the same hanging indent the item's own wrapped text uses, so an item's text and
+its body form one continuous text column beneath the task number. The body SHALL be drawn
+immediately after that item's own rows and before the next item or block. An item whose body
+is empty SHALL contribute no body row and no blank row.
+
+**A group's blocks SHALL be rendered through `ui::markdown::lines`** at the full `width`, with
+no prefix, each drawn at the position `task-groups` recorded for it — before the group's first
+item when that position is zero, and otherwise after that many items. A block SHALL be
+separated from the rows above and below it by one blank row, so a fenced block does not run
+into the item above it; a group carrying no blocks SHALL be byte-identical to the group it was
+before blocks existed, blank rows included.
 
 `item.indent` is `task-parsing`'s own count of the whitespace **characters** preceding the
 bullet, not a column count, and this capability reproduces it as that many spaces without
@@ -235,20 +273,42 @@ tab-indented item renders with **one** space of indent, because a tab is one cha
 matches the parse rather than second-guessing it, and re-deriving a column width here would
 be a second indentation rule beside the one `task-parsing` already publishes.
 
-The item's text SHALL be word-wrapped to `width - prefix_len` columns, with continuation
-lines indented by `prefix_len` spaces so they align under the first line's text — a hanging
-indent, the same shape `markdown-render` gives a list item. A single word longer than the
-available text column SHALL be hard-split at that column rather than overflowing the
+**The hanging indent SHALL fall after the item's task number, not under it.** The hang is
+`prefix_len + tasks::task_number_len(&item.text)` columns: the prefix, plus the width of the
+leading task number `task-labels` already skips when it looks for a label. An item carrying no
+task number has a `task_number_len` of zero and hangs at `prefix_len`, exactly as before.
+
+The item's text SHALL be word-wrapped to `width - hang` columns, with continuation
+lines indented by `hang` spaces so they align under the first line's text after its number —
+a hanging indent, the same shape `markdown-render` gives a list item. A single word longer
+than the available text column SHALL be hard-split at that column rather than overflowing the
 interior or being dropped, so a long path never silently loses its tail.
+
+Hanging after the number rather than under it keeps the number column clear, so a reader
+scanning for `2.3` reads a column of numbers rather than a column of numbers interleaved with
+wrapped prose. It **departs from the source file's own convention** — a `tasks.md` continuation
+line is conventionally indented to six columns, which lands under the number, because the
+source prefix is `- [x] ` and the rendered one is `[x] `. The rendered prefix is a different
+width from the source's, so reproducing the source's column would align with nothing on
+screen; this capability aligns with what it actually draws. Measured over this repository's
+archive, **2,842 of 2,842** items carry a task number, of width 4 (2,168), 5 (663), or 6 (11)
+characters including its trailing space, so the hang is 8 columns for three items in four and
+never more than 10.
+
+The number hang SHALL be **dropped whole** before the prefix is: when
+`prefix_len + task_number_len` would leave no text column, the hang falls back to
+`prefix_len`, and only then does the existing prefix degradation below apply. So a width that
+can hold the glyph and some text never loses the text to the number's indent.
 
 The indent SHALL be **dropped whole** when the prefix would not leave at least one text
 column: `item.indent` spaces first, leaving `[✓] ` alone; and when even that does not fit,
-the glyph alone truncated by `ui::list::pad_or_truncate_right` at `width`. No line's text
-SHALL exceed `width` **display columns**, as `responsive-layout` defines them — the unit
-this change makes uniform across the crate, replacing the `char` count this requirement
-carried. The `[✓]`/`[ ]` glyph and `item.indent`'s spaces measure exactly
-their character counts, so the drop-whole indent rule above is unchanged; only an item's
-own text can differ between the two measures.
+the glyph alone truncated by `ui::list::pad_or_truncate_right` at `width`. An item whose
+prefix has degraded that far SHALL contribute **no body rows**, on the same drop-whole terms:
+a body drawn at a hanging indent wider than the interior has no column to live in, and
+dropping it whole is preferred to one character per row. No line's text SHALL exceed `width`
+**display columns**, as `responsive-layout` defines them. The `[✓]`/`[ ]` glyph and
+`item.indent`'s spaces measure exactly their character counts, so the drop-whole indent rule
+above is unchanged; only an item's own text can differ between the two measures.
 
 `width == 0` SHALL return an empty vector, matching `ui::markdown::lines`.
 
@@ -259,12 +319,12 @@ capability renders an existing parse and introduces no second checkbox rule.
 
 #### Scenario: A folded group and an unfolded one render the same item lines
 
-- **WHEN** `ui::tasks::items` is called at width `78` and at width `58` over
-  `tasks::parse("- [x] 1.1 first\n- [ ] 1.2 second\n").groups[0].items`, and
+- **WHEN** `ui::tasks::group_body` is called at width `78` and at width `58` over
+  `tasks::parse("- [x] 1.1 first\n- [ ] 1.2 second\n").groups[0]`, and
   `ui::tasks::lines` is called at the same two widths over
   `## 1. Setup\n\n- [x] 1.1 first\n- [ ] 1.2 second\n` with
   `Progress { completed: 1, total: 2 }`
-- **THEN** `items` returns exactly two lines whose texts are `[✓] 1.1 first` and
+- **THEN** `group_body` returns exactly two lines whose texts are `[✓] 1.1 first` and
   `[ ] 1.2 second`, the first carrying one `muted: true` segment and the second one
   `Face::plain()` segment, with no progress-bar line, no heading line, and no blank line
 - **AND** `bar_lines` returns exactly two lines — `tasks-progress-bar`'s own bar and one
@@ -272,7 +332,92 @@ capability renders an existing parse and introduces no second checkbox rule.
 - **AND** `lines`' own output at the same width is `bar_lines`' two lines, then the heading
   line `## 1. Setup` carrying `Face { heading: Some(2), .. }`, then those same two item
   texts — asserted against these **literals**, not against `lines`' output, because once
-  `lines` calls `items` a comparison between the two could not fail
+  `lines` calls `group_body` a comparison between the two could not fail
+
+#### Scenario: An item's body is drawn under it at its hanging indent
+
+- **WHEN** `ui::tasks::group_body` is called at width `78` and at width `58` over
+  `tasks::parse("- [ ] 2.2 GREEN: add the method\n      writing the OSC 52 sequence, and\n      the arm.\n").groups[0]`
+- **THEN** at both widths the first row begins `[ ] 2.2 ` and carries a label segment
+  `GREEN:` under `Face { label: Some(LabelRole::Change), .. }`
+- **AND** the body rows follow it, each beginning with exactly eight spaces — four for the
+  prefix and four for the task number `2.2 ` — their text reflowed at `width - 8` and holding
+  `writing the OSC 52 sequence, and the arm.`
+- **AND** this fixture's forty-one reflowed characters fit **one** body row at both widths —
+  a 50-column body at `58` and a 70-column one at `78` — so the fixture pins the hang, the
+  label, and the reflowed text, and cannot itself demonstrate a width-dependent row count
+- **AND** the same item carrying a body long enough to wrap at both widths produces strictly
+  more body rows at `58` than at `78`, so the body genuinely reflows rather than being
+  reproduced line for line
+
+#### Scenario: The hanging indent falls after the task number
+
+- **WHEN** `ui::tasks::group_body` is called at width `78` and at width `58` over three
+  unchecked items long enough to wrap at both widths, whose texts begin `1.1 `, `10.11a `, and
+  with no number at all
+- **THEN** at both widths the first item's continuation rows begin with exactly eight spaces,
+  the second's with exactly eleven, and the third's with exactly four
+- **AND** in each case the first row's text at column `hang` is the same character the
+  continuation rows begin with, so the text column is continuous down the item
+- **AND** the numbers themselves appear only on each item's first row, no continuation row
+  repeating or re-indenting under one
+
+#### Scenario: The number hang is dropped before the prefix is
+
+- **WHEN** `ui::tasks::group_body` is called at widths `78`, `58`, `20`, `12`, `10`, `8`, `6`,
+  `5`, `4`, and `0` over a single unchecked item whose text is `1.1 ` followed by forty
+  characters of space-separated words
+- **THEN** no call panics and no returned line's text exceeds its width
+- **AND** at the widths where `[ ] 1.1 ` leaves at least one text column, continuation rows
+  begin with eight spaces
+- **AND** at a width below that but where `[ ] ` still leaves a text column, continuation rows
+  begin with exactly four spaces and the item's text is still rendered — the number hang was
+  dropped whole and the prefix was not
+- **AND** at `0` the returned vector is empty
+
+#### Scenario: A fenced block in an item's body renders as code, not as vanished text
+
+- **WHEN** `ui::tasks::group_body` is called at width `78` and at width `58` over an item
+  reading `- [ ] run the gate` whose body is a fence opening, `make check`, and a fence
+  closing, each indented six columns in the source
+- **THEN** at both widths a row exists whose text, with the hanging indent stripped, is
+  `make check`, and every segment of that row carries `face.code`
+- **AND** no row's text contains a backtick, the fence delimiters having been consumed by
+  the renderer rather than printed
+- **AND** the same body handed to `ui::markdown::lines` at `width - 4` produces the same
+  row texts, so the body path and the ordinary markdown path cannot drift
+
+#### Scenario: A group's block renders between the items it sits between
+
+- **WHEN** `ui::tasks::group_body` is called at width `78` and at width `58` over a group
+  holding `- [ ] a`, then a column-zero fenced block reading `make check`, then `- [ ] b`
+- **THEN** at both widths the rows are, in order: `[ ] a`, a blank row, a row whose text is
+  `make check` with every segment carrying `face.code`, a blank row, and `[ ] b`
+- **AND** the block's rows begin at column zero, carrying no hanging indent, because a block
+  belongs to the group and not to the item above it
+- **AND** a group holding the same two items and no block returns exactly two rows with no
+  blank row between them, so the blank separators belong to the block rather than to the
+  items
+
+#### Scenario: An item's inline markdown is faced rather than shown as markers
+
+- **WHEN** `ui::tasks::group_body` is called at width `78` and at width `58` over
+  ``tasks::parse("- [ ] 1.1 RED: add the `Recorder` arm and **assert** it\n").groups[0]``
+- **THEN** at both widths the row carries a `Recorder` segment with `face.code` and an
+  `assert` segment with `face.strong`
+- **AND** the row's text contains no backtick and no asterisk
+- **AND** the row still carries `RED:` under `Face { label: Some(LabelRole::Evidence), .. }`,
+  so facing the text did not cost the label
+
+#### Scenario: An emphasised label degrades to unlabelled rather than mis-coloured
+
+- **WHEN** `ui::tasks::group_body` is called at width `78` and at width `58` over
+  `tasks::parse("- [ ] **RED**: write the failing test\n").groups[0]`
+- **THEN** at both widths no segment of the row carries a `label`
+- **AND** the leading text segment carries `face.strong`, the emphasis having been honoured
+- **AND** the same item written `- [ ] RED: write the failing test` does carry a label
+  segment at both widths, so the degradation is driven by the emphasis rather than being
+  unconditional
 
 #### Scenario: A foldable tasks tab draws its groups as fold headers
 
@@ -301,7 +446,7 @@ capability renders an existing parse and introduces no second checkbox rule.
 - **AND** exactly one blank line separates the two groups and none follows the last
 - **AND** the two heading lines carry `Face { heading: Some(2), .. }`, the `[✓] 1.1 first`
   row carries one segment with `muted: true`, and the two unchecked rows each carry one
-  `Face::plain()` segment, no item text here holding a label
+  `Face::plain()` segment, no item text here holding a label or an inline construct
 
 #### Scenario: A nested item reproduces its own indent
 
@@ -312,6 +457,7 @@ capability renders an existing parse and introduces no second checkbox rule.
   `    [ ] grandchild`, so the source's own two- and four-space indents are reproduced
 - **AND** the list is flat: no line is dropped, merged, or re-ordered, because
   `tasks::parse` never nests
+- **AND** no line is attributed to `parent`'s body, a checkbox line never being body text
 
 #### Scenario: A long item wraps with a hanging indent at both widths
 
@@ -320,7 +466,9 @@ capability renders an existing parse and introduces no second checkbox rule.
   `Progress { completed: 0, total: 1 }`
 - **THEN** at each width no line's text exceeds that width
 - **AND** the first item line begins `[ ] ` and every continuation line begins with exactly
-  four spaces, aligning under the first line's text
+  four spaces, the item carrying no task number, so the hang is the prefix alone
+- **AND** the same item written with a leading `1.1 ` hangs at eight spaces instead, so the
+  number's contribution is asserted against its absence rather than on its own
 - **AND** the 58-column call produces strictly more lines than the 78-column call, so the
   width genuinely reaches the wrap
 
@@ -343,6 +491,24 @@ capability renders an existing parse and introduces no second checkbox rule.
   `[✓]` at column zero — the indent was dropped whole rather than partially
 - **AND** at `0` the returned vector is empty
 
+#### Scenario: A body is dropped whole with the prefix it hangs from
+
+- **WHEN** `ui::tasks::lines` is called at widths `78`, `58`, `12`, `6`, `5`, `4`, `3`,
+  `2`, `1`, and `0` over the source `      - [x] alpha\n        a body line\n` (an indent of
+  six) with `Progress { completed: 1, total: 1 }`
+- **THEN** no call panics and no returned line's text exceeds its width
+- **AND** at `78` and `58` the body row follows the item row at the hanging indent
+- **AND** at a width where even `[✓] ` leaves no text column, the item contributes exactly
+  one row and **no** body row, the body having been dropped whole with the prefix rather
+  than wrapped into zero columns
+- **AND** at every width of the **glyph-only** band — where the indent is gone but `[✓] `
+  still fits, here `9`, `8`, `7`, `6`, and `5` — the item renders exactly what the same item
+  carrying **no** body renders, the body being dropped with the indent rather than hung from
+  the four columns the glyph leaves. Measured before this rule was implemented, width `5`
+  drew the body as fourteen one-character rows, which is the outcome dropping whole exists to
+  avoid, and is why the two bands are one rule rather than the truncated-glyph case alone
+- **AND** at `0` the returned vector is empty
+
 #### Scenario: A heading with no items still renders its heading
 
 - **WHEN** `ui::tasks::lines` is called at width `78` and at width `58` over
@@ -350,7 +516,9 @@ capability renders an existing parse and introduces no second checkbox rule.
   `Progress { completed: 0, total: 1 }`
 - **THEN** at each width both headings appear, `## 1. Empty` carries no item line beneath
   it, and `## 2. Full` carries `[ ] only`
-- **AND** the prose line does not appear, because `tasks::parse` discards it
+- **AND** a row reading `some prose` appears beneath `## 1. Empty`, the prose being that
+  group's block rather than discarded content
+- **AND** that row is not attributed to any item, group `1. Empty` holding none
 
 #### Scenario: A headingless leading group renders without a heading line
 
@@ -363,59 +531,73 @@ capability renders an existing parse and introduces no second checkbox rule.
 
 #### Scenario: A labelled unchecked item splits into three segments
 
-- **WHEN** `ui::tasks::items` is called at width `78` and at width `58` over
-  `tasks::parse("- [ ] 1.1 RED: write the failing test\n- [ ] Commit: the parser\n").groups[0].items`
+- **WHEN** `ui::tasks::group_body` is called at width `78` and at width `58` over
+  `tasks::parse("- [ ] 1.1 RED: write the failing test\n- [ ] Commit: the parser\n").groups[0]`
 - **THEN** the first item's row carries exactly three segments — `[ ] 1.1 ` under
   `Face::plain()`, `RED:` under `Face { label: Some(LabelRole::Evidence), ..Face::plain() }`,
   and ` write the failing test` under `Face::plain()`
 - **AND** the second item's row carries exactly **one** `Face::plain()` segment, `Commit:`
   being a one-letter uppercase run and so no label at all
-- **AND** at both widths each row's `Line::text()` is byte-identical to what this capability
-  returned before this change, so the split moved no character
+- **AND** at both widths each row's `Line::text()` equals the item's source text with its
+  prefix prepended, neither item carrying an inline construct whose markers facing would
+  consume
 
 #### Scenario: A checked item is de-emphasised whole, label included
 
-- **WHEN** `ui::tasks::items` is called at width `78` and at width `58` over
-  `tasks::parse("- [x] 1.1 VERIFY: make check is green\n").groups[0].items`
+- **WHEN** `ui::tasks::group_body` is called at width `78` and at width `58` over
+  ``tasks::parse("- [x] 1.1 VERIFY: `make check` is green\n").groups[0]``
 - **THEN** the row carries exactly **one** segment, whose text is the whole row and whose
   face is `Face { muted: true, ..Face::plain() }`
-- **AND** that segment's `label` is `None`, so the completed row carries no label role for
-  `ui::view` to colour — the de-emphasis is not a dimmed `VERIFY:` but no `VERIFY:` role at
-  all
-- **AND** the same text with `[ ]` instead of `[x]` returns three segments with
-  `label: Some(LabelRole::Confirm)` on the middle one, so the two paths are asserted against
-  each other and a rule that muted both, or neither, could not pass
+- **AND** that segment's `label` is `None` and its `code` is `false`, so the completed row
+  carries neither a label role nor a code face for `ui::view` to colour — the de-emphasis is
+  not a dimmed `VERIFY:` beside a bright code span but neither role at all
+- **AND** the same text with `[ ]` instead of `[x]` returns a label segment with
+  `label: Some(LabelRole::Confirm)` and a `make check` segment with `face.code`, so the two
+  paths are asserted against each other and a rule that muted both, or neither, could not
+  pass
 
 #### Scenario: A wrapped labelled item labels only its first row
 
-- **WHEN** `ui::tasks::items` is called at width `58` over a single unchecked item whose text
-  is `1.1 GREEN: ` followed by twenty words of eight characters each, so the item wraps to
-  more than one row
-- **THEN** the first row carries three segments, the middle one `GREEN:` under
+- **WHEN** `ui::tasks::group_body` is called at width `58` over a single unchecked item whose
+  text is `1.1 GREEN: ` followed by twenty words of eight characters each, so the item wraps
+  to more than one row
+- **THEN** the first row carries a `GREEN:` segment under
   `Face { label: Some(LabelRole::Change), .. }`
-- **AND** every continuation row carries exactly one `Face::plain()` segment, with
-  `label: None` and `muted: false`
+- **AND** every continuation row carries segments with `label: None` and `muted: false`
 - **AND** the concatenation of every row's `text()`, with the hanging indent stripped, holds
   the item's whole text, so no character was lost to the split
 
 #### Scenario: A label split across a wrap degrades to unlabelled
 
-- **WHEN** `ui::tasks::items` is called over a single unchecked item whose text is
+- **WHEN** `ui::tasks::group_body` is called over a single unchecked item whose text is
   `1.1 CHARACTERIZE: record the baseline`, at a width where the first row's text column ends
   inside `CHARACTERIZE:` — width `12`, `14`, and `16`
-- **THEN** at each of those widths every row carries exactly one `Face::plain()` segment and
-  no segment carries a `label`
-- **AND** nothing panics, and each row's `text()` is byte-identical to what this capability
-  returned before this change
+- **THEN** at each of those widths no segment carries a `label`
+- **AND** nothing panics, and the concatenation of every row's text, with the hanging indent
+  stripped, reproduces the item's whole text
 - **AND** at widths `58` and `78`, where the label fits on the first row whole, the same item
-  does split into three segments, so the degradation is width-driven rather than unconditional
+  does carry a label segment, so the degradation is width-driven rather than unconditional
 
 ### Requirement: A source holding no task lines renders `No tasks yet`
 
 When `tasks::parse(source)` yields no **items** — no group holds one, so
 `Tasks::progress().total == 0` — the checklist SHALL render the progress-bar line, its blank
-line, and exactly one further line reading `No tasks yet`, and SHALL render **no** heading
-line even where the source carries headings.
+line, one further line reading `No tasks yet`, and then each group's own retained **blocks**,
+and SHALL render **no** heading line even where the source carries headings.
+
+The blocks are drawn because a document with zero items is precisely the document whose every
+non-blank line is a block: `task-groups`' leading headingless group is emitted when it carries
+blocks and no items, so a prose-only `tasks.md` parses to exactly one group holding exactly
+its prose. Discarding it here would throw away the whole file on the one path whose reason for
+existing is that the file has nothing else in it. The row count is therefore no longer fixed
+at one — the previous text said "exactly one further line", true only while a group with no
+items had nothing left to draw — and what is fixed is the **order**: the bar, its blank line,
+`No tasks yet`, then the blocks. Each block is drawn by `ui::tasks::group_body` over a group
+whose `items` slice is empty, which is the same function and the same block grammar the
+item-bearing path uses, so the two cannot drift apart.
+
+No heading line is drawn on this path, unchanged: `group_body` renders a group's items and
+blocks and never its heading, and the heading loop is not reached at all.
 
 That `No tasks yet` line SHALL be passed through `ui::list::pad_or_truncate_right` at
 `width`, on exactly the terms every task item, heading line, and problem row already is. It
@@ -458,6 +640,18 @@ conflated. `No tasks yet` and `No content yet` SHALL never both appear for the s
   heading lines
 - **AND** in each buffer that third row measures exactly the interior width — 78 and 58 —
   because the literal is now padded like every line around it
+
+#### Scenario: A prose-only document draws its blocks beneath `No tasks yet`
+
+- **WHEN** `ui::tasks::lines` is called at width `78` and at width `58` over a source holding
+  a heading and prose but no checkbox line at all, whose leading group therefore carries one
+  block and no items
+- **THEN** at both widths the rows are the progress-bar line, a blank line, `No tasks yet`,
+  **one blank line**, and then the block's own rows, in that order — the blank separating the
+  status row from the content beneath it
+- **AND** the block's text reaches the screen rather than being discarded with the items the
+  document does not have
+- **AND** no heading line is drawn at either width, the source's heading notwithstanding
 
 #### Scenario: `No tasks yet` does not eat the border at a narrow frame
 

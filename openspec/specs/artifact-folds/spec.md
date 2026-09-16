@@ -451,12 +451,30 @@ closed section rather than a panic.
   `ui::list::pad_or_truncate_right` at `width`; followed by
 - when and only when the section is open — or its `label` is `None`, which is always open and
   never foldable — that section's body: `ui::markdown::lines(&section.text, body_width)`, or
-  `tasks-checklist`'s items-only grammar when the selected artifact carries
+  `tasks-checklist`'s group grammar when the selected artifact carries
   `tracks_tasks == true`, where `body_width` is `width - indent_cols` under the indent rule
   below and `width` itself whenever that rule draws at column zero; followed by
 - one **blank row** when that body produced at least one row and a further visible section
   follows, so an open section's content is separated from the next header rather than running
   into it.
+
+A tracked-tasks section's body is that section's items **and its retained content**, not its
+items alone. `ui::detail::content_lines` SHALL obtain it by calling
+`ui::tasks::group_body(group, body_width)` for each group `tasks::parse(&section.text)`
+returned, in document order, so each item's own body rows and each group's blocks are drawn at
+the positions `task-groups` records for them — at the same `body_width` the indent rule below
+decides for every other body, never at `width` when that rule is indenting. It SHALL NOT
+flatten the parse to a single item slice: flattening is what discarded every body and every
+block, and a section whose text is one heading's body parses to one group, so the loop is one
+iteration in the shape every real `tasks.md` produces and is written as a loop only so a
+preamble holding more than one group cannot silently lose its second.
+
+The rows this adds are **body rows**, not sections: they carry `ContentKind::Body` exactly as
+every other body row does, are never fold targets, never carry a `SectionHeader` kind, and are
+hidden by their own section's fold along with the item rows beside them. They are indented by
+their section's `depth` on exactly the terms every other body row is, the indent rule below
+making one decision for the whole call. This change adds no section, no header row, and no
+fold level — an item's body folds with the section that holds it and with nothing finer.
 
 A section is **visible** exactly when no preceding collapsed labelled section has smaller
 `depth` and covers it: walking the list in order, a collapsed labelled section at depth `d`
@@ -504,8 +522,9 @@ A section at `depth` 0 SHALL be drawn at column zero whether or not the floor is
 indent being zero columns.
 
 A **tracked-tasks** tab SHALL be indented on exactly these terms and SHALL have no exemption
-of its own: `tasks-checklist`'s items are a section's body like any other, and a tab whose
-groups sit at a non-zero depth indents them. A tracked-tasks tab's sections are **not**
+of its own: `tasks-checklist`'s rows — its items, their own body rows, and its group blocks
+alike — are a section's body like any other, and a tab whose groups sit at a non-zero depth
+indents them. A tracked-tasks tab's sections are **not**
 always at depth 0 — `depth` is `base + (level - min_level)`, `base` is 1 whenever the artifact
 resolves to more than one path, and a task file that opens with a level-1 title puts every
 `## ` group at depth 1 — so a rule resting on "every tracked-tasks section is at depth 0" would
@@ -881,7 +900,9 @@ opened the section to read. The strikethrough SHALL be the existing `Face` field
 
 - **WHEN** a foldable tracked-tasks tab whose sections are all at depth 0 — one resolved path,
   every group heading at one level — is rendered at content widths `120`, `78`, `58`, and `20`
-- **THEN** every row it draws is byte-identical to what it drew before this change
+- **THEN** every row it draws begins at the column it began at before the indent floor
+  existed — the tab is unmoved **horizontally**, whatever rows its items' bodies and its
+  groups' blocks add to it
 - **AND** no body row gains an indent, depth 0 costing zero columns whether the floor is met
   or not
 - **AND** that is a consequence of its depth alone and not of any tracked-tasks exemption,
@@ -892,10 +913,11 @@ opened the section to read. The strikethrough SHALL be the existing `Face` field
 - **WHEN** a foldable tracked-tasks tab whose groups sit at depth 1 — the shape a task file
   that opens with a level-1 title produces, `min_level` being 1 — is rendered at the mandated
   `78`-column interior and again at `58`
-- **THEN** at `78` every item row begins with exactly two spaces and is wrapped at `76`, its
-  floor being `64 + 2 * 1 = 66`
-- **AND** at `58` every item row begins at column zero and is wrapped at `58`, `58 - 2` being
-  below the floor
+- **THEN** at `78` every row of a group's body — item rows, their own body rows, and the
+  group's blocks alike — begins with exactly two spaces and is wrapped at `76`, its floor
+  being `64 + 2 * 1 = 66`
+- **AND** at `58` every one of those rows begins at column zero and is wrapped at `58`,
+  `58 - 2` being below the floor
 - **AND** the group header rows keep their own `"  " * depth` indent at both widths, unchanged
 - **AND** the progress-bar rows above every header are at column zero at both widths, owned by
   no section
@@ -909,6 +931,38 @@ opened the section to read. The strikethrough SHALL be the existing `Face` field
 - **AND** at `58` the copied text carries none, there being no indent to copy
 - **AND** at `78` a double click inside the indent's own first six columns selects nothing,
   those cells holding only whitespace
+
+#### Scenario: An open tracked-tasks section draws item bodies and group blocks
+
+- **WHEN** a `Dashboard` at `Route::Detail` whose selected artifact carries
+  `tracks_tasks == true`, and whose one path reads a `## 1. Setup` heading, a
+  `<!-- kind: behavior -->` line, a blank line, `- [ ] 1.1 RED: write the test`, a
+  continuation line indented six columns reading `covering the degraded path`, and **a second
+  `## 2. Build` heading carrying one item**, is synced and rendered at 120x20 and at 60x20
+  with the section open — its one path putting every section at depth 0, so the indent rule
+  costs it no columns at either width
+- **AND** the second section is part of the fixture rather than incidental: a task file
+  holding **one** heading yields one section, which has nothing to fold against, so
+  `content_lines` takes the non-foldable `ui::tasks::lines` grammar instead, `detail.expanded`
+  changes nothing, and the scenario below cannot be exercised at all. Measured at
+  implementation
+- **THEN** the content area holds a row whose text is `<!-- kind: behavior -->`, drawn at the
+  section body's own column zero as that group's block
+- **AND** it holds a row whose text, with the hanging indent stripped, is
+  `covering the degraded path`, drawn beneath the item row as that item's body
+- **AND** every one of those rows carries `ContentKind::Body`, none carries
+  `ContentKind::SectionHeader`, and `section_at` resolves none of them to a section
+
+#### Scenario: Collapsing a tracked-tasks section hides its bodies and blocks with its items
+
+- **WHEN** the dashboard above is rendered at 120x20 and at 60x20 with `detail.expanded`
+  cleared
+- **THEN** the content area holds the progress-bar row, a blank row, and `> 1. Setup`, and no
+  other row
+- **AND** neither the block row nor the item's body row is drawn, both being hidden by the
+  same fold that hides the item row
+- **AND** no fold glyph is drawn on any item row, an item's body folding with its section
+  rather than with a control of its own
 
 ### Requirement: A section header row resolves to its own section index
 
@@ -1059,9 +1113,12 @@ false.
 
 - **WHEN** the three-section task dashboard whose first entry is a `None`-labelled preamble is
   given ten `ToggleSection` actions with `detail.scroll` addressing a preamble row — which,
-  on that tab, is the progress-bar row and its blank line, and those two only. `Intro prose.`
-  itself draws **no** row there: a `None`-labelled section's body on a tracked-tasks tab goes
-  through `ui::tasks::items`, which renders task items and nothing else
+  on that tab, are the progress-bar row, its blank line, and the row `Intro prose.` itself now
+  draws: a `None`-labelled section's body on a tracked-tasks tab goes through
+  `ui::tasks::group_body`, which draws that section's blocks and item bodies beside its items,
+  so the preamble's prose is its leading group's position-0 block and occupies a row of its own.
+  What makes the action inert is unchanged and is the point of the scenario: a body row is not
+  a fold target whatever drew it
 - **THEN** the `Dashboard` is equal, field for field, to what it was before the ten
 - **AND** moving `detail.scroll` onto the `1. Setup` header and repeating the action toggles
   that section

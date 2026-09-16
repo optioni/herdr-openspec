@@ -346,7 +346,9 @@ Each returned row's `line` SHALL be:
   - and otherwise the single section's whole `text` rendered as one body, with no header row
     and no separator;
 - where a section's body — and a non-foldable artifact's whole body — is rendered by
-  `tasks-checklist`'s items-only grammar when the tracked-tasks condition above holds, and by
+  `tasks-checklist`'s **group** grammar when the tracked-tasks condition above holds — that
+  section's text parsed into groups and each group drawn by `ui::tasks::group_body`, which
+  emits its items, each item's own body rows, and its blocks in document order — and by
   `ui::markdown::lines(&section.text, body_width)` in every other case: a `None` change, a
   `detail.tab` past the end of the artifact list, and a change carrying no artifacts at all
   among them. `body_width` is `width - indent_cols` whenever `artifact-folds`' indent rule
@@ -396,7 +398,7 @@ be returned and `No content yet` SHALL NOT appear: the reason is known, and repo
 would say two contradictory things about the same tab.
 
 Every row's `line` SHALL carry plain faces except those `markdown::lines`, `ui::tasks::lines`,
-and `ui::tasks::items` produce; a section header's emphasis is carried by its `kind`,
+and `ui::tasks::group_body` produce; a section header's emphasis is carried by its `kind`,
 never by a `Face`, and a blank separator row carries `Face::plain()` like every other row this
 function adds. `content_lines` SHALL name no `ratatui` type and no `palette::Role`, on the
 same terms `ui::markdown`, `ui::list`, and `ui::tasks` do not — which `NOTABSEAM` enforces
@@ -621,6 +623,16 @@ now pins the **reversal**: the tab folds, and concatenation is gone.
 - **AND** every drawn row measures exactly the content area's width in display columns
 - **AND** the two scenarios together are what make the floor observable from this capability:
   one fixture, two widths, opposite outcomes
+
+#### Scenario: A tracked-tasks section's body carries its item bodies and its blocks
+
+- **WHEN** a foldable tracked-tasks tab whose one open section holds a lifecycle comment, an
+  item, and that item's own indented continuation line is rendered at 120x20 and at 60x20
+- **THEN** the section's body rows are `ui::tasks::group_body`'s output for that section's
+  parsed group, holding a row for the comment and a row for the continuation line as well as
+  the item row
+- **AND** every one of those rows carries `ContentKind::Body` and a plain face except where
+  `ui::markdown` faced it, no row carrying a face this function set itself
 
 ### Requirement: The content area names the selected change's own problems above the tab's
 
