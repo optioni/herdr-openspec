@@ -137,12 +137,16 @@ grep -c "fn mouse_table_claims\|fn compare_mouse_claims" tests/doc_contract.rs; 
       `Click(Change)` and `Click(Section)` → `ListRow`; `SelectTab` → `DetailTab`;
       `Click(DetailHeader)`, `Select(Begin)` and `Select(Extend)` → `DetailRow`.
       Thirteen distinct (gesture, outcome) pairs over nineteen active claims.
-- [x] 4.3 CHANGE: Add a row for the wheel over an open help overlay — `Action::ScrollDown` and
-      `Action::ScrollUp` from anywhere in the frame (`src/ui/driver.rs:340-341`), today
-      documented only in the paragraph after the table. This is the new check finding a binding
-      with no row.
+- [x] 4.3 CHANGE: Add **two** rows for the wheel over an open help overlay —
+      `Action::ScrollDown` and `Action::ScrollUp` from anywhere in the frame
+      (`src/ui/driver.rs:340-341`), today documented only in the paragraph after the table.
+      This is the new check finding a binding with no row. One row per direction, because the
+      closed vocabulary of 3.4 maps `Wheel down` and `Wheel up` to one `MouseEventKind` each:
+      a single row would claim `(ScrollDown, overlay open, ScrollUp)`, which is not observed,
+      and leave `(ScrollUp, overlay open, ScrollUp)` uncovered.
 - [x] 4.4 VERIFY: Re-run the second `awk` — it reports **11** rows bearing a `` `Zone:: ``
-      token: 14 binding rows now, less the catch-all and less the overlay-state row. Run
+      token: 15 binding rows now, less the catch-all and less the **three** rows carrying
+      `` `help.open` `` (the dismissing click and the two overlay-wheel rows). Run
       `cargo test --test doc_contract mouse_bindings_match_spec_md` — still green, since
       `backticked_action_variants` matches the literal `Action::` only.
 

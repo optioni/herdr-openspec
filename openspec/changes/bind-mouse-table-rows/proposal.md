@@ -32,9 +32,11 @@ that site inside `cargo test`; this claim has one and is not bound to it.
   is never observed.
 - Each row of `SPEC.md` → Keys' mouse table names the `Zone` variants it applies to, in
   backticks.
-- **A row is added** for the wheel over an open help overlay, which the pane binds
+- **Two rows are added** for the wheel over an open help overlay, which the pane binds
   (`src/ui/driver.rs:340-341`) and the table has never documented — it lives in a prose
-  paragraph the extractor does not read.
+  paragraph the extractor does not read. One row per wheel direction, because the closed
+  gesture vocabulary maps `Wheel down` and `Wheel up` to one `MouseEventKind` each, exactly
+  as the table already documents the list and detail wheels.
 - `mouse_bindings_match_spec_md` becomes a **two-way coverage** assertion: every claim the
   sweep observes is covered by some row, and every row covers at least one observed claim. A
   row describing a binding that no longer exists fails as **vacuous**; a binding with no row
@@ -86,8 +88,8 @@ None.
   `the_sweep_covers_the_mouse_under_both_overlay_states`, the last of which asserts the closed
   and open name sets by equality and is the one most likely to break — all of which keep a
   name-set view over the richer data.
-- `SPEC.md` § Keys — each mouse table row gains the `Zone` variants it covers, and **one row
-  is added** for the overlay wheel. § Testing and quality gates → Doc-conformance checks gains
+- `SPEC.md` § Keys — each mouse table row gains the `Zone` variants it covers, and **two rows
+  are added** for the overlay wheel. § Testing and quality gates → Doc-conformance checks gains
   a reworded mouse bullet, still exactly one bullet.
 - `AGENTS.md` — the contract-tier paragraph's mouse item. `CLAUDE.md` is a symlink to it, not
   a second file.

@@ -2093,6 +2093,14 @@ fn parse_mouse_row(line: &str) -> Result<MouseRow, String> {
     }
 
     let help_open = line.contains(OVERLAY_TOKEN);
+    if help_open && !zones.is_empty() {
+        return Err(format!(
+            "SPEC.md -> Keys' mouse table row {line:?} carries {OVERLAY_TOKEN} and names \
+             {zones:?} as well - while the overlay is open `mouse_action` returns before \
+             consulting `ui::layout::zone` at all, so there is no zone for such a row to \
+             name, and its zones would be silently discarded"
+        ));
+    }
     let catch_all = zones.is_empty() && !help_open && outcomes == ["Ignore"];
     Ok(MouseRow {
         text: line.to_string(),
@@ -2772,6 +2780,22 @@ fn a_zone_less_row_is_rejected_unless_it_is_the_catch_all() {
 }
 
 #[test]
+fn an_overlay_row_naming_a_zone_is_an_error() {
+    // While the overlay is open `mouse_action` resolves no zone, so `row_claims`
+    // gives such a row one `None` slot and would silently discard whatever it
+    // named. Reported on exactly the terms the mistyped-token check already
+    // holds to: never left to surface as an unexplained vacuity.
+    let doc = mouse_table(&[
+        "| Left click outside the band while `help.open` (`Zone::List`) | `Action::ToggleHelp` |",
+        "| Anything else | `Action::Ignore` |",
+    ]);
+    let err = documented_mouse_rows(&doc).expect_err("an overlay row may not name a zone");
+    assert!(err.contains("help.open"), "{err}");
+    assert!(err.contains("List"), "{err}");
+    assert!(!err.contains("vacuous"), "{err}");
+}
+
+#[test]
 fn a_second_catch_all_is_an_error() {
     let two = mouse_table(&[
         "| Left click on a change row | `Action::Click` naming `Target::Change` in \
@@ -3320,11 +3344,19 @@ fn outcome_name(action: Action) -> &'static str {
 /// `design.md` -> Risks' own stated lever, applied because the measurement
 /// crossed its threshold: three passes per fixture put
 /// `cargo test --test doc_contract` at 182 s, past the roughly three minutes
-/// recorded there, and the wide frame at 120x40 already resolves all six `Zone`
-/// variants — so the narrow passes add cells to the selection-present fixture
-/// without adding a claim it could contribute. Trimming them costs no coverage
-/// and is asserted rather than assumed: [`every_zone_is_reached_by_every_fixture`]
-/// compares the two fixtures' zone sets.
+/// recorded there.
+///
+/// Trimming those passes costs no coverage, and that is **asserted rather than
+/// assumed**, because a comment claiming it would be a documented claim with a
+/// computable second site and no binding to it — the rule this whole file
+/// exists to keep. The two assertions are
+/// [`every_zone_is_reached_by_every_fixture`], which compares the fixtures'
+/// zone sets, and [`the_trimmed_passes_could_contribute_no_claim`], which
+/// observes that every claim the selection-present fixture adds is a
+/// `Drag(Left)` claim — `mouse_action` reads `dashboard.selection` in that one
+/// arm — and that the wide frame already resolves all six `Zone` variants under
+/// that kind, so a narrow pass could only re-observe a pair the wide pass has
+/// already contributed.
 fn passes_for(fixture: SweepFixture) -> Vec<(Route, u16, u16)> {
     match fixture {
         SweepFixture::SelectionAbsent => vec![
@@ -3923,6 +3955,45 @@ fn the_overlay_state_is_its_own_axis() {
     assert!(
         open.contains(&claim("ScrollDown", true, None, "ScrollDown")),
         "the wheel scrolls the overlay from anywhere in the frame: {open:?}"
+    );
+}
+
+#[test]
+fn the_trimmed_passes_could_contribute_no_claim() {
+    // [`passes_for`]'s full licence. Sweeping the selection-present fixture over
+    // the narrow frames as well yields three further claims - `Drag(Left)` over
+    // `List`, `ListRow` and `Outside` resolving to `Ignore` - and the union
+    // `all_mouse_claims()` is the same either way. This binds that rather than
+    // asserting it in a comment, and does so out of sweeps already paid for.
+    //
+    // If this goes red, the fix is to restore the narrow passes in `passes_for`
+    // and NOT to weaken the assertion.
+    let absent = swept_mouse_claims(SweepFixture::SelectionAbsent, false);
+    let present = swept_mouse_claims(SweepFixture::SelectionPresent, false);
+
+    // `mouse_action` reads `dashboard.selection` in exactly one arm
+    // (`src/ui/driver.rs`, the `Drag(MouseButton::Left)` arm), **observed** here
+    // rather than taken on trust: every claim the second fixture adds is one.
+    let added: Vec<&Claim> = present.difference(&absent).collect();
+    assert!(!added.is_empty(), "the second fixture must add something");
+    assert!(
+        added.iter().all(|c| c.kind == "Drag(Left)"),
+        "only the Drag(Left) arm reads dashboard.selection, so only Drag(Left) \
+         claims can differ between the fixtures: {added:?}"
+    );
+
+    // And at the wide frame that fixture already resolves all six zones under
+    // that one kind, so a narrow pass has no (kind, zone) pair left to reach.
+    let dragged: BTreeSet<&str> = present
+        .iter()
+        .filter(|c| c.kind == "Drag(Left)")
+        .filter_map(|c| c.zone)
+        .collect();
+    assert_eq!(
+        dragged.len(),
+        ZONE_VARIANTS.len(),
+        "the wide frame reaches {} of the six Zone variants under Drag(Left): {dragged:?}",
+        dragged.len()
     );
 }
 

@@ -135,9 +135,12 @@ one, so the three sites pinned to that count do not move.
 - **THEN** every leg passes
 - **AND** all fourteen `MouseEventKind` values appear in the observed claim set
 - **AND** all six `Zone` variants appear in it, and the overlay-open axis is represented
-- **AND** the wheel-over-an-open-overlay row added by this change covers
+- **AND** the **two** wheel-over-an-open-overlay rows added by this change cover
   `(ScrollDown, overlay open, ScrollDown)` and `(ScrollUp, overlay open, ScrollUp)`, which
-  before this change were bound by no row at all
+  before this change were bound by no row at all. They are two rather than one because the
+  gesture vocabulary is closed and maps `Wheel down` and `Wheel up` to one `MouseEventKind`
+  each: a single row would claim `(ScrollDown, overlay open, ScrollUp)`, which is not
+  observed, and leave `(ScrollUp, overlay open, ScrollUp)` uncovered
 - **AND** no row is vacuous and no claim is uncovered, and the catch-all covers at least one
 
 #### Scenario: The clamp is observed rather than reported vacuous

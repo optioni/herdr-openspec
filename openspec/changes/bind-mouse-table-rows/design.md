@@ -251,6 +251,22 @@ changes production code for a test's convenience, and this change touches no fil
   process, and `doc_contract` already runs ~43 s. The REFACTOR task measures the real figure;
   if the binary crosses roughly three minutes, trimming the second fixture to the wide frame
   alone is the lever, recorded there with its measurement rather than assumed here.
+
+  **Measured during implementation, and the lever above is largely a false one.** The figures,
+  `cargo test --test doc_contract` in a debug build: **43.4 s** before this change, **86.3 s**
+  once the sweep retains claims (the cost is the second `ui::layout::zone` call per cell, not
+  the retention — making every claim axis a `&'static str` rather than an owned `String`
+  changed nothing measurable), **182 s** with the fixture axis at three passes per fixture, and
+  **178 s** with the lever applied. The lever bought **2 s**, because the cost is not the cell
+  count: with a selection present, `mouse_action`'s `Drag(MouseButton::Left)` arm calls
+  `content_area` and `clamp_to_content` — and so `ui::detail::content_lines` — at every cell
+  that previously returned `Action::Ignore` at once, and the wide frame is where most of those
+  cells are. A future session looking for a further lever should start there and not re-derive
+  this one. The trim is kept because it is free rather than because it is fast: the claims the
+  dropped passes could contribute are proved already present by
+  `the_trimmed_passes_could_contribute_no_claim`. For context the whole figure is a debug-profile
+  artifact — the same binary measures **9.2 s** under `--release`, which `make check` does not
+  use.
 - **The closed gesture vocabulary is a maintenance point.** → Deliberate: pinned by length and
   erroring loudly, so it fails toward "a human must look", never toward a silent pass.
 - **A `Zone` variant unreachable in the swept frames would be unclaimable.** → Not hypothetical
