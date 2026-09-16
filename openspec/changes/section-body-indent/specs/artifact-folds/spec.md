@@ -35,9 +35,10 @@
   offset, which would depend on row-grammar layout rather than on the shared site. The whole row is passed through
   `ui::list::pad_or_truncate_right` at `width`; followed by
 - when and only when the section is open — or its `label` is `None`, which is always open and
-  never foldable — that section's body: `ui::markdown::lines(&section.text, width)`, or
+  never foldable — that section's body: `ui::markdown::lines(&section.text, body_width)`, or
   `tasks-checklist`'s items-only grammar when the selected artifact carries
-  `tracks_tasks == true`; followed by
+  `tracks_tasks == true`, where `body_width` is `width - indent_cols` under the indent rule
+  below and `width` itself whenever that rule draws at column zero; followed by
 - one **blank row** when that body produced at least one row and a further visible section
   follows, so an open section's content is separated from the next header rather than running
   into it.
@@ -55,15 +56,23 @@ deepest such indent**. An indented body row is `indent` spaces followed by the r
 `ui::markdown::lines` — or `tasks-checklist`'s grammar — produced at `width - indent_cols`,
 so the body wraps inside the column it is drawn in rather than being prefixed and overflowing.
 
-The decision SHALL be made **once per `content_lines` call**, from the content width and the
-greatest `depth` among the sections that have a body, and SHALL apply to every body row of
-that call or to none. A per-section decision would indent a depth-1 body while leaving the
+The decision SHALL be made **once per `content_lines` call**, from the content width and
+`max_depth` — the greatest `depth` among the sections of `detail.sections` whose own `text` is
+non-empty — and SHALL apply to every body row of that call or to none. `max_depth` SHALL be
+read from `detail.sections` and never from the visible or expanded set: a tab's text column
+must not widen as a deep section is collapsed and narrow again as it is opened, which would
+make `Space` reflow the prose of every sibling that stayed open. The indent is a property of
+the tab, not of the cursor's fold history. A per-section decision would indent a depth-1 body while leaving the
 depth-3 body beside it at column zero, which reads worse than either extreme; one decision per
 render is what makes the tab's left edge either consistently ragged or consistently aligned.
 
 The floor SHALL be that the deepest indented body retains at least **64** display columns of
-interior: body rows are indented when `width - 2 * max_depth >= 64` and are drawn at column
-zero otherwise. The constant is a measured trade rather than a derived one, and its derivation
+interior: body rows are indented when `width.saturating_sub(2 * max_depth) >= 64` and are
+drawn at column zero otherwise. The subtraction SHALL saturate rather than wrap or panic —
+`width` is a `u16` and `depth` a `usize`, and the width sweeps this capability already runs
+from `0` reach every width below `2 * max_depth`. It follows from the floor that an indented
+body's own `width - indent_cols` is at least 64 and therefore never zero, so the width-0 empty
+path of `markdown-render`'s wrapping is unreachable under this rule. The constant is a measured trade rather than a derived one, and its derivation
 is stated so a later reader can re-run it — the archive's deepest spec section is depth 3,
 costing 6 columns, which leaves 72 columns at the 78-column wide interior and 52 at the
 58-column narrow one. The floor is placed between those two so the wide layout gains the
@@ -77,12 +86,44 @@ interior cannot bear is not a cost the 78-column interior must also refuse. `mar
 wrapping being parameterised by a width is what makes the narrower width free to pass.
 
 A section at `depth` 0 SHALL be drawn at column zero whether or not the floor is met, its
-indent being zero columns. Every tracked-tasks section is at depth 0, so no row of a tasks tab
-moves under this rule at any width.
+indent being zero columns.
+
+A **tracked-tasks** tab SHALL be indented on exactly these terms and SHALL have no exemption
+of its own: `tasks-checklist`'s items are a section's body like any other, and a tab whose
+groups sit at a non-zero depth indents them. A tracked-tasks tab's sections are **not**
+always at depth 0 — `depth` is `base + (level - min_level)`, `base` is 1 whenever the artifact
+resolves to more than one path, and a task file that opens with a level-1 title puts every
+`## ` group at depth 1 — so a rule resting on "every tracked-tasks section is at depth 0" would
+be false for much of this repository's own history. One rule for every tab is what keeps the
+fold grammar single, and it is stated here because the opposite was previously assumed.
+
+The **progress-bar** rows `tasks-progress-bar` draws above every header SHALL NOT be indented:
+they are leading body owned by no section, have no header to align beneath, and are already
+padded to the full width. The **blank separator row** between sections SHALL NOT be indented
+either, for the same padding reason — it is already exactly `width` blank columns, and
+prefixing it would make it the one row that exceeds the region.
+
+A `None`-labelled **preamble** section SHALL be indented by its own `depth` like any other
+body. That depth is `base`, which is not necessarily 0: for a glob artifact the file section
+is depth 0 and the preamble beneath it is depth 1, so the preamble's body sits flush under its
+own file's header.
 
 No **header** row's indent, glyph, badge, progress cell, or drop-whole order SHALL change, and
-no body row SHALL become a fold target or acquire a `SectionHeader` kind: this rule moves body
-rows sideways and changes nothing else about them.
+no body row SHALL become a fold target or acquire a `SectionHeader` kind.
+
+This rule moves body rows sideways and, wherever a body wraps, produces **more** rows than it
+did — the body is re-wrapped at the narrower `width - indent_cols`, not merely prefixed. Every
+consumer of the row list re-derives it from the same `content_lines` call at the same width, so
+the drawn frame, the scroll clamp, and the pointer resolvers cannot disagree about either the
+indent or the row count.
+
+The indent is rendered text, so `text-selection` copies it: a selection covering an indented
+body row yields that row's leading spaces, exactly as a selection covering a **header** row
+already yields the header's own `"  " * depth`. That is the consistent reading and SHALL be the
+behaviour — the indent is not trailing padding, which that capability drops, but rendered
+content, which it keeps. It follows that a double click inside the indent's own columns selects
+nothing, those cells holding only whitespace, which `text-selection` already requires of any
+whitespace cell.
 
 When the selected artifact is **not** foldable, `content_lines` SHALL emit no header row and
 no blank separator at all, and SHALL render the single section's `text` exactly as it
@@ -377,7 +418,8 @@ opened the section to read. The strikethrough SHALL be the existing `Face` field
 
 #### Scenario: A spec tab's bodies align under their headers at the wide interior
 
-- **WHEN** a foldable `specs` tab whose file holds `## MODIFIED Requirements`, a
+- **WHEN** a foldable `specs` **glob resolving to more than one file** — so the file section
+  is depth 0 and `base` is 1 — whose first file holds `## MODIFIED Requirements`, a
   `### Requirement: One module` beneath it, and a `#### Scenario: The palette answers` beneath
   that — depths 1, 2, and 3 — is rendered with every section open at a content width of `78`
 - **THEN** the scenario's body rows each begin with exactly six spaces, flush beneath the
@@ -404,7 +446,11 @@ opened the section to read. The strikethrough SHALL be the existing `Face` field
   is at column zero, and never a mixture
 - **AND** the transition happens at exactly one width, `70`, which is `64 + 2 * 3` for that
   tab's maximum depth of 3
-- **AND** no call panics and no row's text exceeds its width
+- **AND** collapsing the depth-3 section leaves every still-open body row's indent and wrap
+  width unchanged, so the decision reads `detail.sections` and not the visible set — an
+  implementation reading `visible_sections` passes every other scenario here
+- **AND** no call panics and no row's text exceeds its width, including at every width below
+  `2 * max_depth`, where the floor's subtraction saturates rather than panicking
 
 #### Scenario: A shallower tab indents at a narrower width
 
@@ -416,10 +462,35 @@ opened the section to read. The strikethrough SHALL be the existing `Face` field
   floor being `70`, so the rule genuinely reads the tab's maximum depth rather than a fixed
   width
 
-#### Scenario: A tracked-tasks tab is unmoved at every width
+#### Scenario: A depth-0 tracked-tasks tab is unmoved at every width
 
-- **WHEN** a foldable tracked-tasks tab whose sections are at depth 0 is rendered at content
-  widths `120`, `78`, `58`, and `20`
+- **WHEN** a foldable tracked-tasks tab whose sections are all at depth 0 — one resolved path,
+  every group heading at one level — is rendered at content widths `120`, `78`, `58`, and `20`
 - **THEN** every row it draws is byte-identical to what it drew before this change
 - **AND** no body row gains an indent, depth 0 costing zero columns whether the floor is met
   or not
+- **AND** that is a consequence of its depth alone and not of any tracked-tasks exemption,
+  which the scenario below fixes from the other side
+
+#### Scenario: A depth-1 tracked-tasks tab indents its items like any other tab
+
+- **WHEN** a foldable tracked-tasks tab whose groups sit at depth 1 — the shape a task file
+  that opens with a level-1 title produces, `min_level` being 1 — is rendered at the mandated
+  `78`-column interior and again at `58`
+- **THEN** at `78` every item row begins with exactly two spaces and is wrapped at `76`, its
+  floor being `64 + 2 * 1 = 66`
+- **AND** at `58` every item row begins at column zero and is wrapped at `58`, `58 - 2` being
+  below the floor
+- **AND** the group header rows keep their own `"  " * depth` indent at both widths, unchanged
+- **AND** the progress-bar rows above every header are at column zero at both widths, owned by
+  no section
+
+#### Scenario: A selection over an indented body row copies the indent
+
+- **WHEN** a depth-3 body row is drawn at a content width of `78`, where the floor is met, and
+  again at `58`, where it is not, and the whole row is selected
+- **THEN** at `78` the copied text carries the row's six leading spaces, the indent being
+  rendered content rather than the trailing padding `text-selection` drops
+- **AND** at `58` the copied text carries none, there being no indent to copy
+- **AND** at `78` a double click inside the indent's own first six columns selects nothing,
+  those cells holding only whitespace

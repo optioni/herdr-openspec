@@ -112,6 +112,16 @@ None.
   `src/ui/markdown.rs` (the new
   `inline` entry point), `src/ui/tasks.rs`, `src/ui/detail.rs` (the tracked-tasks branch of
   the section walk).
+- **Sequencing:** this change and `section-body-indent` both carry an `artifact-folds` delta on
+  the **same** requirement, "A section header row names the file and shows its fold state", and
+  each currently holds the other's untouched original — so whichever archives second silently
+  reverts the first. `section-body-indent` is far smaller and lands first. **This change's
+  `artifact-folds` delta was written against pre-`section-body-indent` text and SHALL be
+  re-diffed against the archived requirement before its tasks are written**; in particular it
+  still carries the deleted sentence "Body rows SHALL NOT be indented by depth" verbatim, and
+  it narrows a tracked-tasks body to the items-only grammar that change widens. Recorded here
+  rather than only in `section-body-indent`'s own proposal, because that record disappears the
+  moment that change archives.
 - **Roadmap:** **unplanned**. `openspec/IMPLEMENTATION-ORDER.md` scoped `tasks-tab` as
   "render the task file as a checklist" and never distinguished the counter's model from the
   renderer's, so the roadmap had no row where this could have been anticipated.

@@ -11,8 +11,8 @@ v MODIFIED Requirements                                   <- depth 1, indent 2
 - **THEN** each answers with a `Style`
 ```
 
-The body hangs six columns left of the header it belongs to. Measured over the 231 delta spec
-files in this repository, **2,812 of 3,757** section headers are at depth 3 — the deep case is
+The body hangs six columns left of the header it belongs to. Measured over the 236 delta spec
+files in this repository, **2,872 of 3,830** section headers are at depth 3 — the deep case is
 the common case, not the corner.
 
 This is **not** an omission. `artifact-folds` states it deliberately:
@@ -37,8 +37,15 @@ the alignment is worth more than the columns.
 - **It is dropped whole below a measured floor**, so the 58-column narrow interior keeps the
   full text column `artifact-folds` argued for and the 78-column wide interior gets the
   alignment. The floor and its derivation are in the design.
-- **The tracked-tasks tab is unaffected.** Its sections are at depth 0 — `base` is 0 for a
-  single-path artifact — so their indent is zero columns at every width and no row moves.
+- **The tracked-tasks tab indents on the same rule as every other tab.** An earlier draft of
+  this proposal claimed it was unaffected because its sections are at depth 0. That premise is
+  false: `base` is 1 whenever the artifact resolves to more than one path, and a task file
+  opening with a level-1 title puts every `## ` group at depth 1, which is the shape 17 of this
+  repository's 44 task files already have. Since the premise was wrong, no exemption was ever
+  actually chosen — and the rule that makes the fold grammar single is one rule for every tab.
+  A tracked-tasks tab whose groups sit at depth 1 therefore indents its items two columns at
+  the 78-column interior and not at the 58-column one; a tab genuinely at depth 0 is unmoved,
+  by its depth alone.
 
 Not **BREAKING**: no manifest, config-format, or keybinding change.
 
@@ -65,11 +72,22 @@ None.
 - `artifact-folds`: body rows are indented by their section's depth when the tab's content
   width can afford the deepest one, replacing the unconditional "Body rows SHALL NOT be
   indented by depth".
+- `artifact-content`: its scenario "A body row is never indented by its section's depth" states
+  the rule this change reverses, over the same seven-section fixture, and becomes a two-sided
+  scenario — indented at the 78-column interior, at column zero at the 58-column one.
 
 ## Impact
 
-- **Code:** `src/ui/detail.rs` only — the section walk in `content_lines`, which already holds
-  both the section's `depth` and the width. No other module is touched.
+- **Code:** one production site — the section walk in `content_lines` in `src/ui/detail.rs`,
+  which already holds both the section's `depth` and the width. No other production module is
+  touched. **Three** existing tests move with it, because they pin the behaviour this change
+  reverses — the set was measured by planting a minimal implementation and running
+  `cargo test --lib` (`1445 passed; 3 failed`), not predicted: `src/ui/view.rs`'s
+  `a_body_row_is_never_indented_by_its_sections_depth`, which is `artifact-content`'s proving
+  test; and in `src/ui/detail.rs`,
+  `a_badged_header_row_is_still_addressed_by_its_own_section_index`, whose depth-1 fixture
+  compares a body row's text exactly, and `the_tracked_tasks_tab_concatenates_rather_than_folding`,
+  whose two-path tracked-tasks fixture sits at depth 1.
 - **Sequencing:** this change and `task-item-bodies` both carry an `artifact-folds` delta on
   the **same** requirement, "A section header row names the file and shows its fold state".
   This one is far smaller and SHALL land first; `task-item-bodies`' delta is then refreshed
@@ -81,5 +99,7 @@ None.
 - **PRD non-goals:** clear. Nothing is written, no change is authored, nothing is orchestrated,
   no Windows path is added.
 - **Gates:** `DETAILWIDTHS` requires every `#[test]` in `src/ui/detail.rs` to name both `58`
-  and `78`, which this change's tests satisfy by construction — the two widths are the two
-  sides of the floor. `COLWIDTH` sweeps the file for `.chars()`-based measurement.
+  and `78` as unsuffixed literals. Most of this change's tests do **not** satisfy that by
+  construction — the wide-interior one names only 78, the narrow one only 58, the sweep runs
+  `0..=120`, and the shallower-tab one asserts at 67/66/65 — so each adds both literals
+  explicitly, per tasks.md 1.4. `COLWIDTH` sweeps the file for `.chars()`-based measurement.
