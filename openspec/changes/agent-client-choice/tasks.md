@@ -155,12 +155,12 @@
 ## 4. `state::recorded_kind`
 <!-- kind: behavior -->
 
-- [ ] 4.1 RED: Write failing tests for: "A recorded kind is read back", "Absent directory,
+- [x] 4.1 RED: Write failing tests for: "A recorded kind is read back", "Absent directory,
   absent file, and empty file are all silent", "An unusable file yields `None` and exactly one
   problem", `plugin-state` :: "Unrecognised keys are ignored".
-- [ ] 4.2 GREEN: Implement `recorded_kind(dir) -> (Option<String>, Vec<String>)` reading
+- [x] 4.2 GREEN: Implement `recorded_kind(dir) -> (Option<String>, Vec<String>)` reading
   `settings.toml`, on `state::read`'s never-fails, one-problem-per-fault contract.
-- [ ] 4.3 Run the group tests — `cargo test --lib state::` — green, selecting more than the
+- [x] 4.3 Run the group tests — `cargo test --lib state::` — green, selecting more than the
   **29** baseline; state that no refactor was needed if none was.
 
 ## 5. `launch::prompt_text`: the CLI-driven shape

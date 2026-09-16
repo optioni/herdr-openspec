@@ -219,6 +219,67 @@ pub fn read(dir: Option<&Path>) -> Mapping {
     mapping
 }
 
+/// Read the optional recorded agent kind from `settings.toml` inside `dir`,
+/// beside `agent-names.toml`:
+///
+/// ```toml
+/// agent_kind = "codex"
+/// ```
+///
+/// Step 2 of `integration-status`' precedence — what `settings-window` will
+/// write once it lands, consulted after a hand-edited `config.toml` and before
+/// any evidence the plugin gathered itself. **This module reads it and never
+/// writes it**: nothing here creates `settings.toml`, and the plugin's own
+/// writes stay exactly `agent-names.toml` under `HERDR_PLUGIN_STATE_DIR`.
+///
+/// Never fails, panics, or returns an error to the caller, on exactly
+/// [`read`]'s terms. An absent directory, an absent file, and an empty file
+/// each yield `None` with no problem. A file that is not valid TOML, an
+/// `agent_kind` that is not a string, and an `agent_kind` that is blank or
+/// whitespace-only each yield `None` with exactly one problem. Keys other than
+/// `agent_kind` are ignored without comment, so the file `settings-window`
+/// grows later is readable by this binary. See
+/// `specs/plugin-state/spec.md`.
+pub fn recorded_kind(dir: Option<&Path>) -> (Option<String>, Vec<String>) {
+    let Some(dir) = dir else {
+        return (None, Vec::new());
+    };
+
+    let path = dir.join("settings.toml");
+    let contents = match std::fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (None, Vec::new()),
+        Err(_) => {
+            return (None, vec!["settings.toml could not be read".to_string()]);
+        }
+    };
+
+    if contents.trim().is_empty() {
+        return (None, Vec::new());
+    }
+
+    let table: toml::Table = match contents.parse() {
+        Ok(table) => table,
+        Err(_) => {
+            return (None, vec!["settings.toml is not valid TOML".to_string()]);
+        }
+    };
+
+    match table.get("agent_kind") {
+        None => (None, Vec::new()),
+        Some(value) => match value.as_str() {
+            Some(s) if s.trim().is_empty() => {
+                (None, vec!["settings.toml: agent_kind is empty".to_string()])
+            }
+            Some(s) => (Some(s.trim().to_string()), Vec::new()),
+            None => (
+                None,
+                vec!["settings.toml: agent_kind is not a string".to_string()],
+            ),
+        },
+    }
+}
+
 /// Record that `agent` is the derived name for `change` inside `dir`. The
 /// `agent == change` short-circuit runs before the directory is consulted, so
 /// an unchanged name succeeds even when no state directory can be resolved —
@@ -740,5 +801,105 @@ mod tests {
 
         let after = snapshot(config.path());
         assert_eq!(before, after);
+    }
+    // --- agent-client-choice: recorded_kind ------------------------------
+
+    fn write_settings(dir: &std::path::Path, contents: &str) {
+        std::fs::write(dir.join("settings.toml"), contents).expect("write settings.toml");
+    }
+
+    #[test]
+    fn a_recorded_kind_is_read_back() {
+        let scratch = crate::testutil::ScratchDir::new();
+        write_settings(scratch.path(), "agent_kind = \"codex\"\n");
+        assert_eq!(
+            super::recorded_kind(Some(scratch.path())),
+            (Some("codex".to_string()), Vec::new())
+        );
+
+        write_settings(scratch.path(), "agent_kind = \"  codex  \"\n");
+        assert_eq!(
+            super::recorded_kind(Some(scratch.path())),
+            (Some("codex".to_string()), Vec::new()),
+            "trimmed, with no problem"
+        );
+    }
+
+    #[test]
+    fn an_absent_directory_file_and_empty_file_are_all_silent() {
+        assert_eq!(super::recorded_kind(None), (None, Vec::new()));
+
+        let scratch = crate::testutil::ScratchDir::new();
+        let before = crate::testutil::snapshot(scratch.path());
+        assert_eq!(
+            super::recorded_kind(Some(scratch.path())),
+            (None, Vec::new())
+        );
+
+        write_settings(scratch.path(), "");
+        assert_eq!(
+            super::recorded_kind(Some(scratch.path())),
+            (None, Vec::new())
+        );
+        std::fs::remove_file(scratch.path().join("settings.toml")).expect("remove it again");
+
+        // No directory and no file is created by any of the three calls.
+        let missing = scratch.path().join("nonexistent");
+        assert_eq!(super::recorded_kind(Some(&missing)), (None, Vec::new()));
+        assert!(!missing.exists());
+        assert_eq!(before, crate::testutil::snapshot(scratch.path()));
+    }
+
+    #[test]
+    fn an_unusable_settings_file_yields_none_and_exactly_one_problem() {
+        for contents in [
+            "agent_kind = = \"codex\"\n",
+            "agent_kind = 7\n",
+            "agent_kind = \"   \"\n",
+        ] {
+            let scratch = crate::testutil::ScratchDir::new();
+            write_settings(scratch.path(), contents);
+            let (kind, problems) = super::recorded_kind(Some(scratch.path()));
+            assert_eq!(kind, None, "{contents:?}");
+            assert_eq!(problems.len(), 1, "{contents:?}: {problems:?}");
+            assert!(
+                problems[0].contains("settings.toml"),
+                "{contents:?}: {problems:?}"
+            );
+        }
+
+        // A directory in the file's place: unreadable rather than malformed,
+        // and still exactly one problem with no error reaching the caller.
+        let scratch = crate::testutil::ScratchDir::new();
+        std::fs::create_dir(scratch.path().join("settings.toml"))
+            .expect("create a directory named settings.toml");
+        let (kind, problems) = super::recorded_kind(Some(scratch.path()));
+        assert_eq!(kind, None);
+        assert_eq!(problems.len(), 1, "{problems:?}");
+    }
+
+    #[test]
+    fn unrecognised_settings_keys_are_ignored() {
+        let scratch = crate::testutil::ScratchDir::new();
+        write_settings(
+            scratch.path(),
+            "agent_kind = \"codex\"\ntheme = \"dark\"\n\n[window]\nwidth = 80\n",
+        );
+        assert_eq!(
+            super::recorded_kind(Some(scratch.path())),
+            (Some("codex".to_string()), Vec::new())
+        );
+    }
+
+    /// The file `settings-window` will grow is read by this binary and written
+    /// by nothing in it: a full read leaves the directory byte-identical.
+    #[test]
+    fn reading_the_recorded_kind_writes_nothing() {
+        let scratch = crate::testutil::ScratchDir::new();
+        write_settings(scratch.path(), "agent_kind = \"codex\"\n");
+        let before = crate::testutil::snapshot(scratch.path());
+        super::recorded_kind(Some(scratch.path()));
+        super::recorded_kind(Some(scratch.path()));
+        assert_eq!(before, crate::testutil::snapshot(scratch.path()));
     }
 }
