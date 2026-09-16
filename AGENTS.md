@@ -119,13 +119,21 @@ the interior entirely, not counted among these rows — so a held key cannot run
 it away. The tab the schema marks as tracking tasks (`ArtifactRef::tracks_tasks`,
 set by position, never by id or filename) renders `ui::tasks`' grammar
 instead of markdown: a progress bar showing the change's own `progress`
-followed by task groups under their headings with a `[✓]`/`[ ]` glyph per
-item — read-only, with no key that toggles one. That tab **folds** like any
+followed by task groups under their headings, each drawing a `[✓]`/`[ ]` glyph
+line per item, that item's own **body** beneath it, and the group's **blocks**
+between the items they sit between — so a task file reaches the screen whole
+rather than at the 20% two line kinds survived to — read-only, with no key that
+toggles one. An item's text is a fragment and goes through
+`ui::markdown::inline`; a body and a block are documents and go through
+`ui::markdown::lines`, which is what makes fenced code, tables and block quotes
+draw here with the grammar every other tab already uses, and item text faced
+rather than shown as literal markers. That tab **folds** like any
 other once its file splits at its headings, which **reverses** `artifact-folds`'
 Decision 8: `ui::tasks::bar_lines` draws the bar above every header, as leading
-body owned by no section and hidden by no fold, and `ui::tasks::items` draws
-each open group's items beneath its own header row, with every group whose
-subtree still holds incomplete work seeded open. The markdown path renders a
+body owned by no section and hidden by no fold, and `ui::tasks::group_body`
+draws each open group's items, their bodies, and its blocks beneath its own
+header row, with every group whose subtree still holds incomplete work seeded
+open. The markdown path renders a
 task-list item with that **same** glyph (`markdown-legibility` turned
 `ENABLE_TASKLISTS` on), so the two checkbox renderers are asserted to agree
 rather than left to drift; what names the checklist path is the progress-bar
