@@ -281,6 +281,16 @@ The resolved `Choice` SHALL be cached in the worker for the rest of the session,
 and every later launch reuse it and issue no further status call. `Request::Focus` SHALL
 never trigger the read: `g` focuses an agent that is already running and needs no kind.
 
+**The resolution's own problems SHALL be reported on the launch that produced them and on
+no other.** They describe a read and a decision that happened once, so replaying them on
+every later launch would report an event that did not recur — and `agent-launch`'s "A
+success clears both entries" is unsatisfiable within one worker if they are replayed, since
+a cached resolution that warned would keep re-warning through a launch in which everything
+succeeded. `Choice::Ambiguous` is the one exception, and it is not an exception to this
+rule: its problem is **re-derived** from the cached `Choice` on every press, because it is
+the refusal itself rather than a warning beside a working action, and a key that refuses
+must say why every time it is pressed.
+
 Reading it lazily rather than at startup is what keeps this capability off the composition
 root's critical path and out of the render path entirely — `SPEC.md` → "The render path
 blocks on nothing but the terminal" — and costs nothing on a pane that never launches

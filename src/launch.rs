@@ -664,8 +664,14 @@ fn handle(
 
     // The resolution's problems lead the outcome's because they occurred first,
     // before `pane split` — the rule `degraded-states` already fixed for the
-    // record/prompt pair — and they are reported on the resolution that
-    // produced them and not replayed on every later launch.
+    // record/prompt pair — and they are reported on the launch that produced
+    // them and on no other: they describe a read and a decision that happened
+    // once. Replaying them would also make `agent-launch`'s "A success clears
+    // both entries" unsatisfiable within one worker, since a cached resolution
+    // that warned would keep re-warning through a launch in which everything
+    // succeeded. `Choice::Ambiguous` below is not an exception to this: its
+    // problem is re-derived from the cached choice on every press, because it
+    // is the refusal itself rather than a warning beside a working action.
     let mut problems = Vec::new();
     if cached.is_none() {
         let (choice, resolution_problems) = resolve_kind(cli, settings);
@@ -2473,6 +2479,25 @@ mod tests {
             assert!(problem.contains("codex"), "{problem}");
             assert!(problem.contains("agent_kind"), "{problem}");
             assert_eq!(before, snapshot(state.path()));
+
+            // A second press answers identically. The ambiguous problem is
+            // **re-derived** from the cached `Choice` rather than replayed from
+            // the resolution's own problems, because it is the refusal itself
+            // and a key that refuses must say why every time it is pressed —
+            // unlike the last-resort and absent-integration warnings, which are
+            // reported on the launch that produced them and on no other.
+            let again = handle(
+                &fake,
+                &with_state,
+                &mut cached,
+                launch("2fa-support", Intent::Apply),
+            );
+            assert_eq!(again, outcome, "the second press answers identically");
+            assert_eq!(
+                log(&fake),
+                vec!["integration status".to_string()],
+                "and reads no second status: the choice is cached"
+            );
         }
 
         #[test]

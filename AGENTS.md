@@ -333,14 +333,16 @@ check, a width assertion, a dependency argument, a build-graph snapshot, and a c
 checker among them. **A gate's floor is its own script default** — every line in the
 recipe runs the script bare, with no `MIN`/`SCAN_MIN` override, because the default is
 kept at the gate's true measured floor rather than a value someone must remember to pass.
-The one stated exception is a **multi-subject gate**: `NODEFAULT-UI` scans seven distinct
+The one stated exception is a **multi-subject gate**: `NODEFAULT-UI` scans eight distinct
 type sets across the codebase (the view-layer dashboard types, `Refresh`, `Launch`,
-`src/agents.rs`'s set, `src/launch.rs`'s `Outcome`, `ArtifactSection`, and
-`src/ui/help.rs`'s `Binding`/`Group`), and one shared default would
+`src/agents.rs`'s set, `src/launch.rs`'s `Outcome`, `ArtifactSection`,
+`src/ui/help.rs`'s `Binding`/`Group`, and `src/launch.rs`'s `Settings`), and one shared
+default would
 either pass vacuously for the smallest set or fail legitimately for the largest — so each
-of its seven recipe lines carries its own explicit `SCAN_MIN`, the only floors that live on
+of its eight recipe lines carries its own explicit `SCAN_MIN`, the only floors that live on
 the `Makefile` line rather than the script default (`notes/gate-floors.md` in the
-`degraded-states` change records how each was measured). Every gate is executed against a
+`degraded-states` change records how the first seven were measured, and the same file in
+`agent-client-choice` records the eighth). Every gate is executed against a
 recorded planted defect, not merely attested to catch one: `tests/gate-controls.toml`
 binds each script under `scripts/gates/` to a plant, and `tests/gate_controls.rs` copies
 the tree to a scratch directory, applies it, and requires that gate to exit non-zero — so
