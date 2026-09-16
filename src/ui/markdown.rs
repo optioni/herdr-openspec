@@ -1437,29 +1437,60 @@ fn leading_block_escape(text: &str) -> Option<usize> {
     None
 }
 
+/// `text` with every line's own block opener escaped and every line's
+/// leading whitespace dropped, so that [`fold`] can recognise no block
+/// construct anywhere in it.
+///
+/// Two rules beyond [`leading_block_escape`]'s own, each measured rather
+/// than reasoned about:
+///
+/// **Every line, not only the first.** A setext underline lives on the
+/// line *after* the text it promotes, and a blank line lets a later line
+/// open a block of its own, so escaping only the first line leaves
+/// `"foo\n==="` rendering as an `h1` and `"para\n\n# heading"` carrying a
+/// `heading` face — both forbidden by this function's own requirement.
+///
+/// **Leading whitespace is dropped, not escaped.** A backslash placed
+/// before a space is emitted literally rather than consumed, so a
+/// whitespace-led fragment escaped in place renders a **visible** `\`;
+/// and four columns of leading whitespace open an indented code block,
+/// which `"\t### heading"` was measured to reach. A paragraph's leading
+/// whitespace carries no text of its own — CommonMark strips it — so
+/// dropping it neither loses a character a reader would see nor leaves a
+/// block opener behind. Trailing whitespace is untouched, two trailing
+/// spaces being a hard break this function is required to honour.
+fn escape_fragment(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 8);
+    for (i, line) in text.split('\n').enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        let line = line.trim_start();
+        match leading_block_escape(line) {
+            Some(at) => {
+                out.push_str(&line[..at]);
+                out.push('\\');
+                out.push_str(&line[at..]);
+            }
+            None => out.push_str(line),
+        }
+    }
+    out
+}
+
 /// Render `text` as the single paragraph it is, on exactly the terms
 /// [`lines`] renders a paragraph it found inside a document: the same
 /// faces, the same wrapping, the same `Line`/`Segment`/`Face` types.
-/// `fold` has no inline-only entry point, so `inline` inserts a CommonMark
-/// backslash escape immediately before whichever character would open a
-/// block, then folds and lays the escaped text out exactly as `lines`
-/// would — recognising no block construct, and setting no `heading` face
-/// on any segment it returns (design.md -> Decision 4).
+/// `fold` has no inline-only entry point, so `inline` escapes whichever
+/// character would open a block — on every line, [`escape_fragment`]
+/// carrying the reasons — then folds and lays the escaped text out
+/// exactly as `lines` would, recognising no block construct and setting
+/// no `heading` face on any segment it returns (design.md -> Decision 4).
 pub fn inline(text: &str, width: u16) -> Vec<Line> {
     if width == 0 || text.trim().is_empty() {
         return Vec::new();
     }
-    let escaped = match leading_block_escape(text) {
-        Some(at) => {
-            let mut escaped = String::with_capacity(text.len() + 1);
-            escaped.push_str(&text[..at]);
-            escaped.push('\\');
-            escaped.push_str(&text[at..]);
-            escaped
-        }
-        None => text.to_string(),
-    };
-    let blocks = fold(&escaped);
+    let blocks = fold(&escape_fragment(text));
     layout(&blocks, width)
 }
 
@@ -3577,6 +3608,60 @@ mod tests {
                     columns(&line.text()) <= width as usize,
                     "width {width}: {:?}",
                     line.text()
+                );
+            }
+        }
+    }
+
+    /// `markdown-render` :: "`inline` SHALL recognise **no block
+    /// construct**" and "every returned `Face` SHALL carry `heading:
+    /// None`", over the inputs a first-line-only, whitespace-blind escape
+    /// was measured to fail on. The production caller cannot reach these
+    /// today — `tasks::parse` trims an item's text and splits it on `\n` —
+    /// but `inline` is `pub` and its requirement is unconditional, so the
+    /// guarantee is asserted over the inputs rather than over the caller.
+    #[test]
+    fn a_whitespace_led_or_multi_line_fragment_still_opens_no_block() {
+        for width in [78, 58] {
+            for input in [
+                "   --- ",
+                "  ``` fenced",
+                "\t### heading",
+                "foo\n===",
+                "foo\n---",
+                "para\n\n# heading",
+                "a\n\n- bullet",
+            ] {
+                let out = inline(input, width);
+                assert!(
+                    !out.is_empty(),
+                    "width {width}: {input:?} rendered nothing at all"
+                );
+                for line in &out {
+                    assert!(
+                        !line.text().contains('\\'),
+                        "width {width}: {input:?} leaked a backslash: {:?}",
+                        line.text()
+                    );
+                    for seg in &line.segments {
+                        assert_eq!(
+                            seg.face.heading, None,
+                            "width {width}: {input:?} set a heading face: {seg:?}"
+                        );
+                    }
+                }
+                let joined: String = out.iter().map(Line::text).collect::<Vec<_>>().join("\n");
+                for marker in ["---", "```", "###", "===", "#", "-"] {
+                    if input.contains(marker) {
+                        assert!(
+                            joined.contains(marker),
+                            "width {width}: {input:?} lost {marker:?}, got {joined:?}"
+                        );
+                    }
+                }
+                assert!(
+                    !joined.contains('\u{2022}'),
+                    "width {width}: {input:?} gained a bullet glyph: {joined:?}"
                 );
             }
         }

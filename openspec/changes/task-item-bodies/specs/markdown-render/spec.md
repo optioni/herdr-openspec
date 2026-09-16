@@ -36,6 +36,27 @@ task label, or a delta operation, and setting those remains the caller's job.
 `inline` SHALL return an **empty vector** at `width == 0`, matching `lines`, and an empty
 vector for a `text` that is empty or entirely whitespace.
 
+The "no block construct" guarantee above is **unconditional over `&str`**, not conditional on
+the caller handing `inline` a trimmed single line. Two consequences follow, and both are the
+function's own obligation rather than the caller's:
+
+- The escape SHALL be applied to **every** line of `text`, not only the first. A setext
+  underline sits on the line *after* the text it promotes, and a blank line lets a later line
+  open a block of its own, so a first-line-only escape leaves `foo\n===` rendering as a
+  level-1 heading and `para\n\n# heading` carrying a `heading` face.
+- Each line's **leading whitespace SHALL be dropped** rather than escaped. A backslash placed
+  before a space is emitted literally, so escaping a whitespace-led fragment in place renders a
+  **visible** `\`; and four columns of leading whitespace open an indented code block, which
+  `\t### heading` reaches. A paragraph's leading whitespace carries no text a reader sees —
+  CommonMark strips it — so dropping it loses no character and leaves no opener behind.
+  **Trailing** whitespace is untouched, two trailing spaces being a hard break `inline` is
+  required to honour.
+
+This is stated because the one production caller cannot currently produce either shape —
+`tasks::parse` trims an item's text and splits the source on `\n`, so an item's text is a
+single trimmed line — and a guarantee that holds only for the inputs today's caller happens to
+produce is one the next caller inherits as a defect.
+
 `inline` SHALL live in `src/ui/markdown.rs` and SHALL NOT widen the parser's option set,
 which stays exactly `ENABLE_TABLES | ENABLE_STRIKETHROUGH | ENABLE_TASKLISTS`. It is a
 second entry point into the parser already confined to that file, so the `MDSEAM` gate's
@@ -73,6 +94,17 @@ subject does not move.
   being dropped
 - **AND** the same fragment wrapped as a lone paragraph by `lines` at the same width yields
   the same line texts, so the two entry points cannot drift apart on wrapping
+
+#### Scenario: A whitespace-led or multi-line fragment still opens no block
+
+- **WHEN** `inline` is called at width `78` and at width `58` with each of `   --- `,
+  `  ``` fenced`, `\t### heading`, `foo\n===`, `foo\n---`, `para\n\n# heading`, and
+  `a\n\n- bullet`
+- **THEN** at both widths each call returns at least one line, no rendered row contains a
+  literal `\`, and every returned segment carries `heading == None`
+- **AND** each input's own marker run survives into the rendered text, the fenced case in
+  particular returning a non-empty vector rather than vanishing whole
+- **AND** no bullet glyph, quote prefix, or thematic-break run is introduced
 
 #### Scenario: Empty, whitespace, and zero-width inputs return nothing
 
