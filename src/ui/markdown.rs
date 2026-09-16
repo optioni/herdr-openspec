@@ -1349,6 +1349,120 @@ pub fn lines(source: &str, width: u16) -> Vec<Line> {
     layout(&blocks, width)
 }
 
+/// Whether `line` is nothing but spaces, tabs, and three or more of the
+/// same `-`, `=`, `_`, or `*` character — the pattern that, unescaped,
+/// would read as a thematic break or (given a preceding paragraph line) a
+/// setext heading underline.
+fn is_whole_line_break_run(line: &str) -> bool {
+    let mut significant = line.chars().filter(|c| *c != ' ' && *c != '\t');
+    let first = match significant.next() {
+        Some(c) if matches!(c, '-' | '=' | '_' | '*') => c,
+        _ => return false,
+    };
+    let mut count = 1;
+    for c in significant {
+        if c != first {
+            return false;
+        }
+        count += 1;
+    }
+    count >= 3
+}
+
+/// The byte offset, if any, at which `text` needs a CommonMark backslash
+/// escape so that none of its own leading characters can open a block.
+/// Only ASCII punctuation can be escaped this way — a backslash prepended
+/// to a digit is emitted verbatim rather than consumed — so an
+/// ordered-list opener is escaped *after* its digit run, never before it;
+/// every other trigger is escaped at position `0` (design.md -> Decision 4).
+fn leading_block_escape(text: &str) -> Option<usize> {
+    if text.is_empty() {
+        return None;
+    }
+
+    // ATX heading: one to six `#` followed by a space or the end of the
+    // first line.
+    let hashes = text.chars().take_while(|&c| c == '#').count();
+    if (1..=6).contains(&hashes) {
+        let after = &text[hashes..];
+        if after.is_empty() || after.starts_with(' ') || after.starts_with('\n') {
+            return Some(0);
+        }
+    }
+
+    if let Some(first) = text.chars().next() {
+        // Bullet list marker: `-`, `*`, or `+` followed by a space.
+        if matches!(first, '-' | '*' | '+') && text[first.len_utf8()..].starts_with(' ') {
+            return Some(0);
+        }
+        // Block quote.
+        if first == '>' {
+            return Some(0);
+        }
+    }
+
+    // Fenced code block opener: three or more backticks or tildes.
+    for fence in ['`', '~'] {
+        if text.chars().take_while(|&c| c == fence).count() >= 3 {
+            return Some(0);
+        }
+    }
+
+    // Thematic break / setext underline: the whole first line and nothing
+    // else.
+    let first_line = text.split('\n').next().unwrap_or("");
+    if is_whole_line_break_run(first_line) {
+        return Some(0);
+    }
+
+    // Ordered list start: a digit run followed by `.` or `)` and then a
+    // space or the end of the first line. The escape goes after the
+    // digits, not before them.
+    let digits = text.chars().take_while(|c| c.is_ascii_digit()).count();
+    if digits > 0 {
+        let after = &text[digits..];
+        if let Some(marker) = after.chars().next()
+            && (marker == '.' || marker == ')')
+        {
+            let past_marker = &after[marker.len_utf8()..];
+            if past_marker.is_empty()
+                || past_marker.starts_with(' ')
+                || past_marker.starts_with('\n')
+            {
+                return Some(digits);
+            }
+        }
+    }
+
+    None
+}
+
+/// Render `text` as the single paragraph it is, on exactly the terms
+/// [`lines`] renders a paragraph it found inside a document: the same
+/// faces, the same wrapping, the same `Line`/`Segment`/`Face` types.
+/// `fold` has no inline-only entry point, so `inline` inserts a CommonMark
+/// backslash escape immediately before whichever character would open a
+/// block, then folds and lays the escaped text out exactly as `lines`
+/// would — recognising no block construct, and setting no `heading` face
+/// on any segment it returns (design.md -> Decision 4).
+pub fn inline(text: &str, width: u16) -> Vec<Line> {
+    if width == 0 || text.trim().is_empty() {
+        return Vec::new();
+    }
+    let escaped = match leading_block_escape(text) {
+        Some(at) => {
+            let mut escaped = String::with_capacity(text.len() + 1);
+            escaped.push_str(&text[..at]);
+            escaped.push('\\');
+            escaped.push_str(&text[at..]);
+            escaped
+        }
+        None => text.to_string(),
+    };
+    let blocks = fold(&escaped);
+    layout(&blocks, width)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3347,8 +3461,7 @@ mod tests {
 
     #[test]
     fn a_fragments_inline_faces_are_set_and_its_text_is_unchanged() {
-        let text =
-            "2.2 GREEN: add the `CrosstermOps` implementation, **bolded**, and *stressed*";
+        let text = "2.2 GREEN: add the `CrosstermOps` implementation, **bolded**, and *stressed*";
         for width in [78, 58] {
             let out = inline(text, width);
             let segments: Vec<&Segment> = out.iter().flat_map(|l| l.segments.iter()).collect();
@@ -3428,7 +3541,9 @@ mod tests {
     #[test]
     fn a_fragment_wraps_and_hard_splits_exactly_as_a_paragraph_does() {
         let prose = "alpha bravo charlie delta echo foxtrot golf hotel india juliett kilo lima \
-                      mike november oscar papa";
+                      mike november oscar papa quebec romeo sierra tango uniform victor whiskey \
+                      xray yankee zulu alpha bravo charlie delta echo foxtrot golf hotel india \
+                      juliett kilo lima mike november oscar papa quebec romeo sierra tango";
         for width in [78, 58] {
             let out = inline(prose, width);
             assert_eq!(out, lines(prose, width), "width {width}");
@@ -3447,7 +3562,11 @@ mod tests {
         let long_word = "x".repeat(150);
         for width in [78, 58] {
             let out = inline(&long_word, width);
-            assert_eq!(out, lines(&long_word, width), "width {width}: hard split parity");
+            assert_eq!(
+                out,
+                lines(&long_word, width),
+                "width {width}: hard split parity"
+            );
             assert!(
                 out.len() > 1,
                 "width {width}: {} chars should hard-split",
