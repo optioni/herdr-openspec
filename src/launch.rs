@@ -1264,17 +1264,37 @@ mod tests {
 
         /// `prompt_text` takes no kind argument at all, so a fourth client
         /// requires no change to this function and no new mapping entry
-        /// anywhere. Asserted by construction and by three byte-identical runs
-        /// made while three different kinds are resolved.
+        /// anywhere — that much is compile-enforced by the signature, and a
+        /// test calling it three times with no kind to vary cannot fail. What
+        /// needs a runtime assertion is that the kind does not reach the prompt
+        /// **through the worker either**, which
+        /// `resolution::the_resolved_kind_does_not_reach_the_prompt` proves by
+        /// running three launches under three resolved kinds and comparing the
+        /// logged `agent prompt` elements. Asserted here only that the built-in
+        /// text really does depend on the three arguments it does take.
         #[test]
-        fn the_kind_does_not_reach_the_prompt() {
+        fn the_prompt_depends_on_the_intent_the_change_and_the_path_only() {
             let overrides = no_overrides();
-            let bin = Path::new(BIN);
-            let mut produced = Vec::new();
-            for _kind in ["claude", "codex", "not-a-kind"] {
-                produced.push(prompt_text(Intent::Apply, "2fa-support", bin, &overrides));
-            }
-            assert!(produced.windows(2).all(|w| w[0] == w[1]), "{produced:?}");
+
+            // Each of the three arguments moves the text, so none is ignored.
+            let base = prompt_text(Intent::Apply, "2fa-support", Path::new(BIN), &overrides);
+            assert_ne!(
+                base,
+                prompt_text(Intent::Continue, "2fa-support", Path::new(BIN), &overrides)
+            );
+            assert_ne!(
+                base,
+                prompt_text(Intent::Apply, "add-auth", Path::new(BIN), &overrides)
+            );
+            assert_ne!(
+                base,
+                prompt_text(
+                    Intent::Apply,
+                    "2fa-support",
+                    Path::new("/elsewhere/openspec"),
+                    &overrides
+                )
+            );
         }
 
         #[test]
@@ -2333,35 +2353,56 @@ mod tests {
             assert_eq!(log(&fake).len(), 1, "no second Herdr call");
         }
 
+        /// Both sources, because `integration-status` states the rule for "a
+        /// **configured or recorded** kind": a read that failed establishes no
+        /// absence, so neither carries the absent-integration warning.
         #[test]
         fn a_failed_status_call_still_launches_the_configured_kind() {
-            let state = ScratchDir::new();
-            let fake = FakeCli::new();
-            status_failed(&fake);
-            split_ok(&fake, "wD:pJ");
-            start_ok(&fake, "c-2fa-support", "codex", "wD:pJ");
-            prompt_ok(
-                &fake,
-                "c-2fa-support",
-                &built_in(Intent::Apply, "2fa-support"),
-            );
+            for (configured, recorded) in [(Some("codex"), None), (None, Some("codex"))] {
+                let state = ScratchDir::new();
+                let fake = FakeCli::new();
+                status_failed(&fake);
+                split_ok(&fake, "wD:pJ");
+                start_ok(&fake, "c-2fa-support", "codex", "wD:pJ");
+                prompt_ok(
+                    &fake,
+                    "c-2fa-support",
+                    &built_in(Intent::Apply, "2fa-support"),
+                );
 
-            let mut cached = None;
-            let outcome = handle(
-                &fake,
-                &settings(&state, Some("codex"), None),
-                &mut cached,
-                launch("2fa-support", Intent::Apply),
-            );
+                let mut cached = None;
+                let outcome = handle(
+                    &fake,
+                    &settings(&state, configured, recorded),
+                    &mut cached,
+                    launch("2fa-support", Intent::Apply),
+                );
 
-            assert!(log(&fake)[2].contains("--kind codex"), "{:?}", log(&fake));
-            assert_eq!(outcome.problems.len(), 1, "{:?}", outcome.problems);
-            assert!(
-                outcome.problems[0].contains("integration_unavailable")
-                    && outcome.problems[0].contains("no socket"),
-                "{:?}",
-                outcome.problems
-            );
+                let log = log(&fake);
+                assert!(
+                    log[2].contains("--kind codex"),
+                    "{configured:?}/{recorded:?}: {log:?}"
+                );
+                assert_eq!(
+                    outcome.problems.len(),
+                    1,
+                    "{configured:?}/{recorded:?}: {:?}",
+                    outcome.problems
+                );
+                assert!(
+                    outcome.problems[0].contains("integration_unavailable")
+                        && outcome.problems[0].contains("no socket"),
+                    "{configured:?}/{recorded:?}: {:?}",
+                    outcome.problems
+                );
+                assert!(
+                    !outcome.problems[0].contains("unknown"),
+                    "{configured:?}/{recorded:?}: no second problem may claim codex's \
+                     integration is absent - the read that would have established it never \
+                     succeeded: {:?}",
+                    outcome.problems
+                );
+            }
         }
 
         #[test]
@@ -2615,6 +2656,56 @@ mod tests {
             assert_eq!(starts.len(), 3);
             assert!(splits.windows(2).all(|w| w[0] == w[1]), "{splits:?}");
             assert!(starts.windows(2).all(|w| w[0] == w[1]), "{starts:?}");
+        }
+
+        /// `agent-prompts` :: "The kind does not reach the prompt." Three
+        /// launches under three **resolved** kinds — `claude`, `codex`, and the
+        /// unlisted `not-a-kind` — with the logged `agent prompt` elements
+        /// compared byte for byte. Driven through the worker rather than
+        /// through `prompt_text` directly, because a test that calls a function
+        /// taking no kind argument three times cannot fail: the property worth
+        /// asserting is that nothing between the resolution and the prompt
+        /// reintroduces one.
+        #[test]
+        fn the_resolved_kind_does_not_reach_the_prompt() {
+            let mut logged = Vec::new();
+            for kind in ["claude", "codex", "not-a-kind"] {
+                let state = ScratchDir::new();
+                let fake = FakeCli::new();
+                status_ok(&fake, &status(&["codex"]));
+                split_ok(&fake, "wD:pJ");
+                start_ok(&fake, "c-2fa-support", kind, "wD:pJ");
+                prompt_ok(
+                    &fake,
+                    "c-2fa-support",
+                    &built_in(Intent::Apply, "2fa-support"),
+                );
+
+                let mut cached = None;
+                handle(
+                    &fake,
+                    &settings(&state, Some(kind), None),
+                    &mut cached,
+                    launch("2fa-support", Intent::Apply),
+                );
+
+                let log = log(&fake);
+                assert!(
+                    log[2].contains(&format!("--kind {kind}")),
+                    "{kind}: the kind reaches `agent start`: {log:?}"
+                );
+                logged.push(log[3].clone());
+            }
+
+            assert!(
+                logged.windows(2).all(|w| w[0] == w[1]),
+                "three resolved kinds, one prompt: {logged:?}"
+            );
+            assert!(
+                logged[0].contains("instructions apply"),
+                "and it is the built-in Apply text: {:?}",
+                logged[0]
+            );
         }
 
         #[test]

@@ -16,7 +16,9 @@ of `claude` is removed: a constant that fires whether or not the reader has ever
 Code is the guess this change exists to stop making, and `claude` now appears only as
 `integration::resolve`'s last resort, in `src/integration.rs`. `Config::default()` SHALL
 therefore carry `agent_kind: None`, and the literal `claude` SHALL NOT appear in
-`src/config.rs` at all.
+`src/config.rs`' **production slice** — the text above its `#[cfg(test)]` line, the same cut
+`WIRED`'s leg 6 and design.md's own measurement use. A test fixture naming the kind is not a
+default that fires.
 
 A value that is empty or whitespace-only SHALL yield `None` and SHALL report one problem
 naming `agent_kind`, on `config::non_blank`'s established "first non-blank wins" rule — a

@@ -3766,8 +3766,10 @@ mod tests {
         );
 
         // `g` still focuses, and `a` is no longer refused by the in-flight
-        // guard: the reader can retry after editing config.toml without
-        // restarting the pane.
+        // guard, so the launch keys are not locked for the rest of the session.
+        // A retried `a` answers with the same refusal, re-derived from the
+        // cached `Choice`: configuration is read once per process, so acting on
+        // the row means editing `config.toml` and restarting the pane.
         assert_eq!(
             crate::launch::decide(
                 crate::launch::Intent::Focus,

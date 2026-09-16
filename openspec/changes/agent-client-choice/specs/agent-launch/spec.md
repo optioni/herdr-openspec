@@ -45,8 +45,10 @@ routes are untouched — a launch that could not choose a client is not a broken
 - **THEN** `launch.in_flight` is `false` afterwards
 - **AND** a subsequent `g` with an attributed agent still returns
   `Decision::Go(Request::Focus { .. })`
-- **AND** a subsequent `a` is not refused by the in-flight guard, so the reader can retry after
-  editing `config.toml` without restarting the pane
+- **AND** a subsequent `a` is not refused by the in-flight guard, so the launch keys are not
+  locked for the rest of the session. It answers with the **same** refusal, re-derived from
+  the cached `Choice`: configuration is read once per process and the choice is deliberately
+  not invalidated, so acting on the row means editing `config.toml` and restarting the pane
 
 #### Scenario: The ambiguous stop renders as one leading problem row at both widths
 
