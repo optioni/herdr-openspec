@@ -521,10 +521,16 @@ opened the section to read. The strikethrough SHALL be the existing `Face` field
 
 - **WHEN** a `Dashboard` at `Route::Detail` whose selected artifact carries
   `tracks_tasks == true`, and whose one path reads a `## 1. Setup` heading, a
-  `<!-- kind: behavior -->` line, a blank line, `- [ ] 1.1 RED: write the test`, and a
-  continuation line indented six columns reading `covering the degraded path`, is synced and
-  rendered at 120x20 and at 60x20 with the section open — its one path putting every section
-  at depth 0, so the indent rule costs it no columns at either width
+  `<!-- kind: behavior -->` line, a blank line, `- [ ] 1.1 RED: write the test`, a
+  continuation line indented six columns reading `covering the degraded path`, and **a second
+  `## 2. Build` heading carrying one item**, is synced and rendered at 120x20 and at 60x20
+  with the section open — its one path putting every section at depth 0, so the indent rule
+  costs it no columns at either width
+- **AND** the second section is part of the fixture rather than incidental: a task file
+  holding **one** heading yields one section, which has nothing to fold against, so
+  `content_lines` takes the non-foldable `ui::tasks::lines` grammar instead, `detail.expanded`
+  changes nothing, and the scenario below cannot be exercised at all. Measured at
+  implementation
 - **THEN** the content area holds a row whose text is `<!-- kind: behavior -->`, drawn at the
   section body's own column zero as that group's block
 - **AND** it holds a row whose text, with the hanging indent stripped, is

@@ -5176,6 +5176,116 @@ mod tests {
     const TWO_TASK_GROUPS: &str =
         "## 1. Setup\n\n- [x] 1.1 first\n- [ ] 1.2 second\n\n## 2. Build\n\n- [ ] 2.1 third\n";
 
+    /// The tracked-tasks fixture `artifact-folds`' two body scenarios name:
+    /// a lifecycle comment retained as its group's position-0 **block**, an
+    /// item, and that item's own indented continuation line retained as its
+    /// **body**.
+    ///
+    /// A second section is present because the scenarios' own one-heading
+    /// description renders **non-foldable** — one section has nothing to
+    /// fold against, so `ui::detail::content_lines` takes the flat
+    /// `ui::tasks::lines` grammar, `detail.expanded` changes nothing, and
+    /// "Collapsing a tracked-tasks section…" cannot be exercised at all.
+    const TASKS_WITH_BODY_AND_BLOCK: &str = "## 1. Setup\n\n<!-- kind: behavior -->\n\n\
+         - [ ] 1.1 RED: write the test\n      covering the degraded path\n\n\
+         ## 2. Build\n\n- [ ] 2.1 third\n";
+
+    fn body_and_block_dashboard() -> (Dashboard, crate::tasks::Progress) {
+        let progress = crate::tasks::Progress {
+            completed: 0,
+            total: 2,
+        };
+        (
+            synced_task_dashboard(TASKS_WITH_BODY_AND_BLOCK, progress, 1),
+            progress,
+        )
+    }
+
+    /// `artifact-folds` :: "An open tracked-tasks section draws item bodies
+    /// and group blocks", at the **frame** tier `design.md`'s Verification
+    /// Matrix files it under and `tasks.md` -> Ordering calls "the
+    /// end-to-end tier".
+    ///
+    /// The sibling in `ui::detail` asserts the same rows' `ContentKind` and
+    /// their `section_at` resolution, which a buffer cannot show. This one
+    /// asserts they are painted, through a **synced** dashboard: the whole
+    /// sync -> sections -> walk -> frame path, which is group 5's own risk.
+    #[test]
+    fn an_open_tracked_tasks_section_paints_item_bodies_and_group_blocks() {
+        let (d, progress) = body_and_block_dashboard();
+        assert_eq!(
+            d.detail.expanded,
+            std::collections::BTreeSet::from([0, 1]),
+            "both subtrees are incomplete, so the seed opened both"
+        );
+
+        for width in [120, 60] {
+            let interior = interior_width(width);
+            let bar = segmented_bar(&progress, &[(0, 1), (0, 1)], interior);
+            let one = crate::tasks::Progress {
+                completed: 0,
+                total: 1,
+            };
+            assert_eq!(
+                drawn_content_rows(&render_at(width, 20, &d), interior),
+                vec![
+                    padded(&bar, interior),
+                    padded("", interior),
+                    expected_header_at("1. Setup", false, 0, Some(one), interior),
+                    padded("<!-- kind: behavior -->", interior),
+                    padded("", interior),
+                    padded("[ ] 1.1 RED: write the test", interior),
+                    padded("        covering the degraded path", interior),
+                    padded("", interior),
+                    expected_header_at("2. Build", false, 0, Some(one), interior),
+                    padded("[ ] 2.1 third", interior),
+                ],
+                "width {width}: the block at column zero and the body at its hanging indent"
+            );
+        }
+    }
+
+    /// `artifact-folds` :: "Collapsing a tracked-tasks section hides its
+    /// bodies and blocks with its items", at the frame tier.
+    #[test]
+    fn collapsing_a_tracked_tasks_section_hides_its_bodies_and_blocks_from_the_frame() {
+        let (mut d, progress) = body_and_block_dashboard();
+        d.detail.expanded.clear();
+
+        for width in [120, 60] {
+            let interior = interior_width(width);
+            let bar = segmented_bar(&progress, &[(0, 1), (0, 1)], interior);
+            let one = crate::tasks::Progress {
+                completed: 0,
+                total: 1,
+            };
+            let rows = drawn_content_rows(&render_at(width, 20, &d), interior);
+            assert_eq!(
+                rows,
+                vec![
+                    padded(&bar, interior),
+                    padded("", interior),
+                    expected_header_at("1. Setup", true, 0, Some(one), interior),
+                    expected_header_at("2. Build", true, 0, Some(one), interior),
+                ],
+                "width {width}: the bar, its blank line, and the two collapsed headers only"
+            );
+            // Named individually so a failure says which of the three row
+            // kinds survived the fold, rather than only that the row list
+            // differs.
+            for hidden in [
+                "<!-- kind: behavior -->",
+                "covering the degraded path",
+                "[ ] 1.1 RED: write the test",
+            ] {
+                assert!(
+                    !rows.iter().any(|r| r.contains(hidden)),
+                    "width {width}: {hidden:?} survived the fold: {rows:?}"
+                );
+            }
+        }
+    }
+
     /// `tasks-checklist` :: "A foldable tasks tab draws its groups as fold headers".
     #[test]
     fn a_foldable_tasks_tab_draws_its_groups_as_fold_headers() {
