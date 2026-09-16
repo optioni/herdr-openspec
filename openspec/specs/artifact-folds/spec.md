@@ -19,8 +19,10 @@ run together and one capability's `spec.md` its requirements — which is why a 
 its own headings too. It owns the section list and the label rule (the capability directory
 for `specs/<capability>/spec.md`, the file name otherwise, the heading's own text for a
 heading section, total over every adversarial path), the header row's grammar — its `"  " *
-depth` indent, emitted before the glyph so truncation eats the label first, with bodies drawn
-unindented at the full content width — and its fold glyph — taken from
+depth` indent, emitted before the glyph so truncation eats the label first, with a body
+carrying that same indent once `width.saturating_sub(2 * max_depth) >= 64` and sitting at
+column zero at the full content width below that floor, which is what keeps the narrow
+interior's text column — and its fold glyph — taken from
 `ui::list::fold_glyph`, the crate's one site for that pair, so a single fold reads the same in
 both regions — the **collapsed-by-default** rule that makes the tab open as a list of
 capability names, the `Detail::expanded` set that inverts the list's `collapsed` so a freshly

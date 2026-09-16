@@ -597,8 +597,12 @@ no label — it draws no header row, is always open, and is never a fold target.
 
 A labelled section is drawn under a header row of `"  " * depth` then
 `<glyph> <label>`, whose glyph pair is the list region's own, read from
-`ui::list::fold_glyph` so one fold reads the same in both regions; bodies carry
-no depth indent, so the narrow interior spends its columns on text. **All
+`ui::list::fold_glyph` so one fold reads the same in both regions; a body carries
+its own section's indent whenever the tab's content width can afford the deepest
+one — `width.saturating_sub(2 * max_depth) >= 64`, decided once per render from
+`detail.sections` — and sits at column zero below that floor, which is what
+keeps the 58-column narrow interior spending its columns on text while the
+78-column wide one draws each body flush beneath its own header. **All
 sections start collapsed**, so the `specs` tab opens as a list of capability
 names — the problem it was built to solve, since OpenSpec spec files open at
 `## MODIFIED Requirements` and carry the capability name only in their

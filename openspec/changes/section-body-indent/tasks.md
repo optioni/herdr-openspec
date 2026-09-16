@@ -23,9 +23,9 @@
 
 <!-- kind: operational -->
 
-- [ ] 3.1 CHECK: Confirm both prose sites still state the reversed rule — `grep -n "no depth indent" SPEC.md` matches at line 601, and `grep -n "bodies drawn" openspec/specs/artifact-folds/spec.md` matches in the capability's `## Purpose`. Both are green-to-red checks: they must match now and match nothing after 3.2.
-- [ ] 3.2 CHANGE: Rewrite both (audience: anyone implementing against the design contract). `SPEC.md` line 601 — "bodies carry no depth indent, so the narrow interior spends its columns on text" — states the floor instead, keeping the narrow-layout reasoning as the reason the floor exists. `openspec/specs/artifact-folds/spec.md` → `## Purpose` — "with bodies drawn unindented at the full content width" — likewise. The Purpose is edited **in place** because a `## MODIFIED Requirements` delta cannot reach a Purpose and `tests/spec_purposes.rs` only checks it is non-empty, so nothing else would ever catch it. Net change is one clause replaced in each, not added.
-- [ ] 3.3 VERIFY: Both greps from 3.1 now return nothing, and no requirement body in `openspec/specs/` was touched — the deltas fold in at archive time, not now.
+- [x] 3.1 CHECK: Confirm both prose sites still state the reversed rule — `grep -n "no depth indent" SPEC.md` matches at line 601, and `grep -n "bodies drawn" openspec/specs/artifact-folds/spec.md` matches in the capability's `## Purpose`. Both are green-to-red checks: they must match now and match nothing after 3.2.
+- [x] 3.2 CHANGE: Rewrite both (audience: anyone implementing against the design contract). `SPEC.md` line 601 — "bodies carry no depth indent, so the narrow interior spends its columns on text" — states the floor instead, keeping the narrow-layout reasoning as the reason the floor exists. `openspec/specs/artifact-folds/spec.md` → `## Purpose` — "with bodies drawn unindented at the full content width" — likewise. The Purpose is edited **in place** because a `## MODIFIED Requirements` delta cannot reach a Purpose and `tests/spec_purposes.rs` only checks it is non-empty, so nothing else would ever catch it. Net change is one clause replaced in each, not added.
+- [x] 3.3 VERIFY: Both greps from 3.1 now return nothing, and no requirement body in `openspec/specs/` was touched — the deltas fold in at archive time, not now.
 
 ## 4. Lint & Verify
 
