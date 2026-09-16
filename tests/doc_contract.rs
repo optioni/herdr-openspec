@@ -1879,29 +1879,21 @@ fn worker_threads_match_sources() {
 /// `openspec/changes/mouse-input/specs/mouse-input/spec.md`: **each row carries
 /// its `Action` variant in backticks**. A row that names none contributes
 /// nothing, which is why the header row and the separator row are harmless.
+/// **Why this lenient parse survives beside [`documented_mouse_rows`].** The
+/// two answer different questions and the difference is load-bearing. This one
+/// wants the table's row-free **vocabulary**, and leg 1 exists to report a plain
+/// vocabulary mismatch in its own terms *before* the stricter legs run
+/// (`design.md` -> Decision 8). Folding it into a projection of the strict parse
+/// would invert that order: a missing `Zone` token or an unlisted gesture phrase
+/// would then surface as leg 1's failure, which is not what leg 1 is about. The
+/// duplication that did exist — locating the table — is gone: both parses share
+/// [`mouse_table_lines`], so there is one answer to "where is the table" and two
+/// to "what does a row mean".
 fn documented_mouse_actions(spec_md: &str) -> Result<BTreeSet<String>, String> {
-    let keys = section(spec_md, "### Keys")?;
-    let start = keys.find("| Gesture | Action |").ok_or_else(|| {
-        "SPEC.md -> Keys holds no mouse table (no `| Gesture | Action |` header row)".to_string()
-    })?;
-    let table = &keys[start..];
-    let mut names = BTreeSet::new();
-    let mut rows = 0usize;
-    for line in table.lines() {
-        if !line.starts_with('|') {
-            break;
-        }
-        rows += 1;
-        for found in backticked_action_variants(line) {
-            names.insert(found);
-        }
-    }
-    if rows < 3 {
-        return Err(format!(
-            "SPEC.md -> Keys' mouse table has {rows} row(s) - a header, a separator, and at \
-             least one binding are the minimum"
-        ));
-    }
+    let names: BTreeSet<String> = mouse_table_lines(spec_md)?
+        .iter()
+        .flat_map(|line| backticked_action_variants(line))
+        .collect();
     if names.is_empty() {
         return Err(
             "SPEC.md -> Keys' mouse table names no `Action::` variant in backticks - the \
@@ -2251,6 +2243,10 @@ fn mouse_bindings_match_spec_md() {
     let spec_md = read_doc(&manifest_dir().join("SPEC.md")).expect("read SPEC.md");
     let driver = read_doc(&manifest_dir().join("src/ui/driver.rs")).expect("read src/ui/driver.rs");
 
+    // Leg 1, unchanged: the set of backticked `Action::` names on each side.
+    // Kept as the **first** leg so a plain vocabulary mismatch is still reported
+    // in its existing terms, before the stricter legs run on a table whose
+    // vocabulary already agrees (`design.md` -> Decision 8).
     let documented = documented_mouse_actions(&spec_md).expect("SPEC.md -> Keys' mouse table");
     let body = mouse_action_body(&driver).expect("mouse_action's own body");
     let implemented: BTreeSet<String> = backticked_action_variants(body).into_iter().collect();
@@ -2260,6 +2256,400 @@ fn mouse_bindings_match_spec_md() {
         "SPEC.md -> Keys' mouse table documents {documented:?} while \
          ui::driver::mouse_action produces {implemented:?}"
     );
+
+    // Leg 2: the table parses onto the claim's four axes at all — a gesture
+    // phrase outside the closed vocabulary, a `Zone` token naming no variant, a
+    // zone-less binding row, a missing or duplicated catch-all, and a gutted
+    // table are each an error here rather than a silent weakening.
+    let rows = documented_mouse_rows(&spec_md).expect("SPEC.md -> Keys' mouse table, by row");
+
+    // Leg 3: the two-way coverage, against `mouse_action` **executed** at every
+    // cell of the swept frames rather than against its source text.
+    let claims = all_mouse_claims();
+    if let Err(report) = compare_mouse_claims(&rows, &claims) {
+        panic!("SPEC.md -> Keys' mouse table and ui::driver::mouse_action disagree:\n  {report}");
+    }
+
+    // What the sweep must have reached for legs 2 and 3 to mean anything. A
+    // fixture or a frame that stopped reaching a gesture or a zone would make
+    // the rows resting on it vacuous; these say so directly instead.
+    let kinds: BTreeSet<&str> = claims.iter().map(|c| c.kind).collect();
+    assert_eq!(
+        kinds.len(),
+        MOUSE_KINDS.len(),
+        "the sweep reaches {} of the {} MouseEventKind values: {kinds:?}",
+        kinds.len(),
+        MOUSE_KINDS.len()
+    );
+    let zones: BTreeSet<&str> = claims.iter().filter_map(|c| c.zone).collect();
+    assert_eq!(
+        zones.len(),
+        ZONE_VARIANTS.len(),
+        "the sweep reaches {} of the six Zone variants: {zones:?}",
+        zones.len()
+    );
+    assert!(
+        claims.iter().any(|c| c.help_open),
+        "the overlay-open pass is represented in the claim set"
+    );
+
+    // The two rows this change added, for a binding the pane has had since
+    // `help-overlay` and the table documented only in the paragraph after it.
+    assert!(claims.contains(&claim("ScrollDown", true, None, "ScrollDown")));
+    assert!(claims.contains(&claim("ScrollUp", true, None, "ScrollUp")));
+
+    assert_eq!(
+        KNOWN_MOUSE_COLLISIONS.len(),
+        1,
+        "the collision list is pinned by length on EXEMPT_ACTIONS' terms, so the \
+         vacuity direction's blindness cannot grow unnoticed: {KNOWN_MOUSE_COLLISIONS:?}"
+    );
+}
+
+/// Claims two rows may legitimately share, listed by name and pinned by count.
+///
+/// The vacuity direction cannot tell such rows apart: each covers the claim, so
+/// neither is vacuous. Rather than weaken the assertion, the pairs are written
+/// down here and the list's length asserted, so a **third** row joining a
+/// collision fails rather than passing unnoticed
+/// (`design.md` -> Decision 10).
+///
+/// The one at HEAD is the click on a change row and the second click on the row
+/// already selected: both produce `Click(Change)`, because "a second click opens
+/// the detail" is decided in `Dashboard::apply`, not in `mouse_action`.
+const KNOWN_MOUSE_COLLISIONS: [(&str, bool, &str, &str, usize); 1] =
+    [("Down(Left)", false, "ListRow", "Click(Change)", 2)];
+
+/// One row's claims: the **cross product** of its gestures, its zones and its
+/// outcomes. An overlay-open row has one zone slot, `None`, because
+/// `mouse_action` resolves no zone at all under that state; a row that is
+/// neither the catch-all nor an overlay row and names no zone has an **empty**
+/// cross product and is therefore vacuous, which is the right answer.
+///
+/// The catch-all is not computed this way: it claims the remainder.
+fn row_claims(row: &MouseRow) -> BTreeSet<(&'static str, bool, Option<&'static str>, &str)> {
+    let slots: Vec<Option<&'static str>> = if row.help_open {
+        vec![None]
+    } else {
+        row.zones.iter().map(|zone| Some(*zone)).collect()
+    };
+    let mut out = BTreeSet::new();
+    for kind in &row.kinds {
+        for zone in &slots {
+            for outcome in &row.outcomes {
+                out.insert((*kind, row.help_open, *zone, outcome.as_str()));
+            }
+        }
+    }
+    out
+}
+
+fn claim_key(c: &Claim) -> (&'static str, bool, Option<&'static str>, &'static str) {
+    (c.kind, c.help_open, c.zone, c.outcome)
+}
+
+fn describe(kind: &str, help_open: bool, zone: Option<&str>, outcome: &str) -> String {
+    let overlay = if help_open {
+        "overlay open"
+    } else {
+        "overlay closed"
+    };
+    let zone = zone.map_or_else(|| "no zone".to_string(), |z| format!("Zone::{z}"));
+    format!("({kind}, {overlay}, {zone}, {outcome})")
+}
+
+/// The two-way comparison, as a **pure function over both sides** so a defect
+/// can be planted on either without doctoring the tree
+/// (`design.md` -> Decision 3).
+///
+/// 1. every claim the sweep observed is covered by at least one row; one covered
+///    by none fails as **undocumented**, naming all four axes;
+/// 2. every row covers at least one observed claim; a row covering none fails as
+///    **vacuous**, naming the row's own text and the claims actually observed at
+///    that row's own zones, so the reader is told what the row should have said.
+///
+/// Both directions are reported when both fail, rather than the first masking
+/// the second. The catch-all claims the remainder — but only claims whose
+/// outcome is `Ignore`, so a new **active** binding can never hide in it — and
+/// must claim at least one.
+fn compare_mouse_claims(rows: &[MouseRow], claims: &BTreeSet<Claim>) -> Result<(), String> {
+    let catch_alls: Vec<&MouseRow> = rows.iter().filter(|row| row.catch_all).collect();
+    if catch_alls.len() != 1 {
+        return Err(format!(
+            "the mouse table must carry exactly one catch-all row and carries {}",
+            catch_alls.len()
+        ));
+    }
+
+    let observed: BTreeSet<(&str, bool, Option<&str>, &str)> =
+        claims.iter().map(claim_key).collect();
+
+    let mut problems: Vec<String> = Vec::new();
+
+    // Direction 2, and the coverage tally direction 1 and the collision check
+    // both read.
+    let mut cover_count: BTreeMap<(&str, bool, Option<&str>, &str), Vec<&str>> = BTreeMap::new();
+    for row in rows.iter().filter(|row| !row.catch_all) {
+        let mine = row_claims(row);
+        let hits: Vec<_> = mine.iter().filter(|c| observed.contains(*c)).collect();
+        if hits.is_empty() {
+            let near: Vec<String> = claims
+                .iter()
+                .filter(|c| {
+                    c.help_open == row.help_open
+                        && row.kinds.contains(&c.kind)
+                        && c.zone.is_some_and(|z| row.zones.contains(&z))
+                })
+                .map(|c| describe(c.kind, c.help_open, c.zone, c.outcome))
+                .collect();
+            problems.push(format!(
+                "vacuous row - it covers no observed claim: {:?}\n    it claims {:?}\n    \
+                 what is actually observed at its own gestures and zones is {near:?}",
+                row.text,
+                mine.iter()
+                    .map(|(k, h, z, o)| describe(k, *h, *z, o))
+                    .collect::<Vec<_>>()
+            ));
+        }
+        for hit in hits {
+            cover_count.entry(*hit).or_default().push(row.text.as_str());
+        }
+    }
+
+    // Direction 1. The catch-all takes the remainder, `Ignore` only.
+    let mut catch_all_claims = 0usize;
+    let mut undocumented: Vec<String> = Vec::new();
+    for key in &observed {
+        if cover_count.contains_key(key) {
+            continue;
+        }
+        if key.3 == "Ignore" {
+            catch_all_claims += 1;
+        } else {
+            undocumented.push(describe(key.0, key.1, key.2, key.3));
+        }
+    }
+    if !undocumented.is_empty() {
+        problems.push(format!(
+            "undocumented - the pane produces these and no row covers them: {undocumented:?}. \
+             The catch-all does not absorb them: it covers only claims whose outcome is \
+             `Ignore`, so a new active binding can never hide in it"
+        ));
+    }
+    if catch_all_claims == 0 {
+        problems.push(format!(
+            "the catch-all row covers nothing - every observed `Ignore` claim is already \
+             claimed by another row: {:?}",
+            catch_alls[0].text
+        ));
+    }
+
+    // The bounded blindness: a claim shared by more than one row must be listed.
+    for (key, texts) in &cover_count {
+        if texts.len() < 2 {
+            continue;
+        }
+        let pinned = KNOWN_MOUSE_COLLISIONS
+            .iter()
+            .find(|(kind, help_open, zone, outcome, _)| {
+                (*kind, *help_open, Some(*zone), *outcome) == *key
+            })
+            .map(|(_, _, _, _, rows)| *rows);
+        match pinned {
+            Some(count) if count == texts.len() => {}
+            Some(count) => problems.push(format!(
+                "{} rows claim {} - KNOWN_MOUSE_COLLISIONS pins that collision at {count}. \
+                 The rows are {texts:?}",
+                texts.len(),
+                describe(key.0, key.1, key.2, key.3)
+            )),
+            None => problems.push(format!(
+                "{} rows claim {}, which KNOWN_MOUSE_COLLISIONS does not list. Two rows may \
+                 legitimately share one claim, but the vacuity direction cannot tell them \
+                 apart, so every such pair is listed by name and pinned by count. The rows \
+                 are {texts:?}",
+                texts.len(),
+                describe(key.0, key.1, key.2, key.3)
+            )),
+        }
+    }
+
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(problems.join("\n  "))
+    }
+}
+
+/// The real table's rows, for the comparator's controls: one real side, one
+/// hand-built (`design.md` -> Test Boundaries).
+fn real_mouse_rows() -> Vec<MouseRow> {
+    let spec_md = read_doc(&manifest_dir().join("SPEC.md")).expect("read SPEC.md");
+    documented_mouse_rows(&spec_md).expect("SPEC.md -> Keys' mouse table")
+}
+
+/// Every claim the sweep observes, both overlay states over every fixture.
+fn all_mouse_claims() -> BTreeSet<Claim> {
+    let mut claims = mouse_claims(false);
+    claims.extend(mouse_claims(true));
+    claims
+}
+
+fn row_index(rows: &[MouseRow], needle: &str) -> usize {
+    rows.iter()
+        .position(|row| row.text.contains(needle))
+        .unwrap_or_else(|| panic!("SPEC.md -> Keys' mouse table has no row containing {needle:?}"))
+}
+
+#[test]
+fn a_row_describing_a_removed_binding_fails_as_vacuous() {
+    // The regression this whole change exists for. `mouse-text-selection`
+    // deleted the row describing `Target::DetailLine` and the shipped check
+    // could not have noticed if it had not: a set equality over backticked
+    // `Action::` names never reads a row's prose.
+    let mut rows = real_mouse_rows();
+    let at = row_index(
+        &rows,
+        "Left click on any other row of the detail region's content area",
+    );
+    let before = rows[at].outcomes.clone();
+    rows[at].outcomes = vec!["Click(DetailLine)".to_string()];
+    assert_ne!(before, rows[at].outcomes);
+
+    let err = compare_mouse_claims(&rows, &all_mouse_claims())
+        .expect_err("a row covering no observed claim is vacuous");
+    assert!(err.contains("vacuous"), "{err}");
+    assert!(err.contains("Click(DetailLine)"), "{err}");
+    // Task 5.3: the reader is told what the row should have said.
+    assert!(err.contains("Click(DetailHeader)"), "{err}");
+    assert!(err.contains("Select(Begin)"), "{err}");
+
+    // Leg 1 is **not** what fails: the row still names `Action::Click`, which
+    // `mouse_action` still produces elsewhere, which is exactly why the shipped
+    // check passed this row.
+    assert!(rows[at].outcomes.iter().all(|o| o.starts_with("Click")));
+}
+
+#[test]
+fn two_rows_differing_only_in_payload_are_told_apart() {
+    let mut rows = real_mouse_rows();
+    let at = row_index(&rows, "Left click on a section header");
+    rows[at].outcomes = vec!["Click(Change)".to_string()];
+
+    let err = compare_mouse_claims(&rows, &all_mouse_claims())
+        .expect_err("Click(Section) is left uncovered");
+    assert!(err.contains("Click(Section)"), "{err}");
+    assert!(err.contains("ListRow"), "{err}");
+
+    // The companion assertion, and the reason axis 4 keeps the payload
+    // constructor: under the **bare** variant key the same mutation is
+    // invisible. `Click(Section)` and `Click(Change)` both collapse to `Click`,
+    // the mutated row still covers the claim, and nothing is left uncovered.
+    let bare = |outcome: &str| -> String {
+        outcome
+            .split_once('(')
+            .map_or(outcome.to_string(), |(variant, _)| variant.to_string())
+    };
+    let observed: BTreeSet<(&str, bool, Option<&str>, String)> = all_mouse_claims()
+        .iter()
+        .map(|c| (c.kind, c.help_open, c.zone, bare(c.outcome)))
+        .collect();
+    let mut covered = BTreeSet::new();
+    for row in &rows {
+        if row.catch_all {
+            continue;
+        }
+        for kind in &row.kinds {
+            let slots: Vec<Option<&str>> = if row.help_open {
+                vec![None]
+            } else {
+                row.zones.iter().map(|z| Some(*z)).collect()
+            };
+            for zone in slots {
+                for outcome in &row.outcomes {
+                    covered.insert((*kind, row.help_open, zone, bare(outcome)));
+                }
+            }
+        }
+    }
+    let uncovered: Vec<_> = observed
+        .iter()
+        .filter(|c| c.3 != "Ignore" && !covered.contains(*c))
+        .collect();
+    assert!(
+        uncovered.is_empty(),
+        "under the bare-variant key the mutation leaves nothing uncovered, which \
+         is the difference the payload discriminant exists to make: {uncovered:?}"
+    );
+}
+
+#[test]
+fn a_binding_with_no_row_fails_as_undocumented() {
+    let rows = real_mouse_rows();
+    let mut claims = all_mouse_claims();
+    claims.insert(claim("Down(Middle)", false, Some("List"), "ToggleHelp"));
+
+    let err = compare_mouse_claims(&rows, &claims).expect_err("a bound gesture with no row");
+    assert!(err.contains("undocumented"), "{err}");
+    assert!(err.contains("Down(Middle)"), "{err}");
+    assert!(err.contains("List"), "{err}");
+    assert!(err.contains("ToggleHelp"), "{err}");
+    // The catch-all does not absorb it: it covers only `Ignore` claims, so a new
+    // **active** binding can never hide in it.
+    assert!(err.contains("closed") || err.contains("help_open"), "{err}");
+}
+
+#[test]
+fn the_overlay_axis_keeps_the_two_passes_apart() {
+    let mut rows = real_mouse_rows();
+    let at = row_index(&rows, "Left click outside the help overlay's band");
+    rows[at].help_open = false;
+
+    let err = compare_mouse_claims(&rows, &all_mouse_claims())
+        .expect_err("the overlay axis is load-bearing");
+    // Both failures, rather than one masking the other.
+    assert!(err.contains("vacuous"), "{err}");
+    assert!(err.contains("undocumented"), "{err}");
+    assert!(err.contains("ToggleHelp"), "{err}");
+}
+
+#[test]
+fn an_empty_catch_all_fails() {
+    // Driven with a synthetic claim set rather than the real tree, and
+    // deliberately: at HEAD the great majority of claims are `Ignore`, so
+    // against the real tree this rule could never fire — and an assertion that
+    // cannot go red is not a guard.
+    let rows = real_mouse_rows();
+    let active: BTreeSet<Claim> = all_mouse_claims()
+        .into_iter()
+        .filter(|c| c.outcome != "Ignore")
+        .collect();
+    assert!(!active.is_empty());
+
+    let err = compare_mouse_claims(&rows, &active).expect_err("a catch-all covering nothing");
+    assert!(err.contains("catch-all row covers nothing"), "{err}");
+    assert!(err.contains("Anything else"), "the row is named: {err}");
+    // Nothing else fails: every active claim is still covered and no row is
+    // vacuous, so this is the empty catch-all alone rather than a side effect.
+    assert!(!err.contains("vacuous"), "{err}");
+    assert!(!err.contains("undocumented"), "{err}");
+}
+
+#[test]
+fn a_third_row_joining_a_known_collision_fails() {
+    let mut rows = real_mouse_rows();
+    let at = row_index(&rows, "Left click on a change row");
+    let mut third = rows[at].clone();
+    third.text = "| Left click on a change row, a third time | `Action::Click` naming \
+                  `Target::Change` in `Zone::ListRow` |"
+        .to_string();
+    rows.push(third);
+
+    let err = compare_mouse_claims(&rows, &all_mouse_claims())
+        .expect_err("a third row joining the collision");
+    assert!(err.contains("a third time"), "{err}");
+    assert!(err.contains("Click(Change)"), "{err}");
+    assert!(err.contains('2'), "the pinned count is named: {err}");
 }
 
 #[test]

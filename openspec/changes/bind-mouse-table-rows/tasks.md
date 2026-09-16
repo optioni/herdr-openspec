@@ -149,33 +149,33 @@ grep -c "fn mouse_table_claims\|fn compare_mouse_claims" tests/doc_contract.rs; 
 ## 5. The two-way comparator
 <!-- kind: behavior -->
 
-- [ ] 5.1 RED: Write failing tests for `a_row_describing_a_removed_binding_fails_as_vacuous`,
+- [x] 5.1 RED: Write failing tests for `a_row_describing_a_removed_binding_fails_as_vacuous`,
       `two_rows_differing_only_in_payload_are_told_apart`,
       `a_binding_with_no_row_fails_as_undocumented`,
       `the_overlay_axis_keeps_the_two_passes_apart`, and
       `a_third_row_joining_a_known_collision_fails`, each calling the comparator with one real
       side and one hand-built side (per design.md → Test Boundaries).
-- [ ] 5.2 GREEN: Add `compare_mouse_claims(rows, claims) -> Result<(), String>` as a pure
+- [x] 5.2 GREEN: Add `compare_mouse_claims(rows, claims) -> Result<(), String>` as a pure
       function over both arguments, reporting uncovered claims and vacuous rows, and reporting
       **both** when both occur rather than returning at the first.
-- [ ] 5.3 GREEN: Make a vacuous-row report name the claims actually observed at that row's own
+- [x] 5.3 GREEN: Make a vacuous-row report name the claims actually observed at that row's own
       zones, so the reader is told what the row should have said.
-- [ ] 5.4 RED: Write `an_empty_catch_all_fails` — the comparator called with a hand-built claim
+- [x] 5.4 RED: Write `an_empty_catch_all_fails` — the comparator called with a hand-built claim
       set holding no `Ignore` claim. It must be driven synthetically: at HEAD roughly 86 of the
       104 claims are `Ignore`, so this rule can never fire against the real tree.
-- [ ] 5.5 GREEN: Give the catch-all the remainder of the `Ignore` claims, require it to claim at
+- [x] 5.5 GREEN: Give the catch-all the remainder of the `Ignore` claims, require it to claim at
       least one, and add the known-collision list pinned by count (per design.md → Decision 10).
-- [ ] 5.6 GREEN: Wire the comparator into `mouse_bindings_match_spec_md` as legs 2 and 3,
+- [x] 5.6 GREEN: Wire the comparator into `mouse_bindings_match_spec_md` as legs 2 and 3,
       keeping the name-set equality as leg 1. Verify `CLAIM_COUNT` is still 13 and
       `documented_claim_count_matches_the_file` passes untouched.
-- [ ] 5.7 REFACTOR: Now that `SPEC.md` carries the tokens, fold `documented_mouse_actions` into
+- [x] 5.7 REFACTOR: Now that `SPEC.md` carries the tokens, fold `documented_mouse_actions` into
       a projection of `documented_mouse_rows` so one parse serves both — or state why the
       lenient parse must survive for `documented_mouse_actions_fails_on_a_missing_table`.
-- [ ] 5.8 VERIFY: Re-run the planting script from **Planning-time evidence**, with the planted
+- [x] 5.8 VERIFY: Re-run the planting script from **Planning-time evidence**, with the planted
       row carrying `` `Zone::DetailRow` `` and `` `Target::DetailLine` `` and **replacing** the
       real content-row row rather than sitting beside it. It must report `PLANTED_EXIT=101`
       with a message naming **vacuity**, not a missing zone; and `CLEAN_EXIT=0`.
-- [ ] 5.9 Run `cargo test --test doc_contract` — green, no regressions.
+- [x] 5.9 Run `cargo test --test doc_contract` — green, no regressions.
 
 ## 6. Change Review
 <!-- kind: operational -->
