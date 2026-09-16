@@ -388,7 +388,7 @@ impl GroupAcc {
             // fenced blocks hold a blank line, and ending the run there
             // leaves delimiters that no longer pair.
             self.pending.push(line.to_string());
-            if closes_fence(line, self.fence) {
+            if self.fence.is_some_and(|open| closes_fence(line, open)) {
                 self.fence = None;
             }
             return;
@@ -461,16 +461,17 @@ fn dedent(lines: &[String]) -> String {
     lines
         .iter()
         .map(|line| {
-            let mut chars = line.chars();
+            // Up to `shallowest` leading whitespace characters, and never a
+            // character that is not one: a blank line shorter than the
+            // dedent is emptied rather than reaching past its own end.
+            let mut rest = line.as_str();
             for _ in 0..shallowest {
-                match chars.clone().next() {
-                    Some(c) if is_task_whitespace(c) => {
-                        chars.next();
-                    }
+                match rest.chars().next() {
+                    Some(c) if is_task_whitespace(c) => rest = &rest[c.len_utf8()..],
                     _ => break,
                 }
             }
-            chars.as_str()
+            rest
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -499,10 +500,8 @@ fn fence_delimiter(line: &str) -> Option<(char, usize)> {
 /// character, a run at least as long, and nothing but whitespace after it.
 /// The trailing test is what stops a second ```` ```rust ```` inside a block
 /// from closing the first.
-fn closes_fence(line: &str, open: Option<(char, usize)>) -> bool {
-    let Some((marker, len)) = open else {
-        return false;
-    };
+fn closes_fence(line: &str, open: (char, usize)) -> bool {
+    let (marker, len) = open;
     let Some((found, found_len)) = fence_delimiter(line) else {
         return false;
     };
