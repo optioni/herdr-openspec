@@ -390,14 +390,14 @@
 ## 14. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 14.1 CHECK: Inspect the intended verification commands and affected tiers — `make check`
+- [x] 14.1 CHECK: Inspect the intended verification commands and affected tiers — `make check`
   runs format, lint, gates, test, and coverage, and every tier this change touches is inside it.
-- [ ] 14.2 VERIFY: `cargo fmt --all -- --check` — clean.
-- [ ] 14.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
-- [ ] 14.4 VERIFY: `make gates` — every script green.
-- [ ] 14.5 VERIFY: `cargo test --all-features` — green, with the selected count above the 1491
+- [x] 14.2 VERIFY: `cargo fmt --all -- --check` — clean.
+- [x] 14.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
+- [x] 14.4 VERIFY: `make gates` — every script green.
+- [x] 14.5 VERIFY: `cargo test --all-features` — green, with the selected count above the 1491
   measured at HEAD.
-- [ ] 14.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` and the production-slice floor via
+- [x] 14.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` and the production-slice floor via
   `scripts/coverage-prod.py` — both green, neither lowered nor waived.
-- [ ] 14.7 VERIFY: `make check` as the single gate; if it fails, name the failing sub-command.
-- [ ] 14.8 VERIFY: `openspec validate agent-client-choice --strict` — valid.
+- [x] 14.7 VERIFY: `make check` as the single gate; if it fails, name the failing sub-command.
+- [x] 14.8 VERIFY: `openspec validate agent-client-choice --strict` — valid.
