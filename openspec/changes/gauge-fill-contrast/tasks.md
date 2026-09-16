@@ -43,10 +43,10 @@ with this change's proposal, specs, and design committed.
 | …and why the previous figure was wrong | `grep -c '^## '` on `archive/2026-09-06-agent-launch` → 22, but five of those headings hold zero items | `segmented_gauge` filters to `total > 0` (`src/ui/tasks.rs:178`), so that change's real `n` is **17**, floor 34, headroom 11. `grep -c '^## '` counts headings, which is not what the floor uses; the delta spec's own paragraph is corrected in this change |
 | The three prose sites carrying the false claim | `grep -n '▓' SPEC.md AGENTS.md openspec/specs/tasks-progress-bar/spec.md` | `SPEC.md:406` (paragraph `404-410`), `AGENTS.md:142` (paragraph `141-145`; `CLAUDE.md` is a symlink to it), `openspec/specs/tasks-progress-bar/spec.md:66` (paragraph `65-70`, in the **grammar** requirement) |
 
-- [ ] 0.1 CHECK: Re-run every command above and confirm each figure still holds. A figure that
+- [x] 0.1 CHECK: Re-run every command above and confirm each figure still holds. A figure that
       moved sends you somewhere specific — the site split and the seven test names to 1.2 and
       1.3, the helper line numbers to 1.2, the three prose sites to group 3.
-- [ ] 0.2 CHECK: Confirm the baseline is green before any edit. Measured at HEAD on 2026-09-16:
+- [x] 0.2 CHECK: Confirm the baseline is green before any edit. Measured at HEAD on 2026-09-16:
       `cargo test --all-features` exits **0** with **1624 passed, 0 failed, 1 ignored** across
       ten test binaries — lib 1445, main 0, `ci_workflow` 21, `cli` 10, `coverage_prod` 19,
       `degraded_coverage` 10 (+1 ignored), `doc_contract` 107, `gate_controls` 5, `manifest` 4,
@@ -63,7 +63,7 @@ with this change's proposal, specs, and design committed.
       **Known flake:** `gate_controls_catch_their_plants` fails with "the real working tree
       changed while running the gate controls" if anything touches this checkout during the
       run. Re-run in a quiet tree before attributing it to a change.
-- [ ] 0.3 CHECK: Re-run the two RED checks. Both were run at HEAD on 2026-09-16 and neither
+- [x] 0.3 CHECK: Re-run the two RED checks. Both were run at HEAD on 2026-09-16 and neither
       describes the post-change tree, so the behaviour is provably absent before group 1.
       `grep -rl '▓' src/ --include='*.rs' | wc -l` → **2** (`src/ui/tasks.rs`,
       `src/ui/view.rs`); it must read **0** after group 1.
@@ -74,12 +74,12 @@ with this change's proposal, specs, and design committed.
       The second selects nothing, so its positive control is recorded beside it:
       `grep -rlE '⢕|⠌|█' src/ --include='*.rs' | wc -l` → **3**, proving the pattern and the
       path reach the files that will hold braille rather than the check being aimed at nothing.
-- [ ] 0.4 CHECK: Confirm the ▓-retirement check is tree-wide rather than pinned to the two
+- [x] 0.4 CHECK: Confirm the ▓-retirement check is tree-wide rather than pinned to the two
       files that hold the glyph today. Negative control run at HEAD: appending
       `// planted: ▓` to `src/ui/detail.rs` made the check name **3** files including
       `src/ui/detail.rs`; `git checkout -- src/ui/detail.rs` returned it to **2** and
       `git status --porcelain` printed nothing. Re-run it if group 1 changes the check's form.
-- [ ] 0.5 CHECK: Confirm both greps above are absence-of-string checks, not
+- [x] 0.5 CHECK: Confirm both greps above are absence-of-string checks, not
       absence-of-behaviour ones. The behavioural RED is 1.1 and 1.2; these are recorded as a
       starting condition, because a grep cannot fail for the right reason.
 
@@ -98,7 +98,7 @@ percentage*. Each passes an empty `groups` slice, so no glyph in it moves; their
 (`src/ui/tasks.rs:621`, `:2046`, `:2085`, `:2229`, `src/ui/view.rs:7627`) are regression rows
 re-run by 1.9 and 4.5, not rewrites.
 
-- [ ] 1.1 RED: Write three failing `ui::tasks` tests named for their scenarios —
+- [x] 1.1 RED: Write three failing `ui::tasks` tests named for their scenarios —
       `the_fill_boundary_is_the_only_change_of_character_family`,
       `a_group_straddling_the_fill_boundary_keeps_one_identity`, and
       `every_glyph_the_bar_can_draw_measures_one_column`. The first two belong to the
@@ -108,45 +108,50 @@ re-run by 1.9 and 4.5, not rewrites.
       width assertions alone pass at HEAD, since `layout::columns` measures a `char` literal the
       crate never draws. Write that clause first and confirm it fails, or the test is a
       decoration in a group whose marker promises a failing start.
-- [ ] 1.2 RED: Rewrite the two shared helpers to the new glyph set — `gauge_run`'s class
+- [x] 1.2 RED: Rewrite the two shared helpers to the new glyph set — `gauge_run`'s class
       becomes `"█░▒⢕⠌"` and `filled_count` counts `█` and `▒` — then rewrite the six
       `ui::tasks` tests and the one `ui::view` test that 0.1 names. Six of the seven are
       regression rows that only change which glyph they count.
-- [ ] 1.3 RED: The seventh is not. `segmentation_is_total_and_partitions_the_run_exactly`
+- [x] 1.3 RED: The seventh is not. `segmentation_is_total_and_partitions_the_run_exactly`
       gains genuinely new coverage: its glyph-count sum moves from four glyphs to five, and it
       gains the non-interleaving assertion — no position drawn as both families, every braille
       position at or after every block one — over its full `0..=130` × five-fixture sweep. The
       new fixture-specific test in 1.1 asserts that property for one slice at two widths; this
       is the row that asserts it everywhere.
-- [ ] 1.4 RED: Confirm the failures are the missing substitution rather than damaged fixtures:
+- [x] 1.4 RED: Confirm the failures are the missing substitution rather than damaged fixtures:
       run `cargo test --all-features` and check that every failure names a test from 1.1 or
-      1.2 and none names a test outside them. Record the failing count.
-- [ ] 1.5 GREEN: Rewrite `segmented_gauge`'s match arms to the four-case table — `('█', true)
+      1.2 and none names a test outside them. Record the failing count. **8 failures**, all
+      inside the set: the three of 1.1, four of 1.2's six (`a_single_group_is_never_segmented`
+      and `groups_headings_items` pass at HEAD, both being regression rows whose assertions
+      the old glyph set still satisfies), and 1.3's. No test outside the set failed.
+- [x] 1.5 GREEN: Rewrite `segmented_gauge`'s match arms to the four-case table — `('█', true)
       => '▒'`, `('░', false) => '⢕'`, `('░', true) => '⠌'`, everything else unchanged. The
       match still reads the incoming glyph to decide, which is what keeps the fill count fixed
       (design.md -> Decision 6).
-- [ ] 1.6 GREEN: Rewrite `segmented_gauge`'s doc comment (`:133` onward) and `progress_bar`'s
+- [x] 1.6 GREEN: Rewrite `segmented_gauge`'s doc comment (`:133` onward) and `progress_bar`'s
       reference to "alternating shade" so the prose names two character families rather than
       one lightness scale. Leave `gauge_of`'s doc comment alone — it does not move.
       Keep the word **stretch**: `TASKSEAM` greps this file's prose for `Span`, case-sensitively,
       so a sentence lifted from the spec beginning "Spans are proportional…" turns `make gates`
       red. The existing comment records this at `:159-164`; do not delete that aside.
-- [ ] 1.7 CHECK: Confirm `gauge_of` is untouched in signature and output, so `detail-header`'s
+- [x] 1.7 CHECK: Confirm `gauge_of` is untouched in signature and output, so `detail-header`'s
       twelve-column gauge cannot have moved: `git diff src/ui/tasks.rs` shows no hunk inside
       `gauge_of`, and `cargo test --all-features --lib ui::detail` is green.
-- [ ] 1.8 CHECK: Run the two 0.3 greps again and confirm they have flipped —
+- [x] 1.8 CHECK: Run the two 0.3 greps again and confirm they have flipped —
       `grep -rl '▓' src/ --include='*.rs' | wc -l` → 0, and
       `grep -rl '⢕\|⠌' src/ --include='*.rs' | wc -l` → **2**, naming exactly `src/ui/tasks.rs`
       and `src/ui/view.rs` and no other file. The count is the view test's own assertions; the
       "no other file" half is the claim worth checking, since braille is the boundary vocabulary
       and `src/ui/detail.rs` draws an unsegmented gauge that must not gain any.
-- [ ] 1.9 CHECK: Confirm `░` survived, with a check that can fail:
+- [x] 1.9 CHECK: Confirm `░` survived, with a check that can fail:
       `grep -rl '░' src/ --include='*.rs' | wc -l` → **3**, naming `src/ui/tasks.rs`,
       `src/ui/detail.rs` and `src/ui/view.rs`. Use `-rl`, never `-rc`: `grep -rc` prints a
       `path:0` line for every file it scans, so it names all three whatever the answer is.
-- [ ] 1.10 REFACTOR: Fold the four match arms into one table if a second copy of the
-      even/odd decision emerged, or record that none was needed.
-- [ ] 1.11 VERIFY: `cargo test --all-features` — green — and `/bin/sh scripts/gates/taskwidths.sh`,
+- [x] 1.10 REFACTOR: Fold the four match arms into one table if a second copy of the
+      even/odd decision emerged, or record that none was needed. **None was needed** — the
+      even/odd decision is computed once (`let odd = group % 2 == 1;`) and read by one match;
+      no second copy emerged, and the four arms are already the table.
+- [x] 1.11 VERIFY: `cargo test --all-features` — green — and `/bin/sh scripts/gates/taskwidths.sh`,
       `taskseam.sh`, `colwidth.sh` and `noio-view.sh` each exit 0. The whole suite, not a module
       filter: this group edits `src/ui/view.rs`, which a `ui::tasks` filter would not run.
 

@@ -28,7 +28,7 @@ use crate::ui::layout::{columns, truncate_columns};
 /// already avoids a `u16` subtraction underflowing.
 ///
 /// `groups` is one `Progress` per task group in document order, which
-/// [`segmented_gauge`] uses to mark the group boundaries by alternating shade.
+/// [`segmented_gauge`] uses to mark the group boundaries by alternating glyph.
 /// It affects **only** which glyph each position is drawn with — never `g`,
 /// never `filled`, never either cell, and never the drop-whole order — so an
 /// **empty slice** produces a byte-identical line to the one this function
@@ -129,19 +129,44 @@ pub(crate) fn gauge_of(progress: &crate::tasks::Progress, g: u16) -> String {
     out
 }
 
-/// [`gauge_of`]'s run with each position's **shade** chosen by which group it
-/// falls in: `█`/`░` in an even-indexed contributing group and `▓`/`▒` in an
+/// [`gauge_of`]'s run with each position's **glyph** chosen by which group it
+/// falls in: `█`/`⢕` in an even-indexed contributing group and `▒`/`⠌` in an
 /// odd-indexed one. A glyph **substitution**, never a second fill computation —
-/// each position keeps whether it is filled or empty and changes only which of
-/// two shades it is drawn with, so `filled == g` iff complete, `filled == 0`
+/// each position keeps whether it is filled or empty and changes only which
+/// glyph it is drawn with, so `filled == g` iff complete, `filled == 0`
 /// whenever `completed == 0`, and the `u128` arithmetic all hold unchanged and
 /// by construction. `gauge_of` itself does not move, so `detail-header`'s
 /// twelve-column gauge is untouched.
 ///
+/// The filled half and the empty half come from **different character
+/// families** — block elements when filled, braille dot patterns when empty —
+/// and that, not a difference in lightness, is what marks where the fill ends.
+/// Under the previous table the fill boundary was a one-step shade change,
+/// exactly the weight of the group boundaries beside it, so every edge in the
+/// bar competed equally and the one a reader actually wants at a glance was the
+/// hardest to find. A block-to-dots transition cannot be confused with a
+/// boundary between two blocks or between two dot patterns, which is why both
+/// halves can now carry boundaries without either blurring the fill edge: `▒`
+/// is not read as partly filled, because nothing in the empty half is a shade
+/// for it to sit on a scale with.
+///
+/// The two alternations are **in phase** — even-indexed is `█` and `⢕`,
+/// odd-indexed `▒` and `⠌` — so a group straddling the fill boundary keeps one
+/// identity on both sides of it rather than reading as two groups. That is the
+/// common case: exactly one group is usually in progress.
+///
+/// `░` survives; the second block shade this table used to hold does not. The
+/// rule that results: **block shades are the unsegmented vocabulary and braille
+/// is the boundary vocabulary**, so braille appears exactly where there are
+/// boundaries to mark and nowhere else in the crate (design.md -> Decision 5).
+/// The retired glyph is deliberately not named here: `gauge-fill-contrast`'s
+/// own check that it is gone from the crate is a tree-wide grep for it, which a
+/// mention in this comment would defeat.
+///
 /// A **contributing group** is one whose `total` is greater than zero. An empty
 /// group contributes no stretch and **consumes no index**, so two groups left
 /// adjacent after empty ones are dropped still alternate — an empty group
-/// taking an index would give two neighbours the same shade and erase the
+/// taking an index would give two neighbours the same glyph and erase the
 /// boundary between them.
 ///
 /// Each group's stretch is proportional to its item count, by **cumulative flooring**: with
@@ -166,7 +191,7 @@ pub(crate) fn gauge_of(progress: &crate::tasks::Progress, g: u16) -> String {
 /// Segmentation is **skipped entirely** — the plain `█`/`░` run — when `groups`
 /// holds fewer than two contributing groups, when `T` is zero, or when
 /// `g < 2 * n`. The last is the legibility floor, stated in columns: a
-/// one-column stretch cannot be read as a shade run, so a gauge that cannot give
+/// one-column stretch cannot be read as a glyph run, so a gauge that cannot give
 /// every contributing group two columns shows no boundaries rather than
 /// unreliable ones (design.md -> Decision 5).
 fn segmented_gauge(
@@ -198,8 +223,9 @@ fn segmented_gauge(
         }
         let odd = group % 2 == 1;
         out.push(match (glyph, odd) {
-            ('█', true) => '▓',
-            ('░', true) => '▒',
+            ('█', true) => '▒',
+            ('░', false) => '⢕',
+            ('░', true) => '⠌',
             (g, _) => g,
         });
     }
@@ -1169,17 +1195,28 @@ mod tests {
         Progress { completed, total }
     }
 
-    /// The four glyphs the segmented gauge can draw, and the two counts every
+    /// The five glyphs the gauge can draw — the four of the segmentation
+    /// table plus the `░` the unsegmented run keeps — and the counts every
     /// test below reads a run through.
     fn gauge_run(bar: &str) -> String {
-        bar.chars().take_while(|c| "█░▓▒".contains(*c)).collect()
+        bar.chars().take_while(|c| "█░▒⢕⠌".contains(*c)).collect()
     }
 
     fn filled_count(bar: &str) -> usize {
         gauge_run(bar)
             .chars()
-            .filter(|&c| c == '█' || c == '▓')
+            .filter(|&c| c == '█' || c == '▒')
             .count()
+    }
+
+    /// The two character families the fill boundary separates: blocks when
+    /// filled, braille dot patterns when empty.
+    fn is_block(c: char) -> bool {
+        c == '█' || c == '▒'
+    }
+
+    fn is_braille(c: char) -> bool {
+        c == '⢕' || c == '⠌'
     }
 
     /// `tasks-progress-bar` :: "Two groups of unequal size get spans
@@ -1192,19 +1229,19 @@ mod tests {
             let bar = progress_bar(&progress, &groups, width);
             let run = gauge_run(&bar);
             let g = run.chars().count();
-            let even = run.chars().filter(|&c| c == '█' || c == '░').count();
-            let odd = run.chars().filter(|&c| c == '▓' || c == '▒').count();
+            let even = run.chars().filter(|&c| c == '█' || c == '⢕').count();
+            let odd = run.chars().filter(|&c| c == '▒' || c == '⠌').count();
             assert_eq!(even + odd, g, "width {width}: every position is drawn");
             assert_eq!(even, g * 9 / 12, "width {width}: the first span");
             assert_eq!(odd, g - g * 9 / 12, "width {width}: the second span");
-            // The first `floor(g * 9 / 12)` positions are the `█`/`░` pair and
-            // the remainder the `▓`/`▒` pair, in that order.
+            // The first `floor(g * 9 / 12)` positions are the `█`/`⢕` pair and
+            // the remainder the `▒`/`⠌` pair, in that order.
             assert!(
-                run.chars().take(even).all(|c| c == '█' || c == '░'),
+                run.chars().take(even).all(|c| c == '█' || c == '⢕'),
                 "width {width}: {run:?}"
             );
             assert!(
-                run.chars().skip(even).all(|c| c == '▓' || c == '▒'),
+                run.chars().skip(even).all(|c| c == '▒' || c == '⠌'),
                 "width {width}: {run:?}"
             );
 
@@ -1212,12 +1249,22 @@ mod tests {
             // produces.
             assert_eq!(filled_count(&bar), g * 3 / 12, "width {width}");
 
-            // And the empty-slice call differs only in the shades.
+            // And the empty-slice call holds only `█` and `░`, with the same
+            // filled count and no braille anywhere.
             let plain = progress_bar(&progress, &[], width);
+            let plain_run = gauge_run(&plain);
+            assert!(
+                plain_run.chars().all(|c| c == '█' || c == '░'),
+                "width {width}: {plain_run:?}"
+            );
+            assert!(
+                !plain_run.chars().any(is_braille),
+                "width {width}: the unsegmented run drew braille"
+            );
             assert_eq!(
-                bar.replace('▓', "█").replace('▒', "░"),
-                plain,
-                "width {width}: segmentation moved something other than a glyph"
+                filled_count(&plain),
+                g * 3 / 12,
+                "width {width}: the unsegmented fill count"
             );
         }
     }
@@ -1233,16 +1280,16 @@ mod tests {
             let bar = progress_bar(&progress, &with_empty, width);
             let run = gauge_run(&bar);
             let g = run.chars().count();
-            let first = run.chars().filter(|&c| c == '░').count();
-            let second = run.chars().filter(|&c| c == '▒').count();
+            let first = run.chars().filter(|&c| c == '⢕').count();
+            let second = run.chars().filter(|&c| c == '⠌').count();
             assert_eq!(first + second, g, "width {width}: every position is drawn");
             assert_eq!(first, g / 2, "width {width}: the first half");
             assert!(
-                run.chars().take(first).all(|c| c == '░'),
+                run.chars().take(first).all(|c| c == '⢕'),
                 "width {width}: {run:?}"
             );
             assert!(
-                run.chars().skip(first).all(|c| c == '▒'),
+                run.chars().skip(first).all(|c| c == '⠌'),
                 "width {width}: {run:?}"
             );
 
@@ -1272,15 +1319,19 @@ mod tests {
             if g == 0 {
                 continue;
             }
-            let shaded = run.chars().any(|c| c == '▓' || c == '▒');
+            let marked = run.chars().any(|c| c == '▒' || is_braille(c));
             if g < 44 {
                 below += 1;
-                assert!(!shaded, "width {width}: g {g} is below the floor: {run:?}");
+                assert!(!marked, "width {width}: g {g} is below the floor: {run:?}");
+                assert!(
+                    run.chars().all(|c| c == '█' || c == '░'),
+                    "width {width}: g {g} is below the floor: {run:?}"
+                );
             } else {
                 above += 1;
                 assert!(
-                    run.chars().any(|c| c == '█' || c == '░')
-                        && run.chars().any(|c| c == '▓' || c == '▒'),
+                    run.chars().any(|c| c == '█' || c == '⢕')
+                        && run.chars().any(|c| c == '▒' || c == '⠌'),
                     "width {width}: g {g} is above the floor and holds one pair only: {run:?}"
                 );
             }
@@ -1297,7 +1348,7 @@ mod tests {
             let run = gauge_run(&progress_bar(&progress, &groups, width));
             assert!(run.chars().count() >= 44, "width {width}");
             assert!(
-                run.chars().any(|c| c == '▓' || c == '▒'),
+                run.chars().any(|c| c == '▒' || is_braille(c)),
                 "width {width}: {run:?}"
             );
         }
@@ -1310,13 +1361,187 @@ mod tests {
         for width in [78, 58] {
             let bar = progress_bar(&progress, &[p(1, 2)], width);
             assert!(
-                !bar.contains('▓') && !bar.contains('▒'),
+                !bar.contains('▒') && !bar.chars().any(is_braille),
                 "width {width}: one group has no boundary to mark: {bar:?}"
+            );
+            assert!(
+                gauge_run(&bar).chars().all(|c| c == '█' || c == '░'),
+                "width {width}: {bar:?}"
             );
             assert_eq!(
                 bar,
                 progress_bar(&progress, &[], width),
                 "width {width}: byte-identical to the empty-slice call"
+            );
+        }
+    }
+
+    /// `tasks-progress-bar` :: "The fill boundary is the only change of
+    /// character family".
+    ///
+    /// The fixture is this repository's own `mouse-text-selection` at the
+    /// moment this change was written — eleven groups, 25 of 47 items — chosen
+    /// because its straddling group's index is **odd**, which under the
+    /// previous table put the fill boundary at the weakest edge in the bar.
+    #[test]
+    fn the_fill_boundary_is_the_only_change_of_character_family() {
+        let progress = p(25, 47);
+        let groups = [
+            p(4, 4),
+            p(4, 4),
+            p(3, 3),
+            p(5, 5),
+            p(8, 8),
+            p(1, 3),
+            p(0, 4),
+            p(0, 3),
+            p(0, 4),
+            p(0, 3),
+            p(0, 6),
+        ];
+        // The widths are written unsuffixed: `TASKWIDTHS` scans `\b(\d+)\b`
+        // and does not see `78u16`.
+        for (width, expected_g) in [(78, 66), (58, 46)] {
+            let bar = progress_bar(&progress, &groups, width);
+            let run = gauge_run(&bar);
+            let chars: Vec<char> = run.chars().collect();
+            let g = chars.len();
+            assert_eq!(g, expected_g, "width {width}: the gauge run's width");
+
+            // Exactly one block-followed-by-braille adjacency, and none the
+            // other way round.
+            let forward = chars
+                .windows(2)
+                .filter(|w| is_block(w[0]) && is_braille(w[1]))
+                .count();
+            let backward = chars
+                .windows(2)
+                .filter(|w| is_braille(w[0]) && is_block(w[1]))
+                .count();
+            assert_eq!(forward, 1, "width {width}: {run:?}");
+            assert_eq!(backward, 0, "width {width}: {run:?}");
+
+            // The **first braille position** is `floor(g * 25 / 47)`, so the
+            // adjacency above sits one before it. This assertion reads the
+            // first braille position, which is the one of the two the spec
+            // names as the index.
+            let first_braille = chars.iter().position(|&c| is_braille(c)).unwrap();
+            assert_eq!(first_braille, g * 25 / 47, "width {width}: {run:?}");
+            assert_eq!(
+                chars
+                    .windows(2)
+                    .position(|w| is_block(w[0]) && is_braille(w[1]))
+                    .unwrap(),
+                g * 25 / 47 - 1,
+                "width {width}: the adjacency sits one before it"
+            );
+
+            // And it is the same index at which `█` becomes `░` unsegmented.
+            let plain = gauge_run(&progress_bar(&progress, &[], width));
+            assert_eq!(
+                plain.chars().position(|c| c == '░').unwrap(),
+                first_braille,
+                "width {width}: the fill boundary moved"
+            );
+
+            // All four glyphs are actually reached.
+            for glyph in ['█', '▒', '⢕', '⠌'] {
+                assert!(
+                    chars.contains(&glyph),
+                    "width {width}: {glyph:?} never drawn: {run:?}"
+                );
+            }
+        }
+    }
+
+    /// `tasks-progress-bar` :: "A group straddling the fill boundary keeps one
+    /// identity".
+    #[test]
+    fn a_group_straddling_the_fill_boundary_keeps_one_identity() {
+        let progress = p(1, 4);
+        let groups = [p(1, 2), p(0, 2)];
+        for width in [78, 58] {
+            let bar = progress_bar(&progress, &groups, width);
+            let run = gauge_run(&bar);
+            let chars: Vec<char> = run.chars().collect();
+            let g = chars.len();
+            // Group 0 owns `[0, floor(g/2))`; group 1 the remainder.
+            let split = g / 2;
+            let (first, second) = chars.split_at(split);
+
+            // Group 0 straddles the fill boundary at `floor(g/4)`: `█` before
+            // it and `⢕` after, both the even-indexed pair.
+            let fill = g / 4;
+            assert!(
+                first[..fill].iter().all(|&c| c == '█'),
+                "width {width}: {run:?}"
+            );
+            assert!(
+                first[fill..].iter().all(|&c| c == '⢕'),
+                "width {width}: {run:?}"
+            );
+            assert!(
+                fill > 0 && fill < split,
+                "width {width}: g {g} must straddle"
+            );
+
+            // Group 1 is wholly empty and wholly odd.
+            assert!(second.iter().all(|&c| c == '⠌'), "width {width}: {run:?}");
+
+            // No position of group 0 carries an odd-indexed glyph, so the two
+            // alternations are in phase and it does not read as two groups.
+            assert!(
+                !first.iter().any(|&c| c == '▒' || c == '⠌'),
+                "width {width}: group 0 changed identity at the fill boundary: {run:?}"
+            );
+        }
+    }
+
+    /// `tasks-progress-bar` :: "Every glyph the bar can draw measures one
+    /// column".
+    ///
+    /// The glyph-presence clause is what makes this red before the
+    /// substitution lands: `layout::columns` measures a `char` literal whether
+    /// or not the crate ever draws it, so the width assertions alone would
+    /// pass against any build.
+    #[test]
+    fn every_glyph_the_bar_can_draw_measures_one_column() {
+        for glyph in ['█', '░', '▒', '⢕', '⠌'] {
+            assert_eq!(columns(&glyph.to_string()), 1, "{glyph:?}");
+        }
+
+        let progress = p(25, 47);
+        let groups = [
+            p(4, 4),
+            p(4, 4),
+            p(3, 3),
+            p(5, 5),
+            p(8, 8),
+            p(1, 3),
+            p(0, 20),
+        ];
+        for width in [78, 58] {
+            let bar = progress_bar(&progress, &groups, width);
+            let run = gauge_run(&bar);
+            assert_eq!(
+                columns(&run),
+                run.chars().count(),
+                "width {width}: a gauge glyph is not one column: {run:?}"
+            );
+            assert_eq!(columns(&bar), width as usize, "width {width}: {bar:?}");
+
+            // The segmented run reaches all four segmentation glyphs, and the
+            // empty-slice call reaches `░`, so all five are measured rather
+            // than the scenario passing on a run holding only two of them.
+            for glyph in ['█', '▒', '⢕', '⠌'] {
+                assert!(
+                    run.contains(glyph),
+                    "width {width}: {glyph:?} never drawn: {run:?}"
+                );
+            }
+            assert!(
+                gauge_run(&progress_bar(&progress, &[], width)).contains('░'),
+                "width {width}: the unsegmented run drew no `░`"
             );
         }
     }
@@ -1346,7 +1571,12 @@ mod tests {
                 );
                 let run = gauge_run(&bar);
                 let g = run.chars().count();
-                let counts = ['█', '░', '▓', '▒']
+                // Five glyphs rather than the segmentation table's four: this
+                // sweep deliberately reaches widths and slices where
+                // segmentation is **skipped**, and there the run is the `█`/`░`
+                // pair `gauge_of` returns, so a sum over the table alone is
+                // short by every `░` on that path.
+                let counts = ['█', '░', '▒', '⢕', '⠌']
                     .iter()
                     .map(|&glyph| run.chars().filter(|&c| c == glyph).count())
                     .sum::<usize>();
@@ -1361,6 +1591,23 @@ mod tests {
                     filled_count(&progress_bar(progress, &[], width)),
                     "case {index} width {width}: the fill moved"
                 );
+                // No position is drawn with both families, and the two never
+                // interleave: every braille position lies at or after every
+                // block one, so the fill boundary is a single transition
+                // rather than a scatter.
+                let chars: Vec<char> = run.chars().collect();
+                assert!(
+                    chars.iter().all(|&c| !(is_block(c) && is_braille(c))),
+                    "case {index} width {width}: {run:?}"
+                );
+                let last_block = chars.iter().rposition(|&c| is_block(c));
+                let first_braille = chars.iter().position(|&c| is_braille(c));
+                if let (Some(last_block), Some(first_braille)) = (last_block, first_braille) {
+                    assert!(
+                        first_braille > last_block,
+                        "case {index} width {width}: the families interleave: {run:?}"
+                    );
+                }
             }
         }
 
@@ -1370,10 +1617,7 @@ mod tests {
         for width in [78, 58] {
             let bar = progress_bar(&p(usize::MAX, usize::MAX), &groups, width);
             let run = gauge_run(&bar);
-            assert!(
-                run.chars().all(|c| c == '█' || c == '▓'),
-                "width {width}: {run:?}"
-            );
+            assert!(run.chars().all(is_block), "width {width}: {run:?}");
             assert!(bar.ends_with("100%"), "width {width}: {bar:?}");
         }
     }
@@ -1495,7 +1739,7 @@ mod tests {
             let out = lines(source, &progress, width);
             let bar = progress_bar(&progress, &per_group, width);
             assert!(
-                bar.contains('▓') || bar.contains('▒'),
+                bar.contains('▒') || bar.chars().any(is_braille),
                 "width {width}: two groups, so the bar segments"
             );
             let texts: Vec<String> = out.iter().map(|l| l.text()).collect();

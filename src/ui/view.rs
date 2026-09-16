@@ -5168,41 +5168,41 @@ mod tests {
             let interior = interior_width(width);
             let bar = drawn_content_rows(&render_at(width, 20, &d), interior)[0].clone();
             assert!(
-                bar.contains('▓') || bar.contains('▒'),
+                bar.contains('▒') || bar.contains('⢕') || bar.contains('⠌'),
                 "width {width}: the pane draws no segmented gauge at all: {bar:?}"
             );
 
-            // The first group's span is the `█`/`░` pair and the second the
-            // `▓`/`▒` pair, their widths in the ratio the two sections' own
+            // The first group's span is the `█`/`⢕` pair and the second the
+            // `▒`/`⠌` pair, their widths in the ratio the two sections' own
             // totals give — 2 items against 1.
-            let first: usize = bar.chars().filter(|&c| c == '█' || c == '░').count();
-            let second: usize = bar.chars().filter(|&c| c == '▓' || c == '▒').count();
+            let first: usize = bar.chars().filter(|&c| c == '█' || c == '⢕').count();
+            let second: usize = bar.chars().filter(|&c| c == '▒' || c == '⠌').count();
             let g = first + second;
             assert_eq!(first, g * 2 / 3, "width {width}: first span");
             assert_eq!(second, g - g * 2 / 3, "width {width}: second span");
 
             // The run's first position belongs to the first group, and its
             // last to the second, so the order is document order.
-            let run: String = bar.chars().take_while(|c| "█░▓▒".contains(*c)).collect();
+            let run: String = bar.chars().take_while(|c| "█░▒⢕⠌".contains(*c)).collect();
             assert!(
-                run.starts_with('█') || run.starts_with('░'),
+                run.starts_with('█') || run.starts_with('⢕'),
                 "width {width}: {run:?}"
             );
             assert!(
-                run.ends_with('▓') || run.ends_with('▒'),
+                run.ends_with('▒') || run.ends_with('⠌'),
                 "width {width}: {run:?}"
             );
         }
 
         // The same dashboard whose artifact does not track tasks draws no
-        // progress-bar row at all, and no shade from either new pair anywhere.
+        // progress-bar row at all, and no `▒` and no braille glyph anywhere.
         let prose = synced_task_dashboard(TWO_TASK_GROUPS, progress, 0);
         for width in [120, 60] {
             let buf = render_at(width, 20, &prose);
             for y in 0..buf.area.height {
                 let row = row_text(&buf, y);
                 assert!(
-                    !row.contains('▓') && !row.contains('▒'),
+                    !row.contains('▒') && !row.contains('⢕') && !row.contains('⠌'),
                     "width {width} row {y}: {row:?}"
                 );
             }
