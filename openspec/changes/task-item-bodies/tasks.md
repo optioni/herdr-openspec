@@ -25,10 +25,10 @@
 
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: Write failing tests for `a_fragments_inline_faces_are_set_and_its_text_is_unchanged`, `a_leading_block_marker_is_literal_text_not_a_block`, `a_fragment_wraps_and_hard_splits_exactly_as_a_paragraph_does`, and `empty_whitespace_and_zero_width_inputs_return_nothing`, each at widths `78` and `58`.
-- [ ] 3.2 GREEN: Add `pub fn inline(text: &str, width: u16) -> Vec<Line>` in `src/ui/markdown.rs`, inserting the CommonMark backslash escape immediately before the character that opens the block and only on a genuine block opener (design.md → Decision 4). The escape goes **after** a digit run, never before it; a bare `**` or `*` gets none; a leading `` ``` `` gets one. The `pulldown-cmark` option set does not move.
-- [ ] 3.3 CHECK: Re-run `/bin/sh scripts/gates/mdseam.sh` and `/bin/sh scripts/gates/mdwidths.sh` — the second requires every `#[test]` in `src/ui/markdown.rs` to name both `58` and `78` as unsuffixed literals, against a floor of `MD_MIN=35` with 40 present at HEAD.
-- [ ] 3.4 VERIFY: `cargo test --lib ui::markdown::` — 40 tests at HEAD plus this group's, green — and confirm the two failure modes design.md → Decision 4 measured: no rendered row begins with a literal `\`, and `inline("**RED**: x", 78)`'s leading segment carries `face.strong`.
+- [x] 3.1 RED: Write failing tests for `a_fragments_inline_faces_are_set_and_its_text_is_unchanged`, `a_leading_block_marker_is_literal_text_not_a_block`, `a_fragment_wraps_and_hard_splits_exactly_as_a_paragraph_does`, and `empty_whitespace_and_zero_width_inputs_return_nothing`, each at widths `78` and `58`.
+- [x] 3.2 GREEN: Add `pub fn inline(text: &str, width: u16) -> Vec<Line>` in `src/ui/markdown.rs`, inserting the CommonMark backslash escape immediately before the character that opens the block and only on a genuine block opener (design.md → Decision 4). The escape goes **after** a digit run, never before it; a bare `**` or `*` gets none; a leading `` ``` `` gets one. The `pulldown-cmark` option set does not move.
+- [x] 3.3 CHECK: Re-run `/bin/sh scripts/gates/mdseam.sh` and `/bin/sh scripts/gates/mdwidths.sh` — the second requires every `#[test]` in `src/ui/markdown.rs` to name both `58` and `78` as unsuffixed literals, against a floor of `MD_MIN=35` with 40 present at HEAD.
+- [x] 3.4 VERIFY: `cargo test --lib ui::markdown::` — 40 tests at HEAD plus this group's, green — and confirm the two failure modes design.md → Decision 4 measured: no rendered row begins with a literal `\`, and `inline("**RED**: x", 78)`'s leading segment carries `face.strong`.
 
 ## 4. The checklist grammar becomes `group_body`
 
