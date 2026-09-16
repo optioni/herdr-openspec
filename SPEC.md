@@ -544,9 +544,18 @@ The **tracked-tasks tab** — identified by **position**, from the schema
 artifact `ArtifactRef::tracks_tasks` marks, never by id or filename —
 renders `ui::tasks`' grammar: a progress bar showing the change's own
 `progress` (never a second count of the source), then task groups under
-their headings with a `[✓]`/`[ ]` glyph per item (`tasks-tab`). Every other
-tab is rendered by
-`markdown-viewer`'s markdown viewer, whose rendering grammar is: a heading
+their headings, each drawing a `[✓]`/`[ ]` glyph line per item, that item's
+own **body** beneath it at a hanging indent falling after the task number,
+and the group's **blocks** at column zero between the items they sit between
+(`tasks-tab`, `task-item-bodies`). Every tab reaches
+`markdown-viewer`'s markdown viewer, and the tracked-tasks tab differs in
+*what* it hands that viewer rather than in whether it uses one: an item's
+text is a **fragment** and goes through `ui::markdown::inline`, which renders
+it as a single paragraph recognising no block construct, while a body and a
+block are **documents** and go through `ui::markdown::lines` — the same entry
+point every other tab uses whole. So fenced code, tables and block quotes
+draw identically on both paths, and item text is faced rather than shown as
+literal markers. That shared grammar is: a heading
 keeps its `#` markers rather than being distinguished by colour; a paragraph
 word-wraps to the interior width, with a **soft** break folded into a single
 space so the paragraph reflows as one unit and a **hard** break — two

@@ -7,18 +7,26 @@ filename — that swaps `ui::markdown`'s grammar for `ui::tasks`', and the line 
 results. Which of `ui::tasks`' three entry points draws it follows the tab's foldability, not
 a second decision about its kind: an unsplit file is `ui::tasks::lines` whole, and a file that
 split at its headings is `ui::tasks::bar_lines` above every section header with
-`ui::tasks::items` inside each open group — `lines` calls `items` per group itself, so a folded
-group and an unfolded one cannot disagree about an item line, and a group's heading is drawn as
-its header row or as a heading line but never both and never neither. The grammar is heading
-lines reproduced from their level, one `[✓]`/`[ ]` glyph line per item
-— the same glyph `markdown-render` gives a task-list item, so the two checkbox renderers agree
-by construction and what names this path is the progress-bar row rather than the glyph —
-preserving the parse's own indent, hanging-indent wrapping, whole-indent dropping as the width
-collapses, and blank separators between groups. It fixes `No tasks yet` for a source that
-holds no items, kept distinct from `artifact-content`'s `No content yet` for a source that
-does not exist, and it carries the read-only guarantee: no key toggles an item, no action
-mutates a `Change`, and no module the dashboard reaches names a filesystem write API. The bar
-that leads the tab is `tasks-progress-bar`'s.
+`ui::tasks::group_body` inside each open group — `lines` calls `group_body` per group itself, so
+a folded group and an unfolded one cannot disagree about an item line, and a group's heading is
+drawn as its header row or as a heading line but never both and never neither. The grammar is
+heading lines reproduced from their level, then, per group in document order, one `[✓]`/`[ ]`
+glyph line per item — the same glyph `markdown-render` gives a task-list item, so the two
+checkbox renderers agree by construction and what names this path is the progress-bar row
+rather than the glyph — each item's own **body** beneath it at a hanging indent that falls
+after the task number, and each of the group's **blocks** at column zero between the items they
+sit between. An item's text is a fragment and goes through `ui::markdown::inline`; its body and
+the group's blocks are documents and go through `ui::markdown::lines`, so fenced code, tables
+and block quotes draw with the grammar every other tab already uses, and item text is faced
+rather than shown as literal markers. A block is separated from the rows around it by exactly
+one blank row and by none where there is no row to separate from. The parse's own indent,
+whole-indent dropping as the width collapses — which drops an item's body with the prefix it
+hangs from — and blank separators between groups are all preserved. It fixes `No tasks yet` for
+a source that holds no items, followed by that source's own retained blocks, kept distinct from
+`artifact-content`'s `No content yet` for a source that does not exist, and it carries the
+read-only guarantee: no key toggles an item, no action mutates a `Change`, and no module the
+dashboard reaches names a filesystem write API. The bar that leads the tab is
+`tasks-progress-bar`'s.
 
 ## Requirements
 
