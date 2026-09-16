@@ -31,6 +31,26 @@ Follow these without exception:
 5. Commit after each step — one commit for RED (failing test), one for GREEN (passing), one for REFACTOR if there are changes. Do not batch the whole group into one commit.
 6. **Acceptance test group exception**: if the orchestrator marks this as the outer loop acceptance test group, your goal is a *correctly-failing* test — do NOT implement anything to make it pass. Report `DONE` when the test fails for the right reason (missing endpoint or module, not a harness setup error).
 
+## When to stop
+
+Your context is the run's dominant cost and it grows quadratically in your turn count, so
+returning early with what you learned is cheap and grinding is not. A fresh implementer
+starting from your evidence pays one cold start; you at turn four hundred pay everything you
+have accumulated, again, on every remaining turn.
+
+Stop and report rather than pushing on when either of these is true:
+
+- **The same failure survives three consecutive fixes.** Not three failures — three attempts
+  at one cause. Report `BLOCKED` with the real output, what you tried, and what you now
+  believe the cause is. The orchestrator re-dispatches the group with your evidence and a
+  clean context. That is the designed path, not an escalation.
+- **You need a file the manifest does not name.** Report `NEEDS_CONTEXT` naming the file and
+  why you need it. Reading it anyway is how a group that owns four files ends up having read
+  forty, and the forty are then charged to every turn you have left.
+
+`BLOCKED` and `NEEDS_CONTEXT` are complete outcomes for a dispatch. Neither is a failure to
+have needed one.
+
 ## Staging
 
 **Stage explicit paths. Never `git add -A` or `git add -u`, and never a bare directory.** Another implementer may be working a parallel group in this same working tree; a broad add commits their half-finished files under your message. For the same reason, never use a relative ref (`HEAD~1`, `HEAD^`, `@{1}`) in `reset`, `rebase` or `--amend` — fix forward instead.

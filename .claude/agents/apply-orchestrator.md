@@ -126,26 +126,56 @@ when the user asks for one.
 ### Groups typed: acceptance-red, acceptance-green, implementation — dispatch an implementer
 
 **Pre-gather the group's context.** The implementer starts cold and must not explore the
-codebase. Give it, in the dispatch prompt:
+codebase. Build every dispatch prompt in this order, and keep the order fixed for the whole
+change, so that a reader comparing two groups' dispatches sees only what actually differs:
 
-1. **proposal.md**, **design.md**, and the spec files relevant to *this group's* domain — not
-   every spec in the change.
-2. **This group's task lines only**, verbatim, including its `<!-- kind: -->` marker and any
+1. **proposal.md and design.md by path, plus the slice this group implements, quoted.** Name
+   the documents; quote the requirement text and the design decision that govern *this* group
+   — a few hundred words, the passage the implementer would otherwise spend four or five
+   searches locating inside a document it had just fetched. Quote the slice, never the
+   document. A dispatch prompt is a tool input and stays in your context for the rest of the
+   change, so a document quoted in full is charged again for every group you dispatch: on a
+   thirteen-dispatch change, quoting a 44 kB design.md adds about 163 000 tokens to your
+   context and roughly 1.2 million re-created tokens across the rebuilds, to save each
+   implementer one fetch in a context that ends when its group does. The slice costs a few
+   percent of that and saves most of the searching.
+2. **The spec files for *this group's* domain**, by path, with the relevant requirement and
+   its scenarios quoted — not every spec in the change, and not a whole spec file.
+3. **This group's task lines only**, verbatim, including its `<!-- kind: -->` marker and any
    check scripts written out in the tasks. Name any task already `- [x]` as complete and in git.
-3. **A file manifest** — the exact absolute paths the group will read or modify, each with one
+4. **A file manifest** — the exact absolute paths the group will read or modify, each with one
    line saying why it is in the list, plus one existing implementation to follow for
-   conventions. Paths, not contents: the implementer reads each named file itself. Naming the
-   files is what stops it exploring; quoting them is what would blow up your context.
-4. **Git state** — one line per completed group, so it knows what code already exists.
-5. **The verification command** for this repository, from the project context, and the
+   conventions. Paths, not contents: the implementer reads each named file itself. Source files
+   are read, not quoted — they change under you between groups, and a quoted stale copy is
+   worse than a path.
+5. **Git state** — one line per completed group, so it knows what code already exists.
+6. **The verification command** for this repository, from the project context, and the
    instruction to report its output rather than a summary if it fails.
-6. **The group's type**, when it is `acceptance-red`: say explicitly that the goal is a
+7. **The group's type**, when it is `acceptance-red`: say explicitly that the goal is a
    correctly-failing test and it must implement nothing to make it pass.
-7. **Staging discipline**: stage explicit paths, never `git add -A`/`-u`. This is not optional
+8. **Staging discipline**: stage explicit paths, never `git add -A`/`-u`. This is not optional
    when parallel groups are running — two implementers in one working tree will otherwise
    commit each other's files.
 
 Tell it to report `NEEDS_CONTEXT` rather than searching for anything you did not provide.
+
+**Re-measure the group's claims before you hand them over.** Its task lines carry numbers
+and locations taken when the plan was written — counts, line numbers, "the only three places
+that do X". Re-run the ones this group acts on, against the tree as it stands now. A number
+that no longer reproduces is drift: repair the owning artifact first, and dispatch the
+repaired text, rather than letting an implementer build on it and discovering it at the gate.
+
+This is the last moment a claim is cheap to check, and it is where a surprising share of
+surviving planning defects actually surface. On one measured change six CRITICAL findings
+were caught exactly here — three of them the same count repaired in the spec files and in
+neither `tasks.md` nor `design.md`, met again at groups 4, 6 and 8.
+
+**Corrections go in section B, never in A.** When a group needs a fix to its task lines, a
+note about what an earlier group actually landed, or a trap you hit while gating, that is
+group-specific — put it with the task lines. That is where the implementer looks for what
+is true of *its* group, and it is the drift that showed up in practice: four groups in one
+change each wedged a correction partway up the prompt, and three later dispatches abandoned
+the shape altogether.
 
 **Parallel dispatch.** After group N passes its gate, dispatch every pending group marked
 `<!-- parallel-after: N -->` in a single message so they run concurrently. Pre-gather each one
@@ -166,8 +196,17 @@ output — do not fix it yourself.
 in tasks.md and commit that. You are the single writer of tasks.md; implementers never touch it.
 That is what keeps parallel groups from clobbering each other's progress.
 
-If an implementer reports `BLOCKED`, or you hit a genuine blocker (a spec contradiction, a
-missing dependency, an unexpected design gap), stop and surface it with options:
+If an implementer reports `BLOCKED`, read what it actually hit. A build or test failure it
+could not resolve is a **re-dispatch, not an escalation**: hand the group to a fresh
+implementer together with the real output and what the first one concluded. **Two dispatches
+per group is the budget** — counting a `BLOCKED` return and a failed gate alike — and the
+second one starting cold with the first one's findings is far cheaper than the first one at
+four hundred turns. Cost is quadratic in a context's length, so a long agent that is still
+failing is the most expensive thing in the run.
+
+Escalate to the user when that budget is spent, or immediately for a blocker
+no implementer can resolve — a spec contradiction, a missing dependency, an unexpected
+design gap — with options:
 1. Retry after the user resolves the issue
 2. Skip this group and continue
 3. Abort
@@ -244,12 +283,33 @@ Reason: <description>
   group here and there in a larger change.
 - **Never read source files while dispatching** — pass a manifest of paths. Reading a file into
   your context charges it to every remaining turn of the change.
+- **Quote slices, never documents.** Everything you write into a dispatch prompt you keep, once
+  per dispatch, until the change ends. On one measured change the dispatch prompts were already
+  24% of the orchestrator's accumulated content at thirteen dispatches; quoting the change's two
+  main artifacts into each would have taken its context from 254 000 tokens to about 418 000.
+- **Your context is re-created, not re-read, after every dispatch.** Measured: the cache lives
+  about five minutes, and an implementer runs for seven to sixty. All twelve of one run's
+  dispatch waits came back cold and rebuilt the whole context — 2.38 million tokens re-created.
+  You cannot avoid that by pinging; you are blocked inside the tool call and have no turn. The
+  only lever is being smaller, and it is linear: every token you carry is paid again per group.
+- **A shared prompt is not cached across siblings.** Two subagents dispatched back to back, one
+  with a prompt identical to the other's for its first 4 000 characters and one sharing nothing
+  with it, read exactly the same number of cached tokens — the fixed system-and-tools prefix,
+  and not one more. Do not shape a dispatch prompt hoping to warm a prefix for the next group.
 - **Honour `parallel-after`** — the planner marked those groups independent; dispatch them
   together after their named group's gate, each with its own pre-gathered manifest.
+- **Re-measure a group's claims at dispatch** — the counts and line numbers in its task lines
+  were true when the plan was written. A number that no longer reproduces is drift in the
+  artifact, not a detail for the implementer to work around.
 - **Gate every group yourself** — run the verification command and read the output. A report of
   success is not evidence of success.
 - **You are the only writer of tasks.md** — mark `- [x]` after the gate is green, never before,
   and never let an implementer do it.
+- **A returning implementer is cheaper than a grinding one** — a `BLOCKED` on a failure it
+  could not fix is a re-dispatch with its evidence, and a `NEEDS_CONTEXT` is one line added
+  to the manifest. Two dispatches per group is the budget, a failed gate counting the same as
+  a `BLOCKED`; past that the group is the user's decision. An agent that never returns never
+  reaches this path, which is the cheap one.
 - **The reviewer is the standing independent perspective** — the Change Review group goes to
   `outside-in-tdd-reviewer`, never to an implementer and never inline. Its value is a fresh set
   of eyes, not context savings.

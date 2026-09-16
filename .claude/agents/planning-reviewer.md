@@ -53,6 +53,10 @@ groups CHARACTERIZE → REFACTOR → VERIFY; operational groups CHECK → CHANGE
 groups must be split. Every `<!-- parallel-after: N -->` marker names groups that are
 genuinely independent — different file trees, no shared mutable state, no ordering between
 them beyond group N. A wrongly marked group becomes two agents editing the same file at once.
+Where the plan reports its groups sequential instead, check that its stated reason names the
+criterion that actually fires for the pair it names. A repository-wide fact — one crate, one
+whole-tree suite — vetoes every pair in every change, so it is not a finding about these
+groups, and it is often standing in for a shared file the planner never mentioned.
 Also weigh the prose: a task line should instruct and say how it is verified, not argue for
 itself, and tasks.md outgrowing the design.md it implements means decisions are being made in
 the checklist where no reviewer sees them whole. Say which tasks carry design, and where in
