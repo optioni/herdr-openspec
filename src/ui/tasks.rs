@@ -10,7 +10,7 @@
 //! "Display width is measured in terminal columns by one pair of
 //! primitives".
 
-use crate::ui::layout::{columns, truncate_columns};
+use crate::ui::layout::columns;
 
 /// `<gauge> <count cell> <percent cell>`, at most `width` display columns,
 /// dropping whole fields as it narrows. Empty string at width 0.
@@ -357,90 +357,6 @@ fn heading_line(heading: &crate::tasks::Heading, width: u16) -> crate::ui::markd
             },
         }],
     }
-}
-
-/// Split `s` at a grapheme-cluster boundary into a prefix whose [`columns`]
-/// is at most `width`, and the remainder — never splitting a cluster and
-/// never panicking. Mirrors `ui::markdown::split_at_columns` exactly, field
-/// for field; duplicated rather than shared for the same reason
-/// [`wrap_plain`]'s own doc comment gives for the whole wrap: a caller here
-/// carries no faces at all, and importing `ui::markdown`'s private helper
-/// would widen `MDSEAM`'s confined module for no reason.
-///
-/// When even the first cluster does not fit — it alone measures more than
-/// `width` columns — it is **dropped** rather than emitted, per
-/// `tasks-checklist`'s carve-out for an over-wide token: the returned
-/// prefix is empty and the remainder skips the dropped cluster, so the
-/// caller always makes progress rather than looping on it forever.
-fn split_at_columns(s: &str, width: usize) -> (&str, &str) {
-    let prefix = truncate_columns(s, width);
-    if !prefix.is_empty() || s.is_empty() {
-        return (prefix, &s[prefix.len()..]);
-    }
-    // `truncate_columns` returned empty on non-empty `s`: the first
-    // grapheme cluster alone is wider than `width`. Find its byte length by
-    // growing the budget one column at a time until something fits —
-    // bounded by `s`'s own total columns, at which point `truncate_columns`
-    // returns `s` whole, so this always terminates.
-    let total = columns(s);
-    let mut probe = width + 1;
-    loop {
-        let candidate = truncate_columns(s, probe);
-        if !candidate.is_empty() {
-            return ("", &s[candidate.len()..]);
-        }
-        if probe >= total {
-            return ("", "");
-        }
-        probe += 1;
-    }
-}
-
-/// Word-wrap `text` to `col` display columns: wrap at spaces, hard-split a
-/// word longer than `col` at a grapheme-cluster boundary, and never lose a
-/// tail. Private to this module — reusing `ui::markdown::wrap_prose` would
-/// mean making its internal `Run` and folder shapes public for a caller
-/// that carries no faces at all, widening `MDSEAM`'s confined module for no
-/// reason. `col == 0` is never reached: every caller in this module has
-/// already fallen back to the truncated-glyph line before wrapping would
-/// be attempted with no column to wrap into.
-fn wrap_plain(text: &str, col: usize) -> Vec<String> {
-    if col == 0 {
-        return vec![String::new()];
-    }
-    let mut lines: Vec<String> = Vec::new();
-    let mut current = String::new();
-    let mut current_cols = 0usize;
-    for word in text.split(' ').filter(|w| !w.is_empty()) {
-        let mut remaining = word;
-        loop {
-            let word_cols = columns(remaining);
-            if current.is_empty() {
-                if word_cols <= col {
-                    current = remaining.to_string();
-                    current_cols = word_cols;
-                    break;
-                }
-                let (chunk, rest) = split_at_columns(remaining, col);
-                lines.push(chunk.to_string());
-                remaining = rest;
-                if remaining.is_empty() {
-                    break;
-                }
-                continue;
-            }
-            if current_cols + 1 + word_cols <= col {
-                current.push(' ');
-                current.push_str(remaining);
-                current_cols += 1 + word_cols;
-                break;
-            }
-            lines.push(std::mem::take(&mut current));
-            current_cols = 0;
-        }
-    }
-    lines.push(current);
-    lines
 }
 
 /// Prepend `prefix` to `line`, merging it into the leading segment — under
