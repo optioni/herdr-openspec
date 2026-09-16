@@ -310,11 +310,8 @@ pub fn parse(text: &str) -> Tasks {
     for raw_line in text.split('\n') {
         let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
         if let Some(new_heading) = heading_line(line) {
-            close_group(
-                &mut groups,
-                std::mem::replace(&mut group, GroupAcc::new(None)),
-            );
-            group.heading = Some(new_heading);
+            let finished = std::mem::replace(&mut group, GroupAcc::new(Some(new_heading)));
+            close_group(&mut groups, finished);
         } else if let Some(parts) = task_line(line) {
             group.push_item(Item {
                 checked: parts.checked,
