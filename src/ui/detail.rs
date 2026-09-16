@@ -628,8 +628,8 @@ fn body_row(line: crate::ui::markdown::Line) -> ContentRow {
 /// row per visible labelled section, that section's own rendered body
 /// beneath it exactly when it is open, and a blank separator after a
 /// non-empty open body a further visible section follows. An open section's
-/// body is `ui::tasks::items` over its parsed items on a tracked-tasks tab
-/// and `ui::markdown::lines(&section.text, width)` otherwise. The
+/// body is `ui::tasks::group_body` over its parsed group on a tracked-tasks
+/// tab and `ui::markdown::lines(&section.text, width)` otherwise. The
 /// tracked-tasks tab folding at all **reverses** `artifact-folds` ->
 /// Decision 8, which held that tab never foldable at any section count
 /// because its whole-change progress bar would disagree with a per-section
@@ -742,10 +742,10 @@ pub fn content_lines(
                 });
             }
             if open {
-                // A tracked-tasks section's body is its items and nothing
-                // else — `ui::tasks::items`, the very function
-                // `ui::tasks::lines` calls per group, so a folded group and
-                // an unfolded one cannot disagree about an item line
+                // A tracked-tasks section's body is its items, their own
+                // bodies, and its blocks — `ui::tasks::group_body`, the very
+                // function `ui::tasks::lines` calls per group, so a folded
+                // group and an unfolded one cannot disagree about a row
                 // (design.md -> D9). Its own heading is already its header
                 // row above.
                 //
@@ -757,13 +757,13 @@ pub fn content_lines(
                 // below this body do not — neither is a section's body, and
                 // the separator is already exactly `width` blank columns.
                 //
-                // `ui::tasks::items` is reached at the reduced width too, and
-                // its own degraded branch — the one that pads to the full
-                // width rather than drawing an item — needs `width <= 4`. The
-                // floor leaves at least `BODY_INDENT_FLOOR` columns, so that
-                // branch is unreachable from here; a future floor low enough
-                // to reach it would need a sweep over an indented
-                // tracked-tasks tab to say what it should draw.
+                // `ui::tasks::group_body` is reached at the reduced width
+                // too, and its own degraded branch — the one that pads to the
+                // full width rather than drawing an item — needs
+                // `width <= 4`. The floor leaves at least `BODY_INDENT_FLOOR`
+                // columns, so that branch is unreachable from here; a future
+                // floor low enough to reach it would need a sweep over an
+                // indented tracked-tasks tab to say what it should draw.
                 let indent_cols = if indented {
                     indent_columns(section.depth)
                 } else {
@@ -772,14 +772,26 @@ pub fn content_lines(
                 let indent = " ".repeat(indent_cols as usize);
                 let body_width = width.saturating_sub(indent_cols);
                 let body = match tracked_tasks_progress {
-                    Some(_) => crate::ui::tasks::items(
-                        &crate::tasks::parse(&section.text)
+                    // `task-item-bodies` -> group 5 owns folding this walk
+                    // over every group a multi-heading section might parse
+                    // to, blocks included; this call keeps the previous
+                    // items-only, flattened-across-groups behaviour this
+                    // section walk has always produced, as a mechanical
+                    // stand-in until then, so a preamble's own prose (a
+                    // block, never an item) still draws no row here.
+                    Some(_) => {
+                        let items: Vec<crate::tasks::Item> = crate::tasks::parse(&section.text)
                             .groups
                             .into_iter()
                             .flat_map(|g| g.items)
-                            .collect::<Vec<_>>(),
-                        body_width,
-                    ),
+                            .collect();
+                        let merged = crate::tasks::Group {
+                            heading: None,
+                            items,
+                            blocks: Vec::new(),
+                        };
+                        crate::ui::tasks::group_body(&merged, body_width)
+                    }
                     None => crate::ui::markdown::lines(&section.text, body_width),
                 };
                 let non_empty = !body.is_empty();
@@ -4762,17 +4774,14 @@ mod tests {
             expanded: std::collections::BTreeSet::from([0, 1, 2]),
             drawn_width: None,
         };
-        let parsed: Vec<crate::tasks::Item> = crate::tasks::parse(group_text)
-            .groups
-            .into_iter()
-            .flat_map(|g| g.items)
-            .collect();
+        let parsed = crate::tasks::parse(group_text);
+        let group = &parsed.groups[0];
         for (width, indent) in [(78u16, "  "), (58, "")] {
             let rows = content_lines(&d, Some(&change), width);
-            // The items are `ui::tasks::items` at the reduced width, then
-            // indented — at 78 wrapped at 76, at 58 at 58.
+            // The rows are `ui::tasks::group_body` at the reduced width,
+            // then indented — at 78 wrapped at 76, at 58 at 58.
             let body_width = width - columns(indent) as u16;
-            let want: Vec<String> = crate::ui::tasks::items(&parsed, body_width)
+            let want: Vec<String> = crate::ui::tasks::group_body(group, body_width)
                 .iter()
                 .map(|l| format!("{indent}{}", l.text()))
                 .collect();

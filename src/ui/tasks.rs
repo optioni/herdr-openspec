@@ -269,22 +269,33 @@ fn muted_line(text: String) -> crate::ui::markdown::Line {
 
 /// An unchecked item's **first** row, split at its label: the prefix
 /// concatenated with everything before the label, the label itself, and the
-/// remainder of that row's text — each omitted rather than emitted empty, so an
-/// item whose text is exactly its label produces two segments rather than
-/// three.
+/// remainder of that leading segment's text — each omitted rather than
+/// emitted empty, so an item whose text is exactly its label produces one
+/// fewer segment than one with a remainder after it — followed by `row`'s
+/// own later segments untouched.
 ///
-/// `label` is looked up against `item.text`, never against the rendered row, so
-/// a wrap falling inside `CHARACTERIZE:` cannot half-style it. The caller has
-/// already established that `start + len` lies within `row` and on its
-/// boundaries; this function re-checks both rather than slicing on trust, so it
-/// is total for any `Label` and any `row`.
+/// `label` is looked up against `item.text`, never against the rendered
+/// row: `tasks::label_of` returns byte offsets into the item's **plain**
+/// text, which no longer address the row once inline spans fold. The label
+/// is therefore applied only when `row`'s leading segment is
+/// `Face::plain()` and long enough to hold `start + len` on character
+/// boundaries — otherwise `None`, and the item renders unlabelled, carrying
+/// the faces `ui::markdown::inline` returned (design.md -> Decision 6). An
+/// emphasised label (`- [ ] **RED**: …`) is the reachable case: its leading
+/// segment is `strong`-faced, so it degrades to unlabelled — a miss, never
+/// a wrong colour.
 fn labelled_line(
     prefix: &str,
-    row: &str,
+    row: &crate::ui::markdown::Line,
     label: crate::tasks::Label,
 ) -> Option<crate::ui::markdown::Line> {
+    let first = row.segments.first()?;
+    if first.face != crate::ui::markdown::Face::plain() {
+        return None;
+    }
+    let text = &first.text;
     let end = label.start.checked_add(label.len)?;
-    if end > row.len() || !row.is_char_boundary(label.start) || !row.is_char_boundary(end) {
+    if end > text.len() || !text.is_char_boundary(label.start) || !text.is_char_boundary(end) {
         return None;
     }
     let plain = crate::ui::markdown::Face::plain();
@@ -292,16 +303,17 @@ fn labelled_line(
         label: Some(label.role),
         ..plain
     };
-    let mut segments = Vec::with_capacity(3);
-    for (text, face) in [
-        (format!("{prefix}{}", &row[..label.start]), plain),
-        (row[label.start..end].to_string(), faced),
-        (row[end..].to_string(), plain),
+    let mut segments = Vec::with_capacity(row.segments.len() + 2);
+    for (t, face) in [
+        (format!("{prefix}{}", &text[..label.start]), plain),
+        (text[label.start..end].to_string(), faced),
+        (text[end..].to_string(), plain),
     ] {
-        if !text.is_empty() {
-            segments.push(crate::ui::markdown::Segment { text, face });
+        if !t.is_empty() {
+            segments.push(crate::ui::markdown::Segment { text: t, face });
         }
     }
+    segments.extend(row.segments[1..].iter().cloned());
     Some(crate::ui::markdown::Line { segments })
 }
 
@@ -431,14 +443,42 @@ fn wrap_plain(text: &str, col: usize) -> Vec<String> {
     lines
 }
 
-/// One `tasks::Item`'s rendered line(s): the prefix — `item.indent`
-/// spaces, the three-character glyph, one space — followed by the
-/// word-wrapped text at a hanging indent of the prefix's own width. The
-/// indent is dropped whole when the full prefix would leave no text
-/// column, then the separating space and glyph-only prefix is tried, and
-/// when even that leaves no text column, the glyph alone — truncated by
-/// `ui::list::pad_or_truncate_right` at `width` — is the whole line, with
-/// the item's text discarded rather than wrapped into zero columns.
+/// Prepend `prefix` to `line`, merging it into the leading segment — under
+/// whatever face that segment already carries — when there is one, and
+/// inserting a fresh `Face::plain()` segment carrying `prefix` alone
+/// otherwise. Used at a hanging indent, where the prefix is bare whitespace
+/// and must read as a literal continuation of whatever the row's own first
+/// character is faced as: a fenced block's body row stays wholly
+/// `face.code`, hang included (`tasks-checklist`'s own "every segment of
+/// that row carries `face.code`" scenario), rather than splitting into a
+/// plain indent segment beside a code one.
+fn hang_line(prefix: &str, mut line: crate::ui::markdown::Line) -> crate::ui::markdown::Line {
+    if prefix.is_empty() {
+        return line;
+    }
+    if let Some(first) = line.segments.first_mut() {
+        first.text = format!("{prefix}{}", first.text);
+        return line;
+    }
+    crate::ui::markdown::Line {
+        segments: vec![crate::ui::markdown::Segment {
+            text: prefix.to_string(),
+            face: crate::ui::markdown::Face::plain(),
+        }],
+    }
+}
+
+/// One `tasks::Item`'s rendered line(s): its own text rows, faced through
+/// `ui::markdown::inline` and labelled at most once, followed by its
+/// body's rows, faced through `ui::markdown::lines` — both at a hanging
+/// indent of `prefix_len + tasks::task_number_len(&item.text)`
+/// (design.md -> Decision 9a). The indent is dropped whole when the full
+/// prefix would leave no text column, then the separating space and
+/// glyph-only prefix is tried, and when even that leaves no text column,
+/// the glyph alone — truncated by `ui::list::pad_or_truncate_right` at
+/// `width` — is the whole line, with the item's text and its body alike
+/// discarded rather than wrapped into zero columns (design.md ->
+/// Decision 9).
 fn item_lines(item: &crate::tasks::Item, width: u16) -> Vec<crate::ui::markdown::Line> {
     let w = width as usize;
     // The same three-column glyph `ui::markdown` renders for a task-list
@@ -470,46 +510,76 @@ fn item_lines(item: &crate::tasks::Item, width: u16) -> Vec<crate::ui::markdown:
         }];
     };
 
-    let col = w - prefix_len;
-    let wrapped = wrap_plain(&item.text, col);
-    let indent = " ".repeat(prefix_len);
+    // The number hang is dropped whole, back to the prefix alone, before
+    // the prefix's own degradation applies (design.md -> Decision 9a): a
+    // width that can hold the glyph and some text never loses the text to
+    // the number's own indent.
+    let number_len = crate::tasks::task_number_len(&item.text);
+    let hang = if prefix_len + number_len < w {
+        prefix_len + number_len
+    } else {
+        prefix_len
+    };
+    let col = (w - hang) as u16;
+    let hang_spaces = " ".repeat(hang);
 
-    // An unchecked item's label, when it has one and it fits on the first row
-    // whole. `label_of` reads `item.text`; a label straddling the wrap would
-    // otherwise produce a segment reading `CHARACT`, so the item degrades to
-    // unlabelled instead (design.md -> Decision 9).
+    // A fragment, not a document: `item.text` is one sentence, so it goes
+    // through `inline` rather than `lines` (design.md -> Decision 3).
+    let rows = crate::ui::markdown::inline(&item.text, col);
+
+    // An unchecked item's label, when it has one. `label_of` reads
+    // `item.text`; `labelled_line` re-checks its offsets against the
+    // rendered row's own leading segment, so a label whose plain run does
+    // not survive facing degrades to unlabelled instead (design.md ->
+    // Decision 6).
     let label = if item.checked {
         None
     } else {
         crate::tasks::label_of(&item.text)
     };
 
-    wrapped
-        .into_iter()
-        .enumerate()
-        .map(|(i, text)| {
-            if item.checked {
-                // Every row of a checked item, its first and its continuations
-                // alike: one de-emphasised segment, never split at its label.
-                return muted_line(if i == 0 {
-                    format!("{prefix}{text}")
-                } else {
-                    format!("{indent}{text}")
-                });
-            }
-            if i == 0 {
-                // A label appears once, on the row it was written on.
-                if let Some(label) = label
-                    && let Some(line) = labelled_line(&prefix, &text, label)
-                {
-                    return line;
-                }
-                plain_line(format!("{prefix}{text}"))
+    let mut out = Vec::with_capacity(rows.len());
+    for (i, line) in rows.into_iter().enumerate() {
+        if item.checked {
+            // Every row of a checked item, its first and its continuations
+            // alike: one de-emphasised segment, never split at its label or
+            // at any inline face (design.md -> Decision 7).
+            let text = if i == 0 {
+                format!("{prefix}{}", line.text())
             } else {
-                plain_line(format!("{indent}{text}"))
+                format!("{hang_spaces}{}", line.text())
+            };
+            out.push(muted_line(text));
+            continue;
+        }
+        if i == 0 {
+            // A label appears once, on the row it was written on.
+            if let Some(label) = label
+                && let Some(labelled) = labelled_line(&prefix, &line, label)
+            {
+                out.push(labelled);
+            } else {
+                out.push(hang_line(&prefix, line));
             }
-        })
-        .collect()
+        } else {
+            out.push(hang_line(&hang_spaces, line));
+        }
+    }
+
+    // The item's body, at the same hanging indent as its own continuation
+    // rows, immediately after its own rows and before the next item or
+    // block. An empty body contributes no row (design.md -> Decision 9).
+    if !item.body.is_empty() {
+        for line in crate::ui::markdown::lines(&item.body, col) {
+            if item.checked {
+                out.push(muted_line(format!("{hang_spaces}{}", line.text())));
+            } else {
+                out.push(hang_line(&hang_spaces, line));
+            }
+        }
+    }
+
+    out
 }
 
 /// The progress-bar line followed by one blank line — and the **empty
@@ -532,19 +602,54 @@ pub(crate) fn bar_lines(
     vec![plain_line(bar), blank_line()]
 }
 
-/// One or more lines per item, in order — no progress bar, no heading
-/// line, no blank separator.
+/// Every block `group` records at position `after`, each drawn through
+/// `ui::markdown::lines` at the group's own full `width` — no hanging
+/// indent, a block belonging to the group rather than to the item above it
+/// — and separated from the rows around it by one blank row either side
+/// (design.md -> Decision 10). A group carrying no block at that position
+/// contributes nothing, which is what keeps a blockless group's rows
+/// byte-identical to the group it was before blocks existed.
+fn push_blocks(
+    out: &mut Vec<crate::ui::markdown::Line>,
+    group: &crate::tasks::Group,
+    after: usize,
+    width: u16,
+) {
+    for block in group.blocks.iter().filter(|b| b.after == after) {
+        out.push(blank_line());
+        out.extend(crate::ui::markdown::lines(&block.text, width));
+        out.push(blank_line());
+    }
+}
+
+/// Every row `group` contributes below its own heading, in document order:
+/// its items, each item's own body rows, and its blocks interleaved at the
+/// positions `task-groups` records for them — no progress bar, no heading
+/// line, no blank separator between groups.
 ///
-/// Takes **parsed items** rather than a source string: [`lines`] already
-/// holds `tasks::Group` values and would have to re-serialise each group to
+/// Takes a **parsed group** rather than a source string: [`lines`] already
+/// holds `tasks::Group` values and would have to re-serialise each one to
 /// call a string-taking form, which is the duplication this extraction
 /// exists to remove. A folded tab reaches it through
-/// `tasks::parse(&section.text)` on a section body whose own heading has
-/// become the fold header.
-pub(crate) fn items(items: &[crate::tasks::Item], width: u16) -> Vec<crate::ui::markdown::Line> {
+/// `tasks::parse(&section.text)` on a section body that carries no heading
+/// of its own, that heading having become the fold header.
+///
+/// This function was named `items` and took `&[crate::tasks::Item]`. It is
+/// renamed because its subject changed: a group's rows are no longer only
+/// its items, and a function called `items` that also draws fenced blocks
+/// would be a name that lies (design.md -> Decision 5).
+pub(crate) fn group_body(
+    group: &crate::tasks::Group,
+    width: u16,
+) -> Vec<crate::ui::markdown::Line> {
+    if width == 0 {
+        return Vec::new();
+    }
     let mut out = Vec::new();
-    for item in items {
+    push_blocks(&mut out, group, 0, width);
+    for (i, item) in group.items.iter().enumerate() {
         out.extend(item_lines(item, width));
+        push_blocks(&mut out, group, i + 1, width);
     }
     out
 }
@@ -601,7 +706,7 @@ pub fn lines(
         if let Some(heading) = &group.heading {
             out.push(heading_line(heading, width));
         }
-        out.extend(items(&group.items, width));
+        out.extend(group_body(group, width));
         if index != last_index {
             out.push(blank_line());
         }
@@ -935,9 +1040,9 @@ mod tests {
         let parsed = crate::tasks::parse(
             "- [ ] 1.1 RED: write the failing test\n- [ ] Commit: the parser\n",
         );
-        let items = &parsed.groups[0].items;
+        let group = &parsed.groups[0];
         for width in [78, 58] {
-            let out = super::items(items, width);
+            let out = super::group_body(group, width);
             assert_eq!(out.len(), 2, "width {width}: neither item wraps here");
 
             assert_eq!(
@@ -986,7 +1091,7 @@ mod tests {
         let checked = crate::tasks::parse("- [x] 1.1 VERIFY: make check is green\n");
         let unchecked = crate::tasks::parse("- [ ] 1.1 VERIFY: make check is green\n");
         for width in [78, 58] {
-            let out = super::items(&checked.groups[0].items, width);
+            let out = super::group_body(&checked.groups[0], width);
             assert_eq!(out.len(), 1, "width {width}");
             assert_eq!(
                 segment_texts(&out[0]),
@@ -1001,7 +1106,7 @@ mod tests {
             // The same text unchecked: three segments with the label role on
             // the middle one. Asserting the pair against each other is what a
             // rule muting both, or neither, could not pass.
-            let twin = super::items(&unchecked.groups[0].items, width);
+            let twin = super::group_body(&unchecked.groups[0], width);
             assert_eq!(
                 segment_texts(&twin[0]),
                 vec!["[ ] 1.1 ", "VERIFY:", " make check is green"],
@@ -1030,31 +1135,36 @@ mod tests {
         let words = ["abcdefgh"; 20].join(" ");
         let source = format!("- [ ] 1.1 GREEN: {words}\n");
         let parsed = crate::tasks::parse(&source);
-        let items = &parsed.groups[0].items;
+        let group = &parsed.groups[0];
+        let items = &group.items;
 
-        // Recorded at HEAD, at both mandated interior widths.
+        // Measured against `group_body`: the hang is now `prefix_len +
+        // task_number_len` (eight columns here, "1.1 " being the number),
+        // not `prefix_len` alone, so both the continuation indent and the
+        // wrap column moved from `task-labels`' own recorded literals.
         let recorded: [(u16, &[&str]); 2] = [
             (
                 78,
                 &[
-                    "[ ] 1.1 GREEN: abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh",
-                    "    abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh",
-                    "    abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh",
+                    "[ ] 1.1 GREEN: abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh",
+                    "        abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh",
+                    "        abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh",
                 ],
             ),
             (
                 58,
                 &[
                     "[ ] 1.1 GREEN: abcdefgh abcdefgh abcdefgh abcdefgh",
-                    "    abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh",
-                    "    abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh",
-                    "    abcdefgh abcdefgh abcdefgh abcdefgh",
+                    "        abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh",
+                    "        abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh",
+                    "        abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh",
+                    "        abcdefgh",
                 ],
             ),
         ];
 
         for (width, expected) in recorded {
-            let out = super::items(items, width);
+            let out = super::group_body(group, width);
             assert_eq!(
                 out.iter().map(|l| l.text()).collect::<Vec<_>>(),
                 expected.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
@@ -1103,7 +1213,7 @@ mod tests {
         }
 
         assert!(
-            super::items(items, 58).len() > super::items(items, 78).len(),
+            super::group_body(group, 58).len() > super::group_body(group, 78).len(),
             "58 must wrap more than 78, or the width does not reach the wrap"
         );
     }
@@ -1117,43 +1227,56 @@ mod tests {
     #[test]
     fn a_label_split_across_a_wrap_degrades_to_unlabelled() {
         let parsed = crate::tasks::parse("- [ ] 1.1 CHARACTERIZE: record the baseline\n");
-        let items = &parsed.groups[0].items;
+        let group = &parsed.groups[0];
 
-        // Recorded at HEAD, at each of the three narrow widths.
+        // Measured against `group_body`: the hang is eight columns here too
+        // (the item carries the same `1.1 ` number), so the wrap column —
+        // `width - 8`, not `width - 4` — and the continuation indent both
+        // moved from `task-labels`' own recorded literals; the number now
+        // sometimes fills the whole of row 0 on its own, at 16.
         let recorded: [(u16, &[&str]); 3] = [
             (
                 16,
                 &[
                     "[ ] 1.1",
-                    "    CHARACTERIZE",
-                    "    : record the",
-                    "    baseline",
+                    "        CHARACTE",
+                    "        RIZE:",
+                    "        record",
+                    "        the",
+                    "        baseline",
                 ],
             ),
             (
                 14,
                 &[
                     "[ ] 1.1",
-                    "    CHARACTERI",
-                    "    ZE: record",
-                    "    the",
-                    "    baseline",
+                    "        CHARAC",
+                    "        TERIZE",
+                    "        :",
+                    "        record",
+                    "        the",
+                    "        baseli",
+                    "        ne",
                 ],
             ),
             (
                 12,
                 &[
                     "[ ] 1.1",
-                    "    CHARACTE",
-                    "    RIZE:",
-                    "    record",
-                    "    the",
-                    "    baseline",
+                    "        CHAR",
+                    "        ACTE",
+                    "        RIZE",
+                    "        :",
+                    "        reco",
+                    "        rd",
+                    "        the",
+                    "        base",
+                    "        line",
                 ],
             ),
         ];
         for (width, expected) in recorded {
-            let out = super::items(items, width);
+            let out = super::group_body(group, width);
             assert_eq!(
                 out.iter().map(|l| l.text()).collect::<Vec<_>>(),
                 expected.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
@@ -1172,7 +1295,7 @@ mod tests {
         // does split, so the degradation is width-driven rather than
         // unconditional.
         for width in [58, 78] {
-            let out = super::items(items, width);
+            let out = super::group_body(group, width);
             assert_eq!(
                 segment_texts(&out[0]),
                 vec!["[ ] 1.1 ", "CHARACTERIZE:", " record the baseline"],
@@ -1773,15 +1896,39 @@ mod tests {
                 reflowed.push_str(text.trim_start());
             }
             assert_eq!(
-                reflowed,
-                "writing the OSC 52 sequence, and the arm.",
+                reflowed, "writing the OSC 52 sequence, and the arm.",
                 "width {width}"
             );
             body_row_counts.insert(width, body_rows.len());
         }
+        // Measured, not predicted: at `width - 8` the body's forty-one
+        // reflowed characters fit one row at both 58 (a 50-column body) and
+        // 78 (a 70-column one), so this exact fixture does not itself reach
+        // a width where 58 wraps more than 78. A longer body, over the same
+        // item, is what demonstrates the body genuinely reflows rather than
+        // being reproduced line for line.
+        assert_eq!(body_row_counts[&58], 1, "{body_row_counts:?}");
+        assert_eq!(body_row_counts[&78], 1, "{body_row_counts:?}");
+
+        let long_body = long_paragraph(200);
+        let long_group = crate::tasks::Group {
+            heading: None,
+            items: vec![crate::tasks::Item {
+                checked: false,
+                text: "2.2 GREEN: add the method".to_string(),
+                indent: 0,
+                body: long_body,
+            }],
+            blocks: Vec::new(),
+        };
+        let mut long_row_counts = std::collections::HashMap::new();
+        for width in [78, 58] {
+            let out = super::group_body(&long_group, width);
+            long_row_counts.insert(width, out.len() - 1);
+        }
         assert!(
-            body_row_counts[&58] > body_row_counts[&78],
-            "{body_row_counts:?}: 58 must produce strictly more body rows"
+            long_row_counts[&58] > long_row_counts[&78],
+            "{long_row_counts:?}: 58 must produce strictly more body rows"
         );
     }
 
@@ -1808,19 +1955,26 @@ mod tests {
                 (format!("10.11a {words}"), 11usize),
                 (words.clone(), 4usize),
             ] {
-                let number: Option<&str> = if hang > 4 {
-                    Some(text.split(' ').next().unwrap())
+                let number: Option<String> = if hang > 4 {
+                    Some(text.split(' ').next().unwrap().to_string())
                 } else {
                     None
                 };
                 let group = group_of(item_of(text));
                 let out = super::group_body(&group, width);
-                assert!(out.len() > 1, "width {width} hang {hang}: the item must wrap");
+                assert!(
+                    out.len() > 1,
+                    "width {width} hang {hang}: the item must wrap"
+                );
 
                 for (i, line) in out.iter().enumerate().skip(1) {
                     let text = line.text();
                     let indent: String = text.chars().take_while(|&c| c == ' ').collect();
-                    assert_eq!(indent.len(), hang, "width {width} hang {hang} row {i}: {text:?}");
+                    assert_eq!(
+                        indent.len(),
+                        hang,
+                        "width {width} hang {hang} row {i}: {text:?}"
+                    );
                 }
 
                 // The text column is continuous: the first row's character
@@ -1835,10 +1989,10 @@ mod tests {
                 );
 
                 // The number appears only on the item's first row.
-                if let Some(number) = number {
+                if let Some(number) = &number {
                     for line in &out[1..] {
                         assert!(
-                            !line.text().trim_start().starts_with(number),
+                            !line.text().trim_start().starts_with(number.as_str()),
                             "width {width} hang {hang}: {:?}",
                             line.text()
                         );
@@ -1890,7 +2044,10 @@ mod tests {
                 // The number hang was dropped whole; the prefix alone
                 // still leaves a text column and the text is still
                 // rendered.
-                assert!(out.len() > 1, "width {width}: the item's text must still render");
+                assert!(
+                    out.len() > 1,
+                    "width {width}: the item's text must still render"
+                );
                 for line in &out[1..] {
                     let indent: String = line.text().chars().take_while(|&c| c == ' ').collect();
                     assert_eq!(indent.len(), 4, "width {width}: {:?}", line.text());
@@ -1903,24 +2060,35 @@ mod tests {
     /// code, not as vanished text".
     #[test]
     fn a_fenced_block_in_an_items_body_renders_as_code_not_as_vanished_text() {
-        let parsed = crate::tasks::parse("- [ ] run the gate\n      ```\n      make check\n      ```\n");
+        let parsed =
+            crate::tasks::parse("- [ ] run the gate\n      ```\n      make check\n      ```\n");
         let group = &parsed.groups[0];
         assert_eq!(group.items[0].body, "```\nmake check\n```");
 
         for width in [78, 58] {
             let out = super::group_body(group, width);
-            assert_eq!(out.len(), 2, "width {width}: the item row and one body row");
-            let body_row = &out[1];
-            assert_eq!(body_row.text(), "    make check", "width {width}");
+            let code_row = out
+                .iter()
+                .find(|l| l.text().trim_start() == "make check")
+                .unwrap_or_else(|| panic!("width {width}: no `make check` row in {out:?}"));
             assert!(
-                body_row.segments.iter().all(|s| s.face.code),
-                "width {width}: {body_row:?}"
+                code_row.segments.iter().all(|s| s.face.code),
+                "width {width}: {code_row:?}"
             );
-            assert!(!body_row.text().contains('`'), "width {width}");
+            assert!(!code_row.text().contains('`'), "width {width}");
 
-            let same = crate::ui::markdown::lines(&group.items[0].body, width - 4);
-            let same_texts: Vec<String> = same.iter().map(|l| l.text()).collect();
-            assert_eq!(same_texts, vec!["make check".to_string()], "width {width}");
+            // The item carries no task number ("run the gate"), so its hang
+            // is the prefix alone — four columns. The body, handed directly
+            // to `ui::markdown::lines` at `width - 4`, produces the same row
+            // texts with the hang stripped, so the body path and the
+            // ordinary markdown path cannot drift.
+            let direct = crate::ui::markdown::lines(&group.items[0].body, width - 4);
+            let direct_texts: Vec<String> = direct.iter().map(|l| l.text()).collect();
+            let via_item: Vec<String> = out[1..]
+                .iter()
+                .map(|l| l.text().trim_start_matches(' ').to_string())
+                .collect();
+            assert_eq!(via_item, direct_texts, "width {width}");
         }
     }
 
@@ -1940,21 +2108,30 @@ mod tests {
         for width in [78, 58] {
             let out = super::group_body(group, width);
             let texts: Vec<String> = out.iter().map(|l| l.text()).collect();
+            assert_eq!(texts[0], "[ ] a", "width {width}");
+            assert_eq!(texts.last().unwrap(), "[ ] b", "width {width}");
+            assert_eq!(texts[1], "", "width {width}: a blank row opens the block");
+            let code_idx = texts
+                .iter()
+                .position(|t| t.trim_start() == "make check")
+                .unwrap_or_else(|| panic!("width {width}: no `make check` row: {texts:?}"));
             assert_eq!(
-                texts,
-                vec![
-                    "[ ] a".to_string(),
-                    String::new(),
-                    "make check".to_string(),
-                    String::new(),
-                    "[ ] b".to_string(),
-                ],
-                "width {width}"
+                texts[code_idx], "make check",
+                "width {width}: a block carries no hanging indent"
             );
             assert!(
-                out[2].segments.iter().all(|s| s.face.code),
+                out[code_idx].segments.iter().all(|s| s.face.code),
                 "width {width}: {:?}",
-                out[2]
+                out[code_idx]
+            );
+            // A blank row closes the block, immediately before the next
+            // item — the block's own rendering may itself trail a further
+            // blank, a `ui::markdown::lines` property of the fenced
+            // content, not something this grammar adds.
+            assert_eq!(
+                texts[texts.len() - 2],
+                "",
+                "width {width}: a blank row precedes the next item"
             );
 
             let plain = super::group_body(plain_group, width);
@@ -2023,10 +2200,15 @@ mod tests {
                 "width {width}: {:?}",
                 out[0]
             );
+            // The prefix ("[ ] ") merges into this leading segment rather
+            // than starting a plain segment of its own, since it is not the
+            // leading *plain* segment the label rule looks for
+            // (design.md -> Decision 6) — so its text is `"[ ] RED"`, not
+            // `"RED"` alone.
             let bold_seg = out[0]
                 .segments
                 .iter()
-                .find(|s| s.text == "RED")
+                .find(|s| s.text.ends_with("RED"))
                 .unwrap_or_else(|| panic!("width {width}: no RED segment: {:?}", out[0]));
             assert!(bold_seg.face.strong, "width {width}");
 
@@ -2318,16 +2500,19 @@ mod tests {
                 texts.contains(&"[ ] only".to_string()),
                 "width {width}: {texts:?}"
             );
+            // `task-item-bodies`: "some prose" is group `1. Empty`'s own
+            // block, not discarded content, and it draws a row beneath that
+            // heading rather than vanishing (design.md -> Decision 10).
             assert!(
-                !texts.iter().any(|t| t.contains("prose")),
+                texts.iter().any(|t| t == "some prose"),
                 "width {width}: {texts:?}"
             );
             let empty_idx = texts.iter().position(|t| t == "## 1. Empty").unwrap();
             let full_idx = texts.iter().position(|t| t == "## 2. Full").unwrap();
-            assert_eq!(
-                full_idx - empty_idx,
-                2,
-                "width {width}: heading, blank, heading — {texts:?}"
+            let prose_idx = texts.iter().position(|t| t == "some prose").unwrap();
+            assert!(
+                empty_idx < prose_idx && prose_idx < full_idx,
+                "width {width}: the prose sits between the two headings — {texts:?}"
             );
         }
     }
