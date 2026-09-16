@@ -4218,4 +4218,147 @@ mod tests {
             }
         }
     }
+
+    // --- group 7: the body indent ------------------------------------
+
+    /// `text` padded with spaces to `width`, by `std::fmt`'s own width
+    /// specifier rather than by `ui::list::pad_or_truncate_right`. The two
+    /// CHARACTERIZE baselines below pin a row list **byte-identical** to the
+    /// one this module produced before the indent existed, and a baseline
+    /// that routes its expectation through the very production helper the
+    /// rows are built with could not fail if that helper moved.
+    fn padded_to(text: &str, width: usize) -> String {
+        format!("{text:<width$}")
+    }
+
+    /// The seven-section fixture's rows, all sections open — the row list
+    /// both `artifact-folds` indent scenarios are stated over.
+    fn seven_section_rows(width: u16) -> Vec<String> {
+        let every = std::collections::BTreeSet::from([0, 1, 2, 3, 4, 5, 6]);
+        content_lines(&seven_section_detail(every), None, width)
+            .iter()
+            .map(ContentRow::text)
+            .collect()
+    }
+
+    /// `artifact-folds` :: "The same tab draws its bodies at column zero at
+    /// the narrow interior".
+    ///
+    /// CHARACTERIZE, not RED: every body row already sits at column zero at
+    /// HEAD, and this baseline exists to stay green. It is asserted as the
+    /// whole row list byte for byte rather than as "begins at column zero",
+    /// because `ui::markdown`'s own hanging indent already starts some body
+    /// rows with spaces and the weaker phrasing could not tell the two apart
+    /// (tasks.md 1.1).
+    #[test]
+    fn the_same_tab_draws_its_bodies_at_column_zero_at_the_narrow_interior() {
+        // The fixture's deepest body-bearing section is depth 3, so its floor
+        // is `64 + 2 * 3 = 70`: 58 is below it and 78 above, which is why this
+        // list is the pre-change one and the wide-interior scenario's is not.
+        assert_eq!(
+            seven_section_rows(58),
+            vec![
+                padded_to("▾ degraded-coverage", 58),
+                padded_to("  ▾ ADDED Requirements", 58),
+                padded_to("    ▾ Requirement: Alpha", 58),
+                "Alpha text.".to_string(),
+                padded_to("", 58),
+                padded_to("      ▾ Scenario: A works", 58),
+                "• WHEN a".to_string(),
+                "• THEN b".to_string(),
+                padded_to("", 58),
+                padded_to("    ▾ Requirement: Beta", 58),
+                "Beta text.".to_string(),
+                padded_to("", 58),
+                padded_to("▾ markdown-render", 58),
+                "## MODIFIED Requirements".to_string(),
+                padded_to("", 58),
+                padded_to("▾ tasks-checklist", 58),
+                "## MODIFIED Requirements".to_string(),
+            ],
+        );
+
+        // The mandated pair, named explicitly per DETAILWIDTHS: every header
+        // row keeps its own `"  " * depth` indent at both interiors, which
+        // this rule does not touch at either.
+        for width in [78, 58] {
+            let rows = seven_section_rows(width);
+            for (row, depth) in [(0usize, 0usize), (1, 1), (2, 2), (5, 3), (9, 2)] {
+                assert!(
+                    rows[row].starts_with(&format!("{}▾ ", "  ".repeat(depth))),
+                    "width {width}: row {row} ({:?}) lost its depth-{depth} header indent",
+                    rows[row]
+                );
+            }
+        }
+    }
+
+    /// A tracked-tasks `Change` whose second artifact tracks the tasks, and
+    /// whose progress is `1/3` — the pair every tracked-tasks scenario in
+    /// this group renders against.
+    fn tracked_tasks_change() -> (crate::changes::Change, Progress) {
+        let progress = Progress {
+            completed: 1,
+            total: 3,
+        };
+        let change =
+            fixture::with_marked_artifacts(&paths_free(&["proposal", "tasks"]), Some(1), progress);
+        (change, progress)
+    }
+
+    /// `artifact-folds` :: "A depth-0 tracked-tasks tab is unmoved at every
+    /// width".
+    ///
+    /// CHARACTERIZE. One resolved path and every group heading at one level,
+    /// so `base` is 0 and every section is at depth 0 — and the rows are
+    /// asserted byte for byte, because `task-item-bodies` is rewriting this
+    /// same item grammar and a regression there must not be attributed to
+    /// this change. That this tab does not move is a consequence of its own
+    /// depth and of no tracked-tasks exemption, which the depth-1 scenario
+    /// below fixes from the other side.
+    #[test]
+    fn a_depth_0_tracked_tasks_tab_is_unmoved_at_every_width() {
+        let (change, progress) = tracked_tasks_change();
+        let d = Detail {
+            sections: vec![
+                ArtifactSection {
+                    label: Some("1. Setup".to_string()),
+                    text: "- [x] a\n- [ ] b\n".to_string(),
+                    depth: 0,
+                    progress: None,
+                    operation: None,
+                },
+                ArtifactSection {
+                    label: Some("2. Build".to_string()),
+                    text: "- [ ] c\n".to_string(),
+                    depth: 0,
+                    progress: None,
+                    operation: None,
+                },
+            ],
+            scroll: 0,
+            tab: 1,
+            problems: Vec::new(),
+            loaded: None,
+            expanded: std::collections::BTreeSet::from([0, 1]),
+            drawn_width: None,
+        };
+        for width in [120, 78, 58, 20] {
+            let rows = content_lines(&d, Some(&change), width);
+            assert_eq!(
+                rows.iter().map(ContentRow::text).collect::<Vec<_>>(),
+                vec![
+                    crate::ui::tasks::progress_bar(&progress, &[], width),
+                    String::new(),
+                    padded_to("▾ 1. Setup", width as usize),
+                    "[✓] a".to_string(),
+                    "[ ] b".to_string(),
+                    padded_to("", width as usize),
+                    padded_to("▾ 2. Build", width as usize),
+                    "[ ] c".to_string(),
+                ],
+                "width {width}"
+            );
+        }
+    }
 }
