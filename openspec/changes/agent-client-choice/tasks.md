@@ -293,8 +293,16 @@
 - [ ] 10.2 VERIFY: Run the three recorded plants for "The wiring test fails when the launcher is
   replaced by the inert double" — `launch::none()` substituted, `run_loop` not handing `pending`
   over, and `Settings::openspec_bin` hardcoded to `None` — and confirm each fails a distinct
-  assertion set, the third leaving the file-mode scenario green.
-- [ ] 10.3 REFACTOR: Clean up harness setup and the scratch programs if warranted.
+  assertion set. The third fails on a missing `integration status` **and** `pane split`, which
+  is only true because the worker refuses a `Launch` carrying `None` (per `agent-prompts`);
+  `Collaborators::file_mode` comes from `cli.is_none()` at `src/ui/mod.rs:211`, not from
+  `Settings`, so `decide` still returns `Go` under that plant.
+- [ ] 10.3 VERIFY: Measure both wiring scenarios' wall time at 120x20 and 60x20 and record it
+  against `testutil::Stages`' 30-second deadline (`src/lib.rs:689`), which is shared across
+  every stage. This change takes "Pressing `a`" to four non-`agent list` entries and "Pressing
+  `g`" to five under that unchanged budget; `ui::tests::wiring` measured **43.4 s for 29 tests**
+  at HEAD, so the per-scenario margin is what needs stating, not assuming.
+- [ ] 10.4 REFACTOR: Clean up harness setup and the scratch programs if warranted.
 
 ## 11. Gates and doc-conformance
 <!-- kind: operational -->
@@ -305,7 +313,9 @@
   `notes/` is change-local in this repository and no such file exists at the root.
   CHECK at HEAD: `grep -c 'nodefault-ui.sh' Makefile` → **7**, so the new line is the eighth.
 - [ ] 11.2 CHANGE: Add a `tests/doc_contract.rs` claim that `src/integration.rs`'s production
-  slice names no filesystem, process, environment, network, or standard-I/O API — the
+  slice names no filesystem, process, environment, network, standard-I/O, or `ratatui` name —
+  `ratatui` included because `LAUNCHSEAM` covers `HerdrCli` but **no** `make gates` script
+  sweeps `src/integration.rs` at all — the
   **fourteenth** bound claim, on `src/specs.rs`' terms, since no `make gates` script sweeps
   either file. Prove it falsifiable by planting `use std::fs;` above the `#[cfg(test)]` line,
   showing the claim fires, removing it, and showing it goes quiet.

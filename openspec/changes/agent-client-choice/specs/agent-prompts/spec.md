@@ -173,8 +173,19 @@ not resolve `openspec` either, so no prompt this capability can build would work
 
 `launch::prompt_text` SHALL therefore never be reached in file mode: `launch::decide` refuses
 first, as `agent-launch` specifies. The composition root SHALL pass the resolved binary as
-`Option<PathBuf>`, and `None` SHALL be exactly the file-mode case, so the two cannot drift
-apart into a state where one says file mode and the other has a path.
+`Option<PathBuf>`, derived from the same `resolve::openspec_bin` result that decides
+`Collaborators::file_mode`.
+
+**The worker SHALL refuse a `Request::Launch` carrying `openspec_bin` `None`**, before
+resolution and before any Herdr call, reporting `named` `None` and exactly one problem naming
+the absent binary. `Collaborators::file_mode` is computed from the CLI handle
+(`cli.is_none()`), **not** from `Settings`, so the two are separate values that a defect can
+drive apart: a composition root that passed `None` for the binary while resolving a CLI would
+leave `decide` seeing `file_mode` `false`, returning `Go`, and handing the worker a request it
+has no path for. The refusal is what makes that state observable instead of a panic or a
+prompt naming an empty path, and it is why the third plant in `agent-launch`'s wiring
+requirement fails on a **missing `integration status` and `pane split`** rather than on the
+prompt text alone.
 
 `g` SHALL NOT be affected: focusing an agent that is already running sends no prompt and
 needs no binary.
@@ -183,10 +194,12 @@ needs no binary.
 
 - **WHEN** `start_collaborators` runs with the configured path, `PATH`, nvm, and the
   `npm prefix -g` hook all unable to produce a usable binary
-- **THEN** `Collaborators::file_mode` is `true` and the launcher is started with
-  `openspec_bin` `None`
-- **AND** the two are the same fact: a control run whose probe resolves a binary has
-  `file_mode` `false` and `openspec_bin` `Some`, and no run produces one without the other
+- **THEN** `Collaborators::file_mode` is `true`, and pressing `a` records a problem row naming
+  the absent `openspec` binary while the invocation log stays empty of `pane split`
+- **AND** a control run whose probe resolves a binary has `file_mode` `false` and completes the
+  launch, so the two runs differ observably at the seam rather than by inspecting
+  `Collaborators::launcher`, which is a `Box<dyn Launcher>` exposing only `request` and `drain`
+  and cannot be asserted against directly
 
 #### Scenario: `g` still works with no binary
 

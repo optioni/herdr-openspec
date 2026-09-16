@@ -57,7 +57,7 @@ Measured for this change against Herdr 0.9.0 and `openspec` 1.13.0:
 | Piece | Where | Pattern it follows |
 |---|---|---|
 | Status parsing and kind precedence | **new** `src/integration.rs` | `src/specs.rs` — a pure classifier outside `src/ui/`, naming no `HerdrCli`, no `ratatui` type, and no I/O |
-| The `integration status` call | `src/launch.rs`'s worker body | `agents::parse_list`'s consumer — the call goes through `Arc<dyn HerdrCli>`, below the module's single `thread::spawn` |
+| The `integration status` call | `src/launch.rs`'s worker body | `agents::parse_list`'s consumer — the call goes through `Arc<dyn HerdrCli>`, below the module's single `thread::spawn`. **Convention, not a gate**: `NOBLOCK`'s `BLOCK3_RE` matches channel receives, joins and parks, not `cli.run`, which already blocks above the spawn at `src/launch.rs:267` today |
 | Prompt text | `src/launch.rs`'s `prompt_text`, extended | already there; stays pure and total |
 | `agent_kind`, `[prompts]` | `src/config.rs` | the existing per-key parse-with-a-problem loop |
 | `recorded_kind` | `src/state.rs` | `state::read`'s never-fails, per-entry-problem contract |
@@ -159,7 +159,8 @@ maintains is untouched and needs no new reconciliation.
 | Filesystem watcher (`notify`) | real, started by `start_collaborators`; not asserted on here | not reached |
 | Agent poller thread | real, running on its own cadence; its `agent list` entries are **excluded** from every log predicate | not reached |
 | Launcher worker thread | real | driven directly, without `run_wired` |
-| Clock | not read by any code this change adds | not read |
+| Refresh worker (`refresh::Refresher`) | real — `start_collaborators` starts it, and it is the collaborator that actually executes the scratch `openspec` program | not reached |
+| Clock | read only by `testutil::Stages`' shared deadline (`src/lib.rs:689`, **30 s across every stage**), never by code under `src/ui/` | not read |
 
 The poller row is the one that has bitten this repository before: it writes to the same
 invocation log on a one-second cadence, so **every** predicate and ordering assertion in a
@@ -464,6 +465,11 @@ happens, so a future reader meets the explanation rather than the drift.
   over `agent start`'s measured 30-second readiness wait survives the extra call and the
   constant does not move. Recorded here because the constant's spec sentence reasons about the
   launch's dominant term, and this change added a term to it.
+- **The wiring scenarios now wait for a fourth and fifth non-`agent list` entry under an
+  unchanged 30-second `Stages` deadline**, which is shared across every stage, and whose own
+  comment records a 5-second version truncating a run mid-sequence under load. → tasks.md
+  carries a step measuring both wiring scenarios' wall time at both widths against that
+  deadline, so the margin is a measurement rather than an assumption.
 - **Adding a module moves three doc-conformance sites at once.** → They fail loudly and name
   both sides of the disagreement, which is what that tier is for; the task group that adds the
   module also moves them.

@@ -57,6 +57,12 @@ The reviewers edited nothing.
 | 25 | SUGGESTION | D | Two documentation task counts were wrong: "three stale rows" (four are named) and "six sites" (the grep prints seven lines across six sites). | Both corrected with the command that produced them. | `tasks.md` 13.1, 13.2 |
 | 26 | SUGGESTION | B | Tasks 4.3 and 7.6 were the same persistence check, both confirming only that design.md says "none". | Deduplicated; group 4 renumbered. | `tasks.md` |
 | 27 | SUGGESTION | self | Found while verifying #7: three gate commands passed two filters positionally. `cargo test --lib config:: launch::` is not a two-filter run — it exits 1 with `error: unexpected argument`. The working form is `cargo test --lib -- config:: launch::`, measured at 69 = 24 + 45. | All three rewritten with `--`; the rule and the measurement recorded beside the baselines. | `tasks.md` header, 3.7, 6.5, 7.11, 8.6 |
+| 28 | WARNING | B | The worker's behaviour on `Request::Launch` with `openspec_bin` `None` was unspecified, and task 10.2's third plant predicted a failure that would not occur: `Collaborators::file_mode` comes from `cli.is_none()` (`src/ui/mod.rs:211`), **not** from `Settings`, so hardcoding the binary to `None` leaves `decide` returning `Go` and `pane split` running. | The worker now refuses such a request before resolution and before any Herdr call, with one named problem; the plant's expected assertion set was restated to match. | `specs/agent-prompts/spec.md`, `tasks.md` 10.2 |
+| 29 | WARNING | B | Test Boundaries omitted `refresh::Refresher`, which `start_collaborators` starts and which is the collaborator that actually executes the scratch `openspec` program. The Clock row said "not read", but the acceptance tier depends on `testutil::Stages`' **30-second deadline shared across every stage** (`src/lib.rs:689`) — and this change takes one wiring scenario to four non-`agent list` entries and another to five under it. | Refresh-worker row added; Clock row restated; a task added measuring both wiring scenarios' wall time against that deadline, with `ui::tests::wiring`'s measured 43.4 s for 29 tests as the reference point. | `design.md` → Test Boundaries + Risks, `tasks.md` 10.3 |
+| 30 | WARNING | B | `agent-prompts` carried an unobservable THEN — "the launcher is started with `openspec_bin` `None`" cannot be asserted, because `Collaborators::launcher` is a `Box<dyn Launcher>` exposing only `request` and `drain`. | Restated behaviourally: the two runs differ at the seam (a problem row and an empty log versus a completed launch) rather than by inspecting a trait object. | `specs/agent-prompts/spec.md` |
+| 31 | SUGGESTION | B | `design.md` presented the worker's below-the-`thread::spawn` placement as gate-enforced. `NOBLOCK`'s `BLOCK3_RE` matches channel receives, joins and parks — not `cli.run`, which already blocks above the spawn at `src/launch.rs:267` today. | Restated as a sound convention rather than a check, at the point the design claims it. | `design.md` → Boundaries |
+| 32 | SUGGESTION | B | Task 11.2's needle set omitted `ratatui`. `LAUNCHSEAM` covers `HerdrCli`, but no `make gates` script sweeps `src/integration.rs` at all, so `ratatui` was covered by nothing. | Added to the claim's needle set. | `tasks.md` 11.2 |
+
 
 ## Verified Clean
 
@@ -72,6 +78,11 @@ Recorded because each is a failure mode that was actively looked for and not fou
   design.md → Boundaries and the three negative controls, which D reproduced independently in a
   scratch copy.
 - **Kind markers**: 15 groups, 15 valid markers, evidence task first in every group.
+- **Seam compliance** (reviewer B, against `scripts/gates/noblock.sh` and
+  `scripts/gates/launchseam.sh`): the new module keeps `LAUNCHSEAM`'s `ALLOWED` at five files,
+  `NOBLOCK`'s Guards D and E for `src/launch.rs` survive — `fn drain`'s last occurrence stays
+  above the single `thread::spawn` — and nothing blocking lands on the render path, because
+  `run_request` is reachable only from `worker_body` below the spawn.
 - **No PRD non-goal crossed**, and **no code path this plan adds writes inside `openspec/`** —
   `settings.toml` is read-only here, the plugin's writes stay `agent-names.toml` under the state
   directory, and a wiring scenario asserts the repository tree byte-identical after a full
