@@ -120,7 +120,7 @@ render **unlabelled**, carrying the faces `inline` returned and no label anywher
 emphasised label (`- [ ] **RED**: …`) is the reachable case: its leading segment is
 `strong`-faced, so it degrades to unlabelled. That is a **miss, never a wrong colour**, which
 is the error direction `task-labels` already chose; measured over this repository's archive,
-2,369 items carry a plain label and **0** carry an emphasised one.
+2,531 items carry a plain label and **0** carry an emphasised one.
 
 A segment SHALL be omitted rather than emitted empty: an item whose text is exactly its label
 produces one fewer segment than one with a remainder after it.
@@ -171,7 +171,7 @@ line is conventionally indented to six columns, which lands under the number, be
 source prefix is `- [x] ` and the rendered one is `[x] `. The rendered prefix is a different
 width from the source's, so reproducing the source's column would align with nothing on
 screen; this capability aligns with what it actually draws. Measured over this repository's
-archive, **2,751 of 2,751** items carry a task number, of width 4 (2,079), 5 (661), or 6 (11)
+archive, **2,842 of 2,842** items carry a task number, of width 4 (2,168), 5 (663), or 6 (11)
 characters including its trailing space, so the hang is 8 columns for three items in four and
 never more than 10.
 

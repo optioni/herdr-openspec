@@ -542,3 +542,133 @@ opened the section to read. The strikethrough SHALL be the existing `Face` field
   same fold that hides the item row
 - **AND** no fold glyph is drawn on any item row, an item's body folding with its section
   rather than with a control of its own
+
+### Requirement: `Space` toggles the artifact section the cursor is on or in
+
+`Dashboard::apply(Action::ToggleSection)` at `Route::Detail` SHALL fold or unfold exactly one
+artifact section: the one the detail cursor is **on or in**. `list-selection` states the
+route split that sends the action here rather than to the list region, and states the list
+route's own arm.
+
+The section the cursor is in SHALL be derived from `ui::detail::content_lines`' own line
+indices: the section whose header row is the last one drawn at or before `detail.scroll`.
+Because a collapsed section's descendants are not drawn at all, that rule names the innermost
+**visible** section containing the cursor, which is the one the reader sees emphasised. Every
+problem row precedes every section and belongs to none, and so does every row of a
+`None`-labelled preamble section and, on the tracked-tasks tab, the progress-bar row and its
+blank line. So:
+
+- when `detail.scroll` addresses a line at or after some header row, that header's section is
+  toggled — its index removed from `detail.expanded` if present, inserted otherwise;
+- when `detail.scroll` addresses a row before the first header row, when the selected artifact
+  is not foldable, or when `detail.sections` is empty, `apply` SHALL change nothing at all and
+  SHALL record no problem.
+
+Toggling a section SHALL change only that section's own membership of `detail.expanded`. A
+collapsed ancestor hides its descendants at render time rather than by clearing their
+membership, so opening an ancestor restores exactly the fold state its subtree had — which is
+what makes closing a requirement to look at its sibling and reopening it a cheap move rather
+than a lossy one.
+
+After a toggle, `detail.scroll` SHALL be set to the **header row index** of the section that
+was toggled, recomputed against the line list the fold just produced. Collapsing a section
+the cursor was inside would otherwise leave the cursor addressing lines that no longer exist,
+and the per-frame clamp alone would land it somewhere unrelated; moving it to the header is
+both the predictable answer and the position from which the next `Space` reopens the section.
+This is `list-selection`'s rule for the list region, applied to the same key in the other
+one.
+
+`apply` SHALL reach no collaborator, spawn no process, touch no filesystem, and read no clock
+while handling `ToggleSection` at either route. In particular it SHALL NOT re-read any
+artifact and SHALL NOT re-split any file: a fold changes which lines are rendered from text
+already in `detail.sections`, and `sync_detail` is not involved.
+
+Opening a section SHALL NOT itself set `refresh.requested`. Unlike the archived list section,
+whose rows may not be resolved yet, every section's `text` was read when the tab was, so a
+fold needs no data.
+
+The blanket rule `list-selection` states — `Dashboard::apply` sets `refresh.requested` after
+**any** action when the archived tier needs resolving — is the stated exception, and is not a
+detail-route toggle doing anything. It runs after every action alike, its condition is about
+the *list*'s archived tier and never about a fold, and exempting it here is what keeps this
+clause true of the code rather than of the fixtures that happen to leave that condition
+false.
+
+#### Scenario: `Space` opens the section under the cursor and leaves its siblings shut
+
+- **WHEN** a `Dashboard` at `Route::Detail` whose selected artifact resolves to three spec
+  files, with `detail.expanded` empty and `detail.scroll` `1`, is given a `ToggleSection`
+  action
+- **THEN** `detail.expanded` holds exactly `1`, and `detail.scroll` is still `1` — the
+  header row index of the section that opened, which did not move because the sections above
+  it did not change height
+- **AND** rendering at 120x40 and at 60x40 shows `> degraded-coverage`, then
+  `v markdown-render`, then that file's rendered markdown, then a blank row, then
+  `> tasks-checklist`
+- **AND** `sections.collapsed`, `selected`, `refresh.requested`, and every other field of the
+  `Dashboard` are unchanged
+
+#### Scenario: `Space` inside an open section folds it and moves the cursor to its header
+
+- **WHEN** the same dashboard with `detail.expanded` holding `0` and `detail.scroll` set to a
+  line inside that open section's body is given a `ToggleSection` action
+- **THEN** `detail.expanded` is empty and `detail.scroll` is `0`, the folded section's header
+  row
+- **AND** rendering at 120x40 and at 60x40 shows exactly three header rows, all collapsed
+- **AND** with `detail.expanded` holding `0` and `detail.scroll` addressing the **third**
+  header row — whose index depends on how many lines the open first section contributed — the
+  same action opens the third section and leaves the first open, so the section acted on is
+  the one the cursor is in and not a fixed one
+
+#### Scenario: Closing an ancestor preserves its subtree's folds
+
+- **WHEN** the seven-section spec-glob dashboard with `detail.expanded` holding `0`, `1`, and
+  `2` has the cursor moved to the `degraded-coverage` header row and is given two
+  `ToggleSection` actions
+- **THEN** after the first `detail.expanded` holds `1` and `2` — the descendants kept their
+  membership — and the content area shows `> degraded-coverage`, `> markdown-render`, and
+  `> tasks-checklist` alone
+- **AND** after the second the rendered rows are byte-identical to what they were before the
+  two actions, at 120x40 and at 60x40
+
+#### Scenario: `Space` on a problem row is inert
+
+- **WHEN** a `Dashboard` at `Route::Detail` whose selected artifact resolves to three spec
+  files, one of which the reader failed on, and whose `detail.scroll` is `0` — the problem
+  row — is given ten `ToggleSection` actions
+- **THEN** the `Dashboard` is equal, field for field, to what it was before the ten
+- **AND** none panics and no further problem is recorded
+- **AND** moving `detail.scroll` to `1` and repeating the action toggles the first section,
+  so the inertness was attributable to the row and not to the presence of a problem
+
+#### Scenario: `Space` on a preamble row is inert
+
+- **WHEN** the three-section task dashboard whose first entry is a `None`-labelled preamble is
+  given ten `ToggleSection` actions with `detail.scroll` addressing a preamble row — which,
+  on that tab, are the progress-bar row, its blank line, and the row `Intro prose.` itself now
+  draws: a `None`-labelled section's body on a tracked-tasks tab goes through
+  `ui::tasks::group_body`, which draws that section's blocks and item bodies beside its items,
+  so the preamble's prose is its leading group's position-0 block and occupies a row of its own.
+  What makes the action inert is unchanged and is the point of the scenario: a body row is not
+  a fold target whatever drew it
+- **THEN** the `Dashboard` is equal, field for field, to what it was before the ten
+- **AND** moving `detail.scroll` onto the `1. Setup` header and repeating the action toggles
+  that section
+
+#### Scenario: `Space` is inert on a non-foldable artifact
+
+- **WHEN** a `Dashboard` at `Route::Detail` whose selected artifact resolves to one path
+  holding prose is given ten `ToggleSection` actions, and a second whose artifact resolves to
+  none is given ten more
+- **THEN** both `Dashboard` values are equal, field for field, to what they were before
+- **AND** neither spawns a process, touches the filesystem, nor calls the artifact reader
+
+#### Scenario: A fold reads no file
+
+- **WHEN** `run_loop` is driven over a `TestBackend` at 120x40 with a recording reader, a
+  dashboard whose selected artifact resolves to three spec files, and an event script of
+  `Enter`, four `Char(' ')` presses, and `Char('q')`
+- **THEN** the reader recorded exactly **one** call per resolved path, all of them during the
+  first sync, and none during the four folds
+- **AND** the run returns `Ok(..)` and the final buffer shows the fold state the four presses
+  produced

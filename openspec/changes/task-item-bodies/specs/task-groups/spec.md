@@ -1,5 +1,95 @@
 ## MODIFIED Requirements
 
+### Requirement: An ATX heading at the start of a line opens a group
+
+The plugin SHALL treat a line beginning at column zero with one to six `#` characters,
+followed by a space or the end of the line, as a heading that closes the group before it
+and opens a new one. The heading's **level** is the number of `#` characters and its
+**text** is the remainder of the line, trimmed, kept verbatim — no closing `#` sequence
+is stripped and no numbering prefix is interpreted.
+
+The column-zero requirement is deliberately stricter than CommonMark, which admits up to
+three leading spaces. An indented `#` inside a code block or a nested list is prose, and
+promoting it to a group would fabricate structure the author did not write. Seven or
+more `#` characters, and a `#` immediately followed by a non-space character, SHALL NOT
+open a group.
+
+Task lines appearing before the first heading SHALL form a group with **no** heading,
+and that leading group SHALL be present only when it holds at least one item **or at
+least one block**, so a file that opens with a title heading does not begin with an
+empty unnamed group, while a file that opens with prose still carries that prose.
+
+The block half of that condition is what makes retention **total**. Measured over this
+repository's archive, **27 of 44** task files open with non-blank content above their
+first heading — a lifecycle comment, a template banner, an ordering note — **736**
+non-blank lines in all, every one of which the item-only condition discards. A rule that
+retains every line inside a group and then drops the group cannot satisfy "Every retained
+line appears exactly once", so the two clauses are written against each other here rather
+than left to disagree.
+
+A leading group carrying blocks but no items SHALL still hold `Progress { completed: 0,
+total: 0 }` and SHALL NOT change what `count` reports for the same text, because a block
+is not a checkbox. This is the one shape in which grouping is **not** byte-identical to
+the pre-retention grouping, and it is named here rather than left as an exception a reader
+has to infer from the retention paragraph in the requirement below.
+
+#### Scenario: Two headings yield two groups holding their own items
+
+- **WHEN** `parse` is given `## 1. First`, `- [x] a`, `- [ ] b`, `## 2. Second`,
+  `- [ ] c`
+- **THEN** the result holds two groups, with heading texts `1. First` and `2. Second`
+  and levels 2 and 2
+- **AND** the first group's items are `a` and `b` and the second group's item is `c`
+- **AND** the group progresses are `Progress { completed: 1, total: 2 }` and
+  `Progress { completed: 0, total: 1 }`
+
+#### Scenario: Items before the first heading form an unnamed leading group
+
+- **WHEN** `parse` is given `- [x] loose`, then `## Group`, then `- [ ] inside`
+- **THEN** the result holds two groups, the first with no heading and the item `loose`,
+  the second with heading text `Group` and the item `inside`
+
+#### Scenario: A file opening with a heading has no empty leading group
+
+- **WHEN** `parse` is given `# Implementation Tasks`, a blank line, `## 1. Group`, and
+  `- [ ] a`
+- **THEN** the result holds exactly two groups, the first with heading text
+  `Implementation Tasks` at level 1 and no items, the second with heading text
+  `1. Group` and one item
+- **AND** no group with an absent heading appears anywhere in the result
+
+#### Scenario: A closing hash sequence is kept, not stripped
+
+- **WHEN** `parse` is given `## Group ##` followed by `- [ ] a`
+- **THEN** the group's heading text is exactly `Group ##` at level 2
+- **AND** no closing sequence rule exists to go wrong on a heading like `## C# ##`
+
+#### Scenario: Indented, over-long, and unspaced hashes are not headings
+
+- **WHEN** `parse` is given `   ## Indented`, `####### Seven`, and `#NoSpace`, each
+  followed by `- [ ] a`
+- **THEN** the result holds exactly one group, with no heading, holding three items
+- **AND** the total count is `Progress { completed: 0, total: 3 }`
+
+#### Scenario: A leading group of prose is emitted so its blocks survive
+
+- **WHEN** `parse` is given `Intro prose.`, a blank line, `## G`, and `- [ ] a`
+- **THEN** the result holds two groups: a headingless leading group with no items and one
+  block whose text is `Intro prose.` and whose recorded position is `0`, then group `G`
+  holding item `a`
+- **AND** `parse(text).progress()` equals `count(text)`, both reporting
+  `Progress { completed: 0, total: 1 }`, so emitting the leading group moved no count
+
+#### Scenario: A file opening with a heading still has no empty leading group
+
+- **WHEN** `parse` is given `# Implementation Tasks`, a blank line, `## 1. Group`, and
+  `- [ ] a`
+- **THEN** the result holds exactly two groups and no group with an absent heading, the
+  pre-retention behaviour being unchanged wherever the leading run holds neither an item
+  nor a block
+- **AND** a document of blank lines alone yields no group at all
+
+
 ### Requirement: Groups and items preserve document order, and no heading is discarded
 
 The plugin SHALL emit groups in the order their headings appear and items in the order
@@ -180,11 +270,28 @@ renderer can place it in document order without a second pass over the source.
 A block SHALL be emitted for content before the group's first item as well as for content
 between items and after the last one; the position recorded for content before the first
 item SHALL be zero. Consecutive non-blank lines SHALL form one block; a blank line SHALL
-end a block. A group with no such content SHALL carry an empty list.
+end a block **except inside an open fence**. A group with no such content SHALL carry an
+empty list.
+
+The fence exception is not a refinement — without it this capability's own purpose fails.
+A fenced block is opened by a line whose first non-whitespace run is three or more `` ` ``
+or `~` characters and closed by the next line whose run matches it or by the end of the
+group, and every line between them, blank ones included, belongs to the block that opened
+it. Measured over this repository's archive, **46 of 112** column-zero fenced blocks
+contain a blank line; under a blank-terminates-always rule each of those is shredded into
+two or more blocks whose delimiters no longer pair, so `ui::markdown::lines` reflows the
+code as prose and drops the `` ``` `` rows entirely — turning the 156-block defect this
+change exists to fix into a differently-broken rendering of 46 of them. An unterminated
+fence SHALL run to the end of its group rather than being abandoned, so the rule is total.
 
 Blocks SHALL NOT be emitted for content that an item's body already claimed, so every
 retained line appears in exactly one place and a renderer that draws every item body and
 every block reproduces each non-blank source line once.
+
+An item's **body** takes the same fence exception, and for the same reason: a blank line
+inside a fence opened within a body does not end that body, even though the continuation
+rule above would otherwise end it at the first line at or below the item's indent. A fence
+opened inside a body SHALL run to the body's own end.
 
 #### Scenario: A group's lifecycle marker is retained as a block before its first item
 
@@ -209,6 +316,16 @@ every block reproduces each non-blank source line once.
   every item body, and every group block yields each non-blank source line exactly once
 - **AND** no non-blank source line is absent from that concatenation, so retention is total
   and no line is claimed twice
+
+#### Scenario: A fenced block survives the blank line inside it
+
+- **WHEN** `parse` is given `## G`, `- [ ] a`, a blank line, a column-zero fence opening,
+  `make check`, a blank line, `make coverage`, a fence closing, a blank line, and `- [ ] b`
+- **THEN** the group holds two items and exactly **one** block, whose text holds all five
+  fence lines in order including the blank one between the two commands
+- **AND** that block's text handed to `ui::markdown::lines` renders both commands with
+  `face.code` and no backtick, which a block split at the blank line could not do
+- **AND** the block's recorded position is `1`
 
 #### Scenario: A group with no interstitial content carries no blocks
 

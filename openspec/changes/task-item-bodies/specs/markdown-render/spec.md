@@ -13,7 +13,7 @@ environment, network, or standard-I/O work, no clock, no global state, and no pa
 `inline` exists because an item's text is a **fragment**, not a document. Handing
 `# not a heading` or `1. first` to the block parser reinterprets the fragment and eats its
 marker, which a renderer of task text must not do. Measured over this repository's archive,
-**0 of 2,751** item texts would be reinterpreted today; the function is therefore justified
+**0 of 2,842** item texts would be reinterpreted today; the function is therefore justified
 structurally rather than by a live defect, and this sentence records that so a later reader
 does not mistake the measurement for a motivating bug.
 
