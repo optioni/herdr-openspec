@@ -4419,6 +4419,181 @@ fn the_production_slice_of_src_specs_rs_carries_no_io_or_schema_name() {
 }
 
 // ---------------------------------------------------------------------------
+// `agent-client-choice` :: "The production slice of `src/integration.rs` carries no I/O
+// or view name" — the **fourteenth** `tests/doc_contract.rs` claim, on exactly
+// `src/specs.rs`' terms: design.md -> Boundaries puts `src/integration.rs` outside
+// `src/ui/`, where **no** `scripts/gates/` script sweeps it at all. `LAUNCHSEAM` covers
+// the Herdr handle and nothing else does, so `ratatui` joins the needle set here.
+// ---------------------------------------------------------------------------
+
+/// The names forbidden anywhere in `src/integration.rs`'s production slice: filesystem,
+/// process, environment, network, and standard-I/O names, plus every `ratatui` type this
+/// pure classifier must not reach for. `ratatui` is in the set because no `make gates`
+/// script sweeps this file, unlike every pure file under `src/ui/`.
+const INTEGRATION_RS_FORBIDDEN_NEEDLES: [&str; 13] = [
+    "std::fs",
+    "std::io",
+    "std::env",
+    "std::process",
+    "std::net",
+    "File::",
+    "read_to_string",
+    "Command",
+    "ratatui",
+    "Modifier",
+    "Style",
+    "Span",
+    "Buffer",
+];
+
+/// Whether `src`'s production slice names any of [`INTEGRATION_RS_FORBIDDEN_NEEDLES`].
+/// `Err` names the first needle found and its 1-based line number. The slice is asserted
+/// non-empty before it is searched, so the check cannot pass vacuously against a file it
+/// failed to read or cut at the wrong place.
+fn integration_rs_production_slice_is_io_free(src: &str) -> Result<(), String> {
+    let prod = production_slice(src);
+    if prod.is_empty() {
+        return Err(
+            "src/integration.rs's production slice is empty — cut at the wrong place, or \
+             the file itself has none"
+                .to_string(),
+        );
+    }
+    for (idx, line) in prod.lines().enumerate() {
+        for needle in INTEGRATION_RS_FORBIDDEN_NEEDLES {
+            if line.contains(needle) {
+                return Err(format!(
+                    "src/integration.rs's production slice names {needle:?} at line {}: {line}",
+                    idx + 1
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn integration_rs_production_slice_check_passes_on_a_clean_slice() {
+    let src = "//! docs
+pub fn a() -> u8 { 1 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+}
+";
+    integration_rs_production_slice_is_io_free(src).expect("no needle above the cut");
+}
+
+#[test]
+fn integration_rs_production_slice_check_fails_naming_needle_and_line() {
+    let src = "pub fn a() {}
+use std::fs;
+
+#[cfg(test)]
+mod tests {}
+";
+    let err =
+        integration_rs_production_slice_is_io_free(src).expect_err("std::fs above the cut fails");
+    assert!(err.contains("std::fs"), "{err}");
+    assert!(err.contains("line 2"), "{err}");
+
+    // The needle `ratatui` is load-bearing here and nowhere else: no gate script sweeps
+    // this file, so a view type reaching it would otherwise go unnoticed.
+    let src = "use ratatui::style::Style;
+
+#[cfg(test)]
+mod tests {}
+";
+    let err = integration_rs_production_slice_is_io_free(src)
+        .expect_err("a ratatui name above the cut fails");
+    assert!(err.contains("ratatui"), "{err}");
+}
+
+#[test]
+fn integration_rs_production_slice_check_rejects_an_empty_slice() {
+    let err = integration_rs_production_slice_is_io_free("#[cfg(test)]\nmod tests {}\n")
+        .expect_err("an empty production slice must fail rather than pass vacuously");
+    assert!(err.contains("empty"), "{err}");
+}
+
+#[test]
+fn the_production_slice_of_src_integration_rs_carries_no_io_or_view_name() {
+    let src =
+        read_doc(&manifest_dir().join("src/integration.rs")).expect("read src/integration.rs");
+    integration_rs_production_slice_is_io_free(&src)
+        .expect("src/integration.rs's production slice names no I/O or ratatui API");
+}
+
+// ---------------------------------------------------------------------------
+// `agent-prompts` :: "No production file still produces an `/opsx:` prompt" — the
+// **fifteenth** claim. `agent-client-choice` removed the three Claude Code slash-command
+// prompts; `grep -rn opsx scripts/gates/ tests/ Makefile` matched nothing before this
+// claim, so no part of `make check` swept for them and the removal rested on a one-off
+// shell command leaving no committed guard.
+// ---------------------------------------------------------------------------
+
+/// Whether any production slice under `src/` holds the literal `/opsx:`. `Err` names every
+/// file and line that does. `files` is `(path, contents)` pairs, and an empty list is an
+/// error: a sweep that reached no file proves nothing.
+fn no_production_slice_names_opsx(files: &[(String, String)]) -> Result<(), String> {
+    const NEEDLE: &str = "/opsx:";
+    if files.is_empty() {
+        return Err("the /opsx: sweep reached no file at all".to_string());
+    }
+    let mut hits = Vec::new();
+    for (path, src) in files {
+        for (idx, line) in production_slice(src).lines().enumerate() {
+            if line.contains(NEEDLE) {
+                hits.push(format!("{path}:{}: {}", idx + 1, line.trim()));
+            }
+        }
+    }
+    if hits.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "{} production slice(s) still name {NEEDLE:?}:\n{}",
+            hits.len(),
+            hits.join("\n")
+        ))
+    }
+}
+
+#[test]
+fn the_opsx_sweep_finds_a_planted_literal_and_ignores_one_below_the_cut() {
+    let clean = vec![(
+        "src/a.rs".to_string(),
+        "pub fn a() {}\n\n#[cfg(test)]\nmod tests {\n    const X: &str = \"/opsx:apply\";\n}\n"
+            .to_string(),
+    )];
+    no_production_slice_names_opsx(&clean).expect("a literal below the cut is not a hit");
+
+    let planted = vec![(
+        "src/a.rs".to_string(),
+        "pub const P: &str = \"/opsx:apply\";\n\n#[cfg(test)]\nmod tests {}\n".to_string(),
+    )];
+    let err = no_production_slice_names_opsx(&planted).expect_err("a planted literal fails");
+    assert!(err.contains("src/a.rs:1"), "{err}");
+    assert!(err.contains("/opsx:"), "{err}");
+
+    let err = no_production_slice_names_opsx(&[]).expect_err("an empty sweep must fail");
+    assert!(err.contains("no file at all"), "{err}");
+}
+
+#[test]
+fn no_production_file_still_produces_an_opsx_prompt() {
+    let files = collect_rs_files(&manifest_dir().join("src"));
+    assert!(
+        files.len() >= 25,
+        "the sweep must reach the whole crate, found {}",
+        files.len()
+    );
+    no_production_slice_names_opsx(&files)
+        .expect("the three Claude Code slash-command prompts are gone from every production slice");
+}
+
+// ---------------------------------------------------------------------------
 // `mouse-text-selection` :: "The clipboard write's confinement is bound inside
 // `cargo test`" (`specs/doc-conformance/spec.md`) — the twelfth `tests/doc_contract.rs`
 // claim. `TerminalOps::write_clipboard` (`src/ui/terminal.rs`) is the crate's only
@@ -4429,17 +4604,19 @@ fn the_production_slice_of_src_specs_rs_carries_no_io_or_schema_name() {
 
 /// The single source of truth both `AGENTS.md` and `SPEC.md` are checked against below —
 /// a documented number is never trusted on its own, only compared to this. Bump it, and
-/// both prose sites, in the same commit that adds a fourteenth claim.
-const CLAIM_COUNT: usize = 13;
+/// both prose sites, in the same commit that adds a sixteenth claim.
+const CLAIM_COUNT: usize = 15;
 
 /// The number words `agents_md_claim_count` accepts. `ten` is kept alongside the three
 /// values this repository has actually used so the negative-control test below has a
 /// fourth, distinct value to assert is parsed correctly without yet being correct.
-const CLAIM_COUNT_WORDS: [(&str, usize); 4] = [
+const CLAIM_COUNT_WORDS: [(&str, usize); 6] = [
     ("ten", 10),
     ("eleven", 11),
     ("twelve", 12),
     ("thirteen", 13),
+    ("fourteen", 14),
+    ("fifteen", 15),
 ];
 
 /// Parse `AGENTS.md`'s "(<number-word> further claims" marker — the sentence naming how

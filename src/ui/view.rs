@@ -8226,7 +8226,7 @@ mod tests {
             d.agents.reachable = false;
             d.file_mode = file_mode;
 
-            for (width, pad) in [(120u16, 82usize), (60u16, 22usize)] {
+            for (width, pad) in [(120, 82usize), (60, 22usize)] {
                 let buf = render_at(width, 20, &d);
                 assert_eq!(
                     row_text(&buf, 19),
@@ -8310,7 +8310,7 @@ mod tests {
                 "file_mode {file_mode}: no launch request is produced by any of the four"
             );
 
-            for width in [120u16, 60u16] {
+            for width in [120, 60] {
                 let row = row_text(&render_at(width, 20, &d), 19);
                 assert!(row.starts_with("/acsg_"), "file_mode {file_mode}: {row}");
                 assert!(

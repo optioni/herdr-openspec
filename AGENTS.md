@@ -286,7 +286,7 @@ triangle — a `herdr-plugin.toml`, `README.md`, or binary-name edit that drifts
 against another fails it, deliberately asserting nothing about `target/release/`, which
 `make check` never builds), `tests/degraded_coverage.rs` (`SPEC.md`'s degraded-states
 table bound to a named, passing proving test per row), and `tests/doc_contract.rs`
-(thirteen further claims — the module map, the tested-modules list, the worker-thread
+(fifteen further claims — the module map, the tested-modules list, the worker-thread
 count, the MSRV, the gate-path programs, the manifest transcription, the injected
 OpenSpec context, the documented mouse bindings (`SPEC.md` → Keys' mouse table
 bound **row by row** by *executing* `mouse_action` at every cell of the swept

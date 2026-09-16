@@ -4,7 +4,7 @@
 //!
 //! Pure and total on exactly `crate::specs`' terms — no filesystem, process,
 //! environment, network, or standard-I/O API, no clock, no global mutable
-//! state, no `ratatui` type, no handle on the Herdr half of the subprocess
+//! state, no view-layer type, no handle on the Herdr half of the subprocess
 //! seam, and no panic for any input, the empty string included. The
 //! `herdr integration status` call itself lives in `src/launch.rs`'s worker
 //! body, which reaches the program through the seam trait it already holds;
@@ -14,8 +14,10 @@
 //! does: a new pure-view file would move `NOIO-VIEW`'s "ten pure files" and
 //! `COLWIDTH`'s "nine pure view files", two counts four documents carry. The
 //! cost is that no `make gates` script sweeps this file at all, so its
-//! freedom from I/O is a `tests/doc_contract.rs` claim over its production
-//! slice instead. See `specs/integration-status/spec.md`.
+//! freedom from I/O — and from the view layer, which `LAUNCHSEAM` does not
+//! cover here — is a `tests/doc_contract.rs` claim over its production slice
+//! instead. That claim greps for the render crate's own name, so this comment
+//! does not spell it. See `specs/integration-status/spec.md`.
 
 /// One line of `herdr integration status`: an integration Herdr knows about,
 /// the status text it printed for it, and whether the user has set it up.

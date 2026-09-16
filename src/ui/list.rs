@@ -2302,7 +2302,7 @@ mod tests {
         d.agents.agents = vec![live_agent("c-2fa-support")];
         d.apply(Action::LaunchApply);
 
-        for width in [38u16, 58u16] {
+        for width in [38, 58] {
             let rows = rows(&d, width);
             assert_eq!(rows[0].kind, RowKind::Problem, "width {width}");
             assert!(
@@ -2323,7 +2323,7 @@ mod tests {
         d.apply(Action::LaunchApply);
         d.apply(Action::LaunchApply);
         assert_eq!(d.launch.problems.len(), 1);
-        for width in [38u16, 58u16] {
+        for width in [38, 58] {
             assert_eq!(
                 rows(&d, width)
                     .iter()
@@ -2352,7 +2352,7 @@ mod tests {
         d.apply(Action::LaunchApply);
 
         assert_eq!(d.launch.problems.len(), 1, "{:?}", d.launch.problems);
-        for width in [38u16, 58u16] {
+        for width in [38, 58] {
             let rows = rows(&d, width);
             assert_eq!(rows[0].kind, RowKind::Problem, "width {width}");
             assert!(rows[0].text.starts_with("! "), "width {width}");
@@ -2393,7 +2393,7 @@ mod tests {
         );
         d.launch.problems = problems.clone();
 
-        for width in [38u16, 58u16] {
+        for width in [38, 58] {
             let rows = rows(&d, width);
             for (i, problem) in problems.iter().enumerate() {
                 assert_eq!(rows[i].kind, RowKind::Problem, "width {width} row {i}");
@@ -2433,7 +2433,7 @@ mod tests {
         );
         d.launch.problems = vec![refusal.to_string()];
 
-        for width in [38u16, 58u16] {
+        for width in [38, 58] {
             let rows = rows(&d, width);
             assert_eq!(rows[0].kind, RowKind::Problem, "width {width}");
             assert_eq!(
@@ -2458,19 +2458,19 @@ mod tests {
             Vec::new(),
             0,
         );
-        let before: Vec<Vec<String>> = [38u16, 58u16]
+        let before: Vec<Vec<String>> = [38, 58]
             .iter()
             .map(|w| rows(&d, *w).into_iter().map(|r| r.text).collect())
             .collect();
 
         d.launch.problems = vec!["herdr exited with code 1: agent_blocked".to_string()];
-        for width in [38u16, 58u16] {
+        for width in [38, 58] {
             assert_eq!(rows(&d, width)[0].kind, RowKind::Problem, "width {width}");
         }
 
         // The next outcome replaces the vector wholesale; a success empties it.
         d.launch.problems = Vec::new();
-        let after: Vec<Vec<String>> = [38u16, 58u16]
+        let after: Vec<Vec<String>> = [38, 58]
             .iter()
             .map(|w| rows(&d, *w).into_iter().map(|r| r.text).collect())
             .collect();

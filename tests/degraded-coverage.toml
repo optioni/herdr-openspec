@@ -153,7 +153,7 @@ tier = "view"
 proof = ["an_unreachable_socket_renders_the_agentless_pane"]
 verdict = "spec-corrected"
 why = "the pane renders identically whether AgentSnapshot::problem is Some or None, via render_at"
-covers = ["src/ui/app.rs:804-817"]
+covers = ["src/ui/app.rs:806-819"]
 
 [[row]]
 condition = "A launch's `pane split` call fails"
@@ -161,7 +161,7 @@ tier = "outer"
 proof = ["every_launch_failure_renders_as_a_leading_row"]
 verdict = "unproven"
 why = "a real run_wired run against a scratch herdr failing at pane split, both widths"
-covers = ["src/launch.rs:284-290"]
+covers = ["src/launch.rs:367-373"]
 
 [[row]]
 condition = "A launch's `agent start` call fails"
@@ -169,7 +169,7 @@ tier = "outer"
 proof = ["every_launch_failure_renders_as_a_leading_row"]
 verdict = "unproven"
 why = "a real run_wired run against a scratch herdr failing at agent start, both widths"
-covers = ["src/launch.rs:305-313"]
+covers = ["src/launch.rs:388-396"]
 
 [[row]]
 condition = "A launch's `agent prompt` call fails"
@@ -177,7 +177,7 @@ tier = "outer"
 proof = ["every_launch_failure_renders_as_a_leading_row"]
 verdict = "unproven"
 why = "a real run_wired run against a scratch herdr failing at agent prompt, both widths"
-covers = ["src/launch.rs:328-330"]
+covers = ["src/launch.rs:411-413"]
 
 [[row]]
 condition = "A launch's derived agent name is already live in the session"
@@ -185,7 +185,7 @@ tier = "outer"
 proof = ["every_launch_failure_renders_as_a_leading_row"]
 verdict = "unproven"
 why = "a real run_wired run refused before any Herdr call, the sentence asserted in full at 120 columns"
-covers = ["src/launch.rs:112-116"]
+covers = ["src/launch.rs:137-141"]
 
 [[row]]
 condition = "`state::record` fails after a successful `agent start`"
@@ -193,7 +193,7 @@ tier = "outer"
 proof = ["a_success_clears_both_entries", "every_launch_failure_renders_as_a_leading_row"]
 verdict = "repaired"
 why = "openspec/changes/archive/2026-09-06-agent-launch should have shipped this: Outcome::problems now accumulates both the record and prompt failures, proved through run_wired and run_loop"
-covers = ["src/launch.rs:320-323"]
+covers = ["src/launch.rs:403-406"]
 
 [[row]]
 condition = "`g` on a change with no attributed agent"
@@ -201,7 +201,7 @@ tier = "outer"
 proof = ["g_with_no_agent_renders_the_same_buffer"]
 verdict = "unproven"
 why = "a real run_wired run pressing g on an unattributed change renders the identical buffer, with an empty argv log"
-covers = ["src/launch.rs:89-96"]
+covers = ["src/launch.rs:103-110"]
 
 [[row]]
 condition = "A `pane split` payload is not the measured envelope (a Herdr older than the manifest's `min_herdr_version` floor, `0.7.0`, might return one)"
@@ -209,7 +209,7 @@ tier = "outer"
 proof = ["every_launch_failure_renders_as_a_leading_row"]
 verdict = "unproven"
 why = "a real run_wired run against a scratch herdr returning a malformed pane-split payload"
-covers = ["src/launch.rs:155-163"]
+covers = ["src/launch.rs:180-188"]
 
 [[row]]
 condition = "Pane narrower than 100 columns"
@@ -225,7 +225,7 @@ tier = "outer"
 proof = ["config_fallback_renders_as_a_leading_problem_row"]
 verdict = "unproven"
 why = "a real run_wired run with Config::problems set renders the leading problem row"
-covers = ["src/config.rs:118-123", "src/config.rs:130-137"]
+covers = ["src/config.rs:134-139", "src/config.rs:146-153"]
 
 [[row]]
 condition = "`agent-names.toml` unusable (malformed, unreadable, or an entry Herdr would reject)"
@@ -400,7 +400,7 @@ tier = "unit"
 proof = ["prefers_the_workspace_cwd_and_falls_back_when_there_is_none", "a_herdr_context_with_no_workspace_cwd_is_the_fallback_case_not_a_failure"]
 verdict = "confirmed"
 why = "startup_dir's own unit tests drive both arms of the fallback decision directly"
-covers = ["src/ui/mod.rs:369-374"]
+covers = ["src/ui/mod.rs:388-393"]
 
 [[row]]
 condition = "The terminal refuses mouse capture (`enable_mouse` fails)"
@@ -408,7 +408,7 @@ tier = "outer"
 proof = ["a_refused_capture_is_named_last", "a_successful_capture_adds_no_row"]
 verdict = "confirmed"
 why = "mouse-input: run_wired is driven with Startup::mouse_problem set and with it None; the first proves the reason lands as refresh.startup's LAST entry, below the binary probe's own, and renders as a `!`-marked row above the change rows while the loop runs normally; the second proves a successful capture adds no entry and leaves the frame unchanged"
-covers = ["src/ui/mod.rs:307-309", "src/ui/terminal.rs:83-83", "src/ui/terminal.rs:91-93"]
+covers = ["src/ui/mod.rs:326-328", "src/ui/terminal.rs:83-83", "src/ui/terminal.rs:91-93"]
 
 [[row]]
 condition = "The clipboard write fails locally (`TerminalOps::write_clipboard` returns an error)"
@@ -425,3 +425,45 @@ proof = ["a_change_archived_mid_cycle_appears_in_both_lists_for_one_cycle"]
 verdict = "confirmed"
 why = "changes::merge's own unit proof: two merges, the second with an empty CLI list, showing add-auth appears in both active and archived for one cycle and then self-corrects rather than sticking (design.md -> Decision D6)"
 covers = ["src/changes.rs:1794-1794", "src/changes.rs:1834-1835", "src/changes.rs:1842-1847"]
+
+# --- agent-client-choice ----------------------------------------------------
+
+[[row]]
+condition = "`herdr integration status` cannot be read (non-zero exit, a failure to start, or a timeout)"
+tier = "integration"
+proof = ["a_failed_status_call_still_launches_the_configured_kind", "a_failed_status_call_with_nothing_configured_reaches_claude_with_two_problems", "unparseable_output_is_not_a_failed_call"]
+verdict = "confirmed"
+why = "the launcher's worker is driven through `handle` against a HerdrCli whose `integration status` fails, and separately against one whose output parses to nothing; the first proves a configured kind still reaches `--kind` with exactly one problem and no second one claiming its integration is absent, the second proves the last resort with the read failure first, and the third proves the per-line problems are summarised into one entry at the launch boundary - three lines and seventeen both yielding two, while `parse` itself still returns one per line"
+covers = ["src/launch.rs:724-745"]
+
+[[row]]
+condition = "Two or more agent integrations installed, with no `agent_kind` configured and none recorded"
+tier = "integration"
+proof = ["two_installed_integrations_stop_the_launch_with_one_problem_and_no_pane", "a_configured_kind_suppresses_the_stop_entirely", "the_ambiguous_refusal_clears_the_in_flight_flag_and_leaves_g_working", "the_ambiguous_stop_renders_as_one_leading_problem_row"]
+verdict = "confirmed"
+why = "the worker stops at `Choice::Ambiguous` with an invocation log of exactly one entry and a state directory byte-identical to before; the configured-kind control proves the stop is caused by the absence of a choice and by nothing else in the fixture; the driver test proves the same `drain` that adopts the outcome clears `in_flight` and leaves both `g` and a retried `a` working; and the list test proves the row at both mandated interior widths"
+covers = ["src/launch.rs:677-692"]
+
+[[row]]
+condition = "No agent integration installed at all, with no `agent_kind` configured and none recorded"
+tier = "unit"
+proof = ["nothing_installed_and_nothing_configured_reaches_claude_and_says_so", "a_sole_integration_and_a_last_resort_carry_no_absence_warning"]
+verdict = "confirmed"
+why = "`integration::resolve` over seventeen integrations none of which is installed returns `Use { kind: claude, source: LastResort }` with exactly one problem naming `agent_kind` and `claude`; the second proof pins that it is that one warning and not a second about claude's own integration being absent, and that a sole integration carries none at all"
+covers = ["src/integration.rs:203-215"]
+
+[[row]]
+condition = "The chosen agent kind's own integration is not installed (a configured or recorded kind Herdr reports as absent, or never lists)"
+tier = "unit"
+proof = ["a_configured_kind_with_no_integration_warns_and_still_resolves", "a_kind_herdr_never_listed_is_warned_about_on_the_same_terms", "a_recorded_kind_with_no_integration_warns_too", "a_recorded_kind_outranks_the_evidence"]
+verdict = "confirmed"
+why = "`resolve` is driven against the measured corpus with `cursor` (listed, not installed) and with `not-a-kind` (never listed), each returning the kind with exactly one problem naming it and the word `unknown`, paired with an installed control that carries an empty problems vector - so the warning is caused by the absence and by nothing else; the recorded-kind pair proves the same for step 2 and that the launch still completes end to end"
+covers = ["src/integration.rs:174-185"]
+
+[[row]]
+condition = "`a`, `c`, or `s` pressed in file mode"
+tier = "unit"
+proof = ["file_mode_refuses_the_three_launch_keys_and_names_the_missing_binary", "focus_is_exempt_from_file_mode", "a_file_mode_refusal_renders_one_row_at_both_widths", "file_mode_leaves_a_refusing_and_g_working_in_the_shipped_root"]
+verdict = "confirmed"
+why = "`launch::decide` with `file_mode` true refuses all three launch intents with a reason naming the absent binary, whether or not anything is selected, while the `file_mode` false control returns `Go` - so the refusal is caused by the flag alone; `Focus` is exempt; the list test proves the row at 38 and 58 columns; and the wiring test proves it end to end in the shipped composition root against a reachable socket, with the footer carrying `g focus` and not `a/c/s launch`"
+covers = ["src/launch.rs:115-121"]

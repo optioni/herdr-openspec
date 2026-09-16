@@ -326,12 +326,12 @@
 ## 11. Gates and doc-conformance
 <!-- kind: operational -->
 
-- [ ] 11.1 CHANGE: Add an eighth `NODEFAULT-UI` line to the `Makefile` for
+- [x] 11.1 CHANGE: Add an eighth `NODEFAULT-UI` line to the `Makefile` for
   `HOMEFILE=src/launch.rs TYPES='Settings'`, measure its true floor, and record the measurement
   in `openspec/changes/agent-client-choice/notes/gate-floors.md`, which this task creates —
   `notes/` is change-local in this repository and no such file exists at the root.
   CHECK at HEAD: `grep -c 'nodefault-ui.sh' Makefile` → **7**, so the new line is the eighth.
-- [ ] 11.2 CHANGE: Add a `tests/doc_contract.rs` claim that `src/integration.rs`'s production
+- [x] 11.2 CHANGE: Add a `tests/doc_contract.rs` claim that `src/integration.rs`'s production
   slice names no filesystem, process, environment, network, standard-I/O, or `ratatui` name —
   `ratatui` included because `LAUNCHSEAM` covers `HerdrCli` but **no** `make gates` script
   sweeps `src/integration.rs` at all — the
@@ -340,15 +340,15 @@
   showing the claim fires, removing it, and showing it goes quiet.
   CHECK at HEAD: `SPEC.md` → § Doc-conformance checks lists **13** bound claims and
   `AGENTS.md:289` says "thirteen further claims", so this is the fourteenth.
-- [ ] 11.3 CHANGE: Add a fifteenth `tests/doc_contract.rs` claim that the production slice
+- [x] 11.3 CHANGE: Add a fifteenth `tests/doc_contract.rs` claim that the production slice
   holds no `/opsx:` literal, so 8.4's one-off grep becomes a committed regression guard.
   CHECK at HEAD: `grep -rn 'opsx' scripts/gates/ tests/ Makefile` → **0 matches**, so nothing
   in `make check` sweeps for it today and the guard is genuinely new.
-- [ ] 11.4 CHANGE: Add the new degraded-state rows to `SPEC.md`'s table — unreadable
+- [x] 11.4 CHANGE: Add the new degraded-state rows to `SPEC.md`'s table — unreadable
   `integration status`, ambiguous resolution, last-resort `claude`, absent integration for the
   chosen kind, and the file-mode launch refusal — and bind each to a named passing test in
   `tests/degraded-coverage.toml`.
-- [ ] 11.5 VERIFY: Run `make gates`, `cargo test --test doc_contract` (the suite 11.2 and 11.3
+- [x] 11.5 VERIFY: Run `make gates`, `cargo test --test doc_contract` (the suite 11.2 and 11.3
   extend), and `cargo test --test degraded_coverage` — all green, each with a non-zero selected
   count.
 
