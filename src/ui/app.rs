@@ -1359,6 +1359,11 @@ impl Dashboard {
             self.agents.reachable,
             &live_names,
             self.launch.in_flight,
+            // `agent-client-choice`: the seventh and last argument, so `in_flight` stays the
+            // sixth. `file_mode` is the composition root's own fact — the binary probe
+            // resolved nothing — and it is the same one the header badges and the footer
+            // reads, so the badge, the dropped hint and this refusal all follow one value.
+            self.file_mode,
         ) {
             crate::launch::Decision::Nothing => {}
             crate::launch::Decision::Refuse(reason) => {

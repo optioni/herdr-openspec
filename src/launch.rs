@@ -15,7 +15,10 @@
 //! `Focus`) against a real `HerdrCli`; and `start`/`worker_body` run that sequence on the
 //! crate's third worker thread, behind the `Launcher` trait every consumer reaches it through.
 
-/// Which `/opsx:*` command a launch sends, or that `g` is a focus rather than a launch.
+/// Which of the three CLI-driven prompts a launch sends — apply, continue, or archive — or
+/// that `g` is a focus rather than a launch. The text each produces is `prompt_text`'s, built
+/// from the resolved `openspec` path and the change name and overridable per kind from
+/// `config.toml`; the intent names the concern, never a client's own command grammar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Intent {
     Apply,
@@ -54,9 +57,11 @@ pub enum Decision {
 /// reason the worker accumulated, in the order it occurred, and is empty on complete success.
 /// **`degraded-states`' repair of row 23**: a single `Option<String>` could not hold both a
 /// `state::record` failure and an `agent prompt` failure, so the one path where both fail
-/// silently discarded the record's reason. `problems` holds **at most two** entries — the
-/// record failure and the prompt failure are the only pair that can co-occur — never more,
-/// since every earlier failure point returns immediately with exactly one. Never `Default`,
+/// silently discarded the record's reason. `problems` holds **at most four** entries: the kind
+/// resolution contributes at most two — one about obtaining the status, one about the kind
+/// chosen — and the record failure and the prompt failure are the only other pair that can
+/// co-occur. Never more, since every earlier failure point returns immediately with exactly
+/// what it has accumulated. Never `Default`,
 /// anywhere in the crate; every construction and destructuring names both fields, with no
 /// `..` rest — on exactly `agents::AgentSnapshot`'s and `agents::Attribution`'s terms.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,14 +70,22 @@ pub struct Outcome {
     pub problems: Vec<String>,
 }
 
-/// The whole launch policy, a pure total function of its six arguments. Performs no
+/// The whole launch policy, a pure total function of its seven arguments. Performs no
 /// filesystem, process, environment, network, or terminal I/O, reads no clock and no global
 /// state, spawns nothing, and never panics for any combination of arguments. The order is
 /// exactly: an unreachable socket makes every intent inert; `Focus` resolves against `pane`
 /// alone and returns without consulting `change` or `in_flight` — a user waiting through a
-/// slow launch can still press `g`; no selected change means no launch; a launch already in
+/// slow launch can still press `g`; file mode refuses the three launch keys; no selected
+/// change means no launch; a launch already in
 /// flight is refused before any live-name check; a derived name already live in the session is
-/// refused before any request is produced; and otherwise the request goes ahead. See
+/// refused before any request is produced; and otherwise the request goes ahead.
+///
+/// `file_mode` is `agent-client-choice`'s addition, appended **last** so `in_flight` stays the
+/// sixth argument and the "tracks whether a launch is in flight" requirement stays byte-true.
+/// Argument order and check order are unrelated here and already were. It is checked after
+/// `Focus`, because `g` focuses an agent that is already running and needs no `openspec`
+/// binary, and before the selection test, so pressing `a` in file mode says why whether or not
+/// anything is selected. See
 /// `specs/agent-launch/spec.md` -> "The launch decision is a pure, total function that refuses
 /// before it reaches Herdr".
 pub fn decide(
@@ -82,6 +95,7 @@ pub fn decide(
     reachable: bool,
     live_names: &[&str],
     in_flight: bool,
+    file_mode: bool,
 ) -> Decision {
     if !reachable {
         return Decision::Nothing;
@@ -93,6 +107,17 @@ pub fn decide(
             }),
             None => Decision::Nothing,
         };
+    }
+    // In file mode the prompt this plugin would send names an absolute `openspec` path it does
+    // not have, and the launched agent's own shell will not resolve `openspec` either — so
+    // there is no prompt that could work. The header already badges `file mode` and the footer
+    // drops the `a/c/s launch` hint, so the refusal confirms a context already on screen.
+    if file_mode {
+        return Decision::Refuse(
+            "no openspec binary was found - a, c, and s cannot tell an agent how to run the \
+             workflow without one"
+                .to_string(),
+        );
     }
     let Some(change) = change else {
         return Decision::Nothing;
@@ -229,10 +254,12 @@ fn intent_name(intent: Intent) -> &'static str {
 /// the intent, the change name, and the resolved path **only**, never on the
 /// agent kind: adding a client therefore requires no mapping at all.
 ///
-/// The `/opsx:*` shortcuts are gone. They are a Claude Code plugin's shortcut
-/// rather than a universal idea, they fail in any Claude Code without the
-/// `opsx` plugin installed, and no other client has an equivalent to translate
-/// to. What generalises is the CLI underneath.
+/// The `opsx` slash-command shortcuts are gone. They are a Claude Code
+/// plugin's shortcut rather than a universal idea, they fail in any Claude Code
+/// without that plugin installed, and no other client has an equivalent to
+/// translate to. What generalises is the CLI underneath. The literal spelling
+/// is deliberately absent from this file: `tests/doc_contract.rs` requires the
+/// production slice to hold none of it.
 ///
 /// `openspec` is the **resolved absolute path**, never the bare command:
 /// measured, a fresh interactive `zsh` with a reset `PATH` reports
@@ -615,8 +642,31 @@ mod tests {
                 Intent::Archive,
                 Intent::Focus,
             ] {
-                let result = decide(intent, Some("add-auth"), Some("w8:p3"), false, &[], false);
+                let result = decide(
+                    intent,
+                    Some("add-auth"),
+                    Some("w8:p3"),
+                    false,
+                    &[],
+                    false,
+                    false,
+                );
                 assert_eq!(result, Decision::Nothing, "{intent:?}");
+                // An unreachable socket outranks file mode, so a pane with
+                // neither is silent rather than doubly noisy.
+                assert_eq!(
+                    decide(
+                        intent,
+                        Some("add-auth"),
+                        Some("w8:p3"),
+                        false,
+                        &[],
+                        false,
+                        true
+                    ),
+                    Decision::Nothing,
+                    "{intent:?} with file_mode"
+                );
             }
         }
 
@@ -624,17 +674,17 @@ mod tests {
         fn no_change_means_no_launch_and_no_agent_means_no_focus() {
             for intent in [Intent::Apply, Intent::Continue, Intent::Archive] {
                 assert_eq!(
-                    decide(intent, None, None, true, &[], false),
+                    decide(intent, None, None, true, &[], false, false),
                     Decision::Nothing,
                     "{intent:?}"
                 );
             }
             assert_eq!(
-                decide(Intent::Focus, None, None, true, &[], false),
+                decide(Intent::Focus, None, None, true, &[], false, false),
                 Decision::Nothing
             );
             assert_eq!(
-                decide(Intent::Focus, None, Some("w8:p3"), true, &[], false),
+                decide(Intent::Focus, None, Some("w8:p3"), true, &[], false, false),
                 Decision::Go(Request::Focus {
                     pane_id: "w8:p3".to_string()
                 })
@@ -645,7 +695,7 @@ mod tests {
         fn each_intent_carries_its_own_change_and_name() {
             let mut results = Vec::new();
             for intent in [Intent::Apply, Intent::Continue, Intent::Archive] {
-                let result = decide(intent, Some("2fa-support"), None, true, &[], false);
+                let result = decide(intent, Some("2fa-support"), None, true, &[], false, false);
                 assert_eq!(
                     result,
                     Decision::Go(Request::Launch {
@@ -687,6 +737,7 @@ mod tests {
                 true,
                 &["c-2fa-support", "other"],
                 false,
+                false,
             );
             match result {
                 Decision::Refuse(reason) => {
@@ -703,6 +754,7 @@ mod tests {
                 true,
                 &["c-2fa-support-x", "2fa-support"],
                 false,
+                false,
             );
             assert!(matches!(go, Decision::Go(_)), "expected Go, got {go:?}");
         }
@@ -716,7 +768,7 @@ mod tests {
         #[test]
         fn a_second_press_while_a_launch_is_in_flight_is_refused_not_queued() {
             for intent in [Intent::Apply, Intent::Continue, Intent::Archive] {
-                let result = decide(intent, Some("2fa-support"), None, true, &[], true);
+                let result = decide(intent, Some("2fa-support"), None, true, &[], true, false);
                 match result {
                     Decision::Refuse(reason) => {
                         assert!(
@@ -732,7 +784,7 @@ mod tests {
                 }
                 // The same three calls with `in_flight` false return `Go`, so the refusal is
                 // caused by the flag and by nothing else in the fixture.
-                let go = decide(intent, Some("2fa-support"), None, true, &[], false);
+                let go = decide(intent, Some("2fa-support"), None, true, &[], false, false);
                 assert!(
                     matches!(go, Decision::Go(_)),
                     "{intent:?} expected Go with in_flight=false, got {go:?}"
@@ -756,6 +808,7 @@ mod tests {
                 true,
                 &["c-2fa-support"],
                 true,
+                false,
             );
             match result {
                 Decision::Refuse(reason) => {
@@ -777,7 +830,7 @@ mod tests {
         /// See specs/agent-launch/spec.md -> "Focus still works while a launch is in flight".
         #[test]
         fn focus_still_works_while_a_launch_is_in_flight() {
-            let result = decide(Intent::Focus, None, Some("w8:p3"), true, &[], true);
+            let result = decide(Intent::Focus, None, Some("w8:p3"), true, &[], true, false);
             assert_eq!(
                 result,
                 Decision::Go(Request::Focus {
@@ -786,46 +839,117 @@ mod tests {
             );
         }
 
+        /// Sixteen cases: `in_flight` both ways, crossed with `file_mode` both
+        /// ways, once per `Intent`. `agent-client-choice` widened this from
+        /// eight.
         #[test]
         fn every_combination_is_total() {
+            let mut calls = 0usize;
             for in_flight in [false, true] {
-                for intent in [
-                    Intent::Apply,
-                    Intent::Continue,
-                    Intent::Archive,
-                    Intent::Focus,
-                ] {
-                    let result = decide(intent, Some(""), Some(""), true, &[""], in_flight);
-                    match (intent, in_flight) {
-                        (Intent::Focus, _) => {
-                            assert_eq!(
-                                result,
-                                Decision::Go(Request::Focus {
-                                    pane_id: String::new()
-                                }),
-                                "{intent:?} in_flight={in_flight}"
-                            );
-                        }
-                        (_, true) => {
-                            assert!(
-                                matches!(result, Decision::Refuse(_)),
-                                "{intent:?} expected Refuse, got {result:?}"
-                            );
-                        }
-                        (_, false) => {
-                            assert_eq!(
-                                result,
-                                Decision::Go(Request::Launch {
-                                    change: String::new(),
-                                    agent: "change".to_string(),
-                                    intent,
-                                }),
-                                "{intent:?}"
-                            );
+                for file_mode in [false, true] {
+                    for intent in [
+                        Intent::Apply,
+                        Intent::Continue,
+                        Intent::Archive,
+                        Intent::Focus,
+                    ] {
+                        let result = decide(
+                            intent,
+                            Some(""),
+                            Some(""),
+                            true,
+                            &[""],
+                            in_flight,
+                            file_mode,
+                        );
+                        calls += 1;
+                        match (intent, in_flight, file_mode) {
+                            (Intent::Focus, _, _) => {
+                                assert_eq!(
+                                    result,
+                                    Decision::Go(Request::Focus {
+                                        pane_id: String::new()
+                                    }),
+                                    "{intent:?} in_flight={in_flight} file_mode={file_mode}"
+                                );
+                            }
+                            (_, _, true) => {
+                                assert!(
+                                    matches!(result, Decision::Refuse(_)),
+                                    "{intent:?} in_flight={in_flight}: file mode refuses \
+                                     whatever in_flight is, got {result:?}"
+                                );
+                            }
+                            (_, true, false) => {
+                                assert!(
+                                    matches!(result, Decision::Refuse(_)),
+                                    "{intent:?} expected Refuse, got {result:?}"
+                                );
+                            }
+                            (_, false, false) => {
+                                assert_eq!(
+                                    result,
+                                    Decision::Go(Request::Launch {
+                                        change: String::new(),
+                                        agent: "change".to_string(),
+                                        intent,
+                                    }),
+                                    "{intent:?}"
+                                );
+                            }
                         }
                     }
                 }
             }
+            assert_eq!(calls, 16);
+        }
+
+        /// `agent-client-choice`: file mode refuses the three launch keys and
+        /// names the missing binary, before the selection test and after
+        /// `Focus`.
+        #[test]
+        fn file_mode_refuses_the_three_launch_keys_and_names_the_missing_binary() {
+            for intent in [Intent::Apply, Intent::Continue, Intent::Archive] {
+                let refused = decide(intent, Some("2fa-support"), None, true, &[], false, true);
+                match &refused {
+                    Decision::Refuse(reason) => assert!(
+                        reason.contains("openspec"),
+                        "{intent:?}: the reason must name the absent binary: {reason}"
+                    ),
+                    other => panic!("{intent:?}: expected Refuse, got {other:?}"),
+                }
+
+                // Step 3 precedes the selection test, so the answer is the same
+                // with nothing selected.
+                assert_eq!(
+                    decide(intent, None, None, true, &[], false, true),
+                    refused,
+                    "{intent:?}: file mode answers whether or not anything is selected"
+                );
+
+                // The control: the same fixture with `file_mode` false goes
+                // ahead, so the refusal is caused by the flag and by nothing
+                // else in the fixture.
+                assert!(
+                    matches!(
+                        decide(intent, Some("2fa-support"), None, true, &[], false, false),
+                        Decision::Go(_)
+                    ),
+                    "{intent:?}"
+                );
+            }
+        }
+
+        /// `g` focuses an agent that is already running, so it sends no prompt,
+        /// needs no path, and is exempt from step 3 entirely.
+        #[test]
+        fn focus_is_exempt_from_file_mode() {
+            assert_eq!(
+                decide(Intent::Focus, None, Some("w8:p3"), true, &[], false, true),
+                Decision::Go(Request::Focus {
+                    pane_id: "w8:p3".to_string()
+                })
+            );
         }
 
         #[test]
@@ -840,6 +964,7 @@ mod tests {
                 true,
                 &["x"],
                 false,
+                false,
             );
             let b = decide(
                 Intent::Apply,
@@ -847,6 +972,7 @@ mod tests {
                 Some("w8:p1"),
                 true,
                 &["x"],
+                false,
                 false,
             );
             assert_eq!(a, b);
@@ -860,6 +986,7 @@ mod tests {
                 None,
                 true,
                 &[],
+                false,
                 false,
             );
             assert_eq!(

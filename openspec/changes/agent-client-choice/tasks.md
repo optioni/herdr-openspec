@@ -183,7 +183,7 @@
 <!-- kind: behavior -->
 <!-- Moves the `src/ui/app.rs:1355` call site in the same group; see the ordering note. -->
 
-- [ ] 6.1 RED: Write failing tests for the two new scenarios — "File mode refuses the three
+- [x] 6.1 RED: Write failing tests for the two new scenarios — "File mode refuses the three
   launch keys and names the missing binary", "Focus is exempt from file mode" — and for the
   widened `agent-launch` :: "Every combination is total" (sixteen cases). Extend, do not
   replace, the six carried scenarios: "An unreachable socket makes every action key inert",
@@ -191,17 +191,17 @@
   carries its own change and derived name", "A derived name already live in the session is
   refused before any Herdr call", "A second press while a launch is in flight is refused, not
   queued", "Focus still works while a launch is in flight".
-- [ ] 6.2 GREEN: Append `file_mode: bool` as the seventh and last parameter and insert the
+- [x] 6.2 GREEN: Append `file_mode: bool` as the seventh and last parameter and insert the
   refusal as step 3, per design.md → Decisions 6 and 7.
-- [ ] 6.3 GREEN: Move the call site — pass `self.file_mode` from
+- [x] 6.3 GREEN: Move the call site — pass `self.file_mode` from
   `ui::app::apply_launch_action` (`src/ui/app.rs:1355`) so the crate compiles.
-- [ ] 6.4 CHECK: Re-inspect `decide`'s signature against that consumer and confirm `in_flight`
+- [x] 6.4 CHECK: Re-inspect `decide`'s signature against that consumer and confirm `in_flight`
   is still the sixth argument, per design.md → Decisions 6.
-- [ ] 6.5 CHANGE: Update `src/launch.rs:70`'s doc comment, which says `decide` is "a pure total
+- [x] 6.5 CHANGE: Update `src/launch.rs:70`'s doc comment, which says `decide` is "a pure total
   function of its six arguments", and `src/launch.rs:18`'s `Intent` doc comment, the one
   remaining `/opsx:` site no other task names. Both are production prose that this change
   falsifies and no gate reads.
-- [ ] 6.6 Run the group tests — `cargo test --lib -- decide ui::app::` — green,
+- [x] 6.6 Run the group tests — `cargo test --lib -- decide ui::app::` — green,
   selecting more than the **179** baseline (10 + 169); state that no refactor was needed if none
   was.
 
