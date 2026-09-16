@@ -60,9 +60,9 @@
 
 <!-- kind: operational -->
 
-- [ ] 6.1 CHECK: Dispatch an independent reviewer (not a fork of the implementing session) against proposal.md, all five delta specs, design.md, and tasks.md with the diff. Concentrate on: a corpus sweep that selects zero files and passes vacuously; the count fixture regenerated after the parse edit rather than before it; a body or block wrapped at `width` and then prefixed, overflowing an interior the region does not clip; the `inline` escape leaking a backslash into rendered text; and `label_of`'s byte offsets applied to a faced segment.
-- [ ] 6.2 CHANGE: Fix every CRITICAL, resolve or accept each WARNING with a one-line reason, note SUGGESTIONs, and re-run affected tests.
-- [ ] 6.3 VERIFY: Confirm no blocking or unowned finding remains.
+- [x] 6.1 CHECK: Dispatch an independent reviewer (not a fork of the implementing session) against proposal.md, all five delta specs, design.md, and tasks.md with the diff. Concentrate on: a corpus sweep that selects zero files and passes vacuously; the count fixture regenerated after the parse edit rather than before it; a body or block wrapped at `width` and then prefixed, overflowing an interior the region does not clip; the `inline` escape leaking a backslash into rendered text; and `label_of`'s byte offsets applied to a faced segment.
+- [x] 6.2 CHANGE: Fix every CRITICAL, resolve or accept each WARNING with a one-line reason, note SUGGESTIONs, and re-run affected tests.
+- [x] 6.3 VERIFY: Confirm no blocking or unowned finding remains.
 
 ## 7. Documentation
 
