@@ -123,9 +123,9 @@ grep -c "fn mouse_table_claims\|fn compare_mouse_claims" tests/doc_contract.rs; 
 ## 4. `SPEC.md`'s mouse table names its zones, targets, and the overlay wheel
 <!-- kind: operational -->
 
-- [ ] 4.1 CHECK: Record the starting state with the three `awk` commands above — 13 binding
+- [x] 4.1 CHECK: Record the starting state with the three `awk` commands above — 13 binding
       rows, 0 naming a `Zone`, 6 `Zone` variants.
-- [ ] 4.2 CHANGE: Add to each non-catch-all row every `Zone` it covers and its outcome's payload
+- [x] 4.2 CHANGE: Add to each non-catch-all row every `Zone` it covers and its outcome's payload
       constructor: the two list-wheel rows name `Zone::List` and `Zone::ListRow`; the two
       detail-wheel rows name `Zone::Detail`, `Zone::DetailTab` and `Zone::DetailRow`; the click
       and drag rows name their single zone and their `Target::`/`SelectPhase::` constructor; the
@@ -137,11 +137,11 @@ grep -c "fn mouse_table_claims\|fn compare_mouse_claims" tests/doc_contract.rs; 
       `Click(Change)` and `Click(Section)` → `ListRow`; `SelectTab` → `DetailTab`;
       `Click(DetailHeader)`, `Select(Begin)` and `Select(Extend)` → `DetailRow`.
       Thirteen distinct (gesture, outcome) pairs over nineteen active claims.
-- [ ] 4.3 CHANGE: Add a row for the wheel over an open help overlay — `Action::ScrollDown` and
+- [x] 4.3 CHANGE: Add a row for the wheel over an open help overlay — `Action::ScrollDown` and
       `Action::ScrollUp` from anywhere in the frame (`src/ui/driver.rs:340-341`), today
       documented only in the paragraph after the table. This is the new check finding a binding
       with no row.
-- [ ] 4.4 VERIFY: Re-run the second `awk` — it reports **11** rows bearing a `` `Zone:: ``
+- [x] 4.4 VERIFY: Re-run the second `awk` — it reports **11** rows bearing a `` `Zone:: ``
       token: 14 binding rows now, less the catch-all and less the overlay-state row. Run
       `cargo test --test doc_contract mouse_bindings_match_spec_md` — still green, since
       `backticked_action_variants` matches the literal `Action::` only.

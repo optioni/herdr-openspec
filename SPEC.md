@@ -663,29 +663,32 @@ other gesture still names the key that already reached it.
 
 | Gesture | Action |
 |---|---|
-| Wheel down over the list region | `Action::SelectNext` — move the list selection, at **either** route, so the wide layout's two regions scroll independently |
-| Wheel up over the list region | `Action::SelectPrev`, on the same terms |
-| Wheel down over the detail region | `Action::ScrollDown` — scroll the detail content by one line, at either route |
-| Wheel up over the detail region | `Action::ScrollUp`, on the same terms |
-| Left click on a change row | `Action::Click` naming that row — move the cursor to it and reset the tab and the scroll, exactly as `j`/`k` do |
-| Left click again on the row already selected | The same `Action::Click`; applying it opens the detail, exactly as `Enter` does. A third click changes nothing |
-| Left click on a section header | The same `Action::Click`, naming the section — fold it if open, unfold it if collapsed, and move the cursor to it, exactly as `Space` does |
-| Left click on an artifact tab cell | `Action::SelectTab` for that cell's own position, exactly as its digit key. It does not change the route |
-| Left click on an artifact-section header, when the selected artifact is foldable | `Action::Click` naming that row's own content-line index and section index — fold it if open, unfold it if collapsed, and move the detail cursor to it, exactly as `Space` does at `Route::Detail` (`foldable-spec-sections`) |
-| Left click on any other row of the detail region's content area, foldable artifact or not | `Action::Select` at its arming phase, for that row's own content-line index and display column: the first of consecutive presses at one cell only records it, the second selects the word under it, the third the whole rendered row, and a press at a different cell restarts the count. It moves no cursor and folds nothing (`text-selection`) |
-| Left drag over the detail content area, on a row that is not a section header | `Action::Select` at its extending phase — follow the drag's focus there, foldable artifact or not, clamped to the content area rather than scrolling it (`text-selection`) |
-| Left click outside the help overlay's band while the overlay is open — above it, below it, or on the footer row | `Action::ToggleHelp` — close the overlay, and nothing else in the same event: the click that dismissed it does not also select the row under it (`help-overlay`) |
-| Anything else — a right or middle press, any release, a drag that does not land on a non-header row of the detail region's content area, pointer motion, a horizontal wheel, the footer row, a region's heading row, its padding row, or its gutter, a problem or message row, a content row past the last one the detail region drew, or a point outside the frame | `Action::Ignore` |
+| Wheel down over the list region (`Zone::List`, `Zone::ListRow`) | `Action::SelectNext` — move the list selection, at **either** route, so the wide layout's two regions scroll independently |
+| Wheel up over the list region (`Zone::List`, `Zone::ListRow`) | `Action::SelectPrev`, on the same terms |
+| Wheel down over the detail region (`Zone::Detail`, `Zone::DetailTab`, `Zone::DetailRow`) | `Action::ScrollDown` — scroll the detail content by one line, at either route |
+| Wheel up over the detail region (`Zone::Detail`, `Zone::DetailTab`, `Zone::DetailRow`) | `Action::ScrollUp`, on the same terms |
+| Left click on a change row (`Zone::ListRow`) | `Action::Click` naming `Target::Change` for that row — move the cursor to it and reset the tab and the scroll, exactly as `j`/`k` do |
+| Left click again on the row already selected (`Zone::ListRow`) | The same `Action::Click` naming `Target::Change`; applying it opens the detail, exactly as `Enter` does — a distinction `Dashboard::apply` makes, not `mouse_action`, so this row and the one above claim the same behaviour. A third click changes nothing |
+| Left click on a section header (`Zone::ListRow`) | The same `Action::Click`, naming `Target::Section` — fold it if open, unfold it if collapsed, and move the cursor to it, exactly as `Space` does |
+| Left click on an artifact tab cell (`Zone::DetailTab`) | `Action::SelectTab` for that cell's own position, exactly as its digit key. It does not change the route |
+| Left click on an artifact-section header, when the selected artifact is foldable (`Zone::DetailRow`) | `Action::Click` naming `Target::DetailHeader` — that row's own content-line index and section index — fold it if open, unfold it if collapsed, and move the detail cursor to it, exactly as `Space` does at `Route::Detail` (`foldable-spec-sections`) |
+| Left click on any other row of the detail region's content area, foldable artifact or not (`Zone::DetailRow`) | `Action::Select` at `SelectPhase::Begin`, for that row's own content-line index and display column: the first of consecutive presses at one cell only records it, the second selects the word under it, the third the whole rendered row, and a press at a different cell restarts the count. It moves no cursor and folds nothing (`text-selection`) |
+| Left drag over the detail content area, on a row that is not a section header (`Zone::DetailRow`) — or, once a selection is already in progress, anywhere else in the frame (`Zone::List`, `Zone::ListRow`, `Zone::Detail`, `Zone::DetailTab`, `Zone::Outside`) | `Action::Select` at `SelectPhase::Extend` — follow the drag's focus there, foldable artifact or not, clamped to the content area's nearest edge rather than scrolling it (`text-selection`) |
+| Left click outside the help overlay's band while the overlay is open (`help.open`) — above it, below it, or on the footer row | `Action::ToggleHelp` — close the overlay, and nothing else in the same event: the click that dismissed it does not also select the row under it (`help-overlay`) |
+| Wheel down anywhere in the frame while the overlay is open (`help.open`) | `Action::ScrollDown` — scroll the overlay itself rather than the region under the pointer, which is covered by the modal (`help-overlay`) |
+| Wheel up anywhere in the frame while the overlay is open (`help.open`) | `Action::ScrollUp`, on the same terms |
+| Anything else — a right or middle press, any release, a drag with no selection in progress that does not land on a non-header row of the detail region's content area, pointer motion, a horizontal wheel, the footer row, a region's heading row, its padding row, or its gutter, a problem or message row, a content row past the last one the detail region drew, or a point outside the frame | `Action::Ignore` |
 
-While the help overlay is open its own row above takes precedence over every
-other row in this table, and `ui::layout::zone` is not consulted at all: both
-of the region rules resolve the pointer to a region, and while a modal covers
-the body there is no region under the pointer to resolve it to. The wheel then
-scrolls the overlay from **anywhere in the frame** — `Action::ScrollDown` and
-`Action::ScrollUp`, which `apply` routes to `help.scroll` — while a click
+While the help overlay is open the three rows above that carry `help.open` take
+precedence over every other row in this table, and `ui::layout::zone` is not
+consulted at all: both of the region rules resolve the pointer to a region, and
+while a modal covers the body there is no region under the pointer to resolve
+it to. That is why those three rows name no `Zone` — there is none to name —
+and why the overlay state is an axis of its own rather than a seventh zone. The
+overlay wheel's two rows are what `apply` routes to `help.scroll`; a click
 **inside** the band, which is read-only and holds no control, and a click
 **outside the frame**, which is not a gesture the pane received, are both
-`Action::Ignore`.
+`Action::Ignore` and belong to the catch-all.
 
 The region under a wheel is the **whole** region — its heading row, its padding
 row, and its gutters included, and, for the detail region, its tab bar as well as its content area.
