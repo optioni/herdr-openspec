@@ -202,12 +202,12 @@ grep -c "fn mouse_table_claims\|fn compare_mouse_claims" tests/doc_contract.rs; 
 ## 8. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 8.1 VERIFY: `cargo fmt --all -- --check` — clean.
-- [ ] 8.2 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings.
-- [ ] 8.3 VERIFY: `make gates` — every hygiene gate.
-- [ ] 8.4 VERIFY: `cargo test --all-features` — green, contract tier included.
-- [ ] 8.5 VERIFY: `cargo llvm-cov --fail-under-lines 80` and the production-slice floor. No file
+- [x] 8.1 VERIFY: `cargo fmt --all -- --check` — clean.
+- [x] 8.2 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings.
+- [x] 8.3 VERIFY: `make gates` — every hygiene gate.
+- [x] 8.4 VERIFY: `cargo test --all-features` — green, contract tier included.
+- [x] 8.5 VERIFY: `cargo llvm-cov --fail-under-lines 80` and the production-slice floor. No file
       under `src/` is touched and the coverage export names 28 files all under `src/`, so both
       figures must be unchanged: **95.32% lines** (95.49% regions — `--fail-under-lines` governs
       the lines column) and 96.33% production.
-- [ ] 8.6 VERIFY: `openspec validate bind-mouse-table-rows --strict`.
+- [x] 8.6 VERIFY: `openspec validate bind-mouse-table-rows --strict`.
