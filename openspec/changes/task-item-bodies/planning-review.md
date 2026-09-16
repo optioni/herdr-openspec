@@ -65,6 +65,12 @@ way before accepting it.
 | SUGGESTION | tasks.md | The blast-radius plant was recorded as 18 `super::Group` literals / 20 sites; recount gives 17 / 19. | Corrected. | `tasks.md` → 1.6, Checks run at planning time |
 | SUGGESTION | tasks.md | "`~~~` alone renders an empty line" — it returns a zero-element vector, which matters if a test asserts a length. | Corrected, and tied to the fence's addition to the escape set. | `tasks.md` → Checks run at planning time |
 
+## Repairs Made During Implementation
+
+| Severity | Source Artifact | Problem | Repair | Updated Location |
+|---|---|---|---|---|
+| SUGGESTION | tasks.md | The blast-radius plant measured **one** existing test as changing behaviour; implementation measured **two**. The plant planted the two fields and the continuation rule and stopped, so it never ran under task 1.5's blocks-only leading-group emission — which is what falsifies `tasks::tests::an_empty_document_parses_to_no_tasks_and_no_problems`' prose-only half (`groups: vec![]`). Scope, contracts and test boundaries are unchanged; only the figure was wrong, and it was wrong **low**. | Both sites restated at two, with the method named: a partial plant bounds a blast radius from below, so its figure is a floor rather than an exact count. The second test's rewrite gains a `blanks_only` case, the delta's "a document of blank lines alone yields no group at all" clause having been otherwise unpinned. | `tasks.md` → 1.6, Checks run at planning time |
+
 ## No Remaining Implementation-Blocking Gaps
 
 None remain. All nine CRITICALs are repaired in the artifact that owns each, `openspec

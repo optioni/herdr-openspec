@@ -7,7 +7,7 @@
 - [x] 1.3 RED: Write `tests/task_corpus.rs` with `retention_leaves_every_count_in_the_archive_unmoved` (every file's `parse(text).progress()` against both `count(text)` and the 1.1 fixture row) and `every_retained_line_appears_exactly_once` (the partition, asserted in both directions). Each must print the file count it swept and fail on a zero sweep: a glob under a mistyped path exits clean.
 - [x] 1.4 GREEN: Add `Item.body: String` and `Group.blocks: Vec<Block>` with `Block { text: String, after: usize }`, and implement `task-groups`' continuation rule in `parse` — a line continues the preceding item when blank or indented strictly past that item's `indent`; the body ends at the first heading, the first checkbox line at any indent, or the first non-blank line at or below it; trailing blanks stripped. `count` is not touched.
 - [x] 1.5 GREEN: Emit the headingless leading group when it carries blocks but no items (design.md → Decision 1a). Measured: 27 of 44 corpus files carry a non-blank preamble totalling 736 lines, all of which the existing suppression rule drops, which is what 1.3's partition test fails on.
-- [x] 1.6 CHANGE: Update the construction sites the two new fields break. Measured by planting the fields at planning time: **1** production site (`close_group`), **1** test helper (`fn item`), and **17** `super::Group { … }` literals in `src/tasks.rs`'s own tests — and exactly **one** existing test changes behaviour, `tasks::tests::prose_between_items_is_dropped_and_does_not_split_a_group`, which now sees a block and is rewritten against the delta's amended scenario.
+- [x] 1.6 CHANGE: Update the construction sites the two new fields break. Measured by planting the fields at planning time: **1** production site (`close_group`), **1** test helper (`fn item`), and **17** `super::Group { … }` literals in `src/tasks.rs`'s own tests — and exactly **one** existing test changes behaviour, `tasks::tests::prose_between_items_is_dropped_and_does_not_split_a_group`, which now sees a block and is rewritten against the delta's amended scenario. **Corrected at implementation: two did.** The second is `tasks::tests::an_empty_document_parses_to_no_tasks_and_no_problems`, whose prose-only half asserted `groups: vec![]` — under Decision 1a that prose is now a leading group carrying one block. The planning plant measured the fields alone, **before** 1.5's emission rule, which is why it could not see this one; the figure is a floor on the blast radius, not a ceiling. Its rewrite gains a `blanks_only` case beside it, the delta's "a document of blank lines alone yields no group at all" clause being otherwise unpinned.
 - [x] 1.6a GREEN: Carry an open fence across a blank line in both a body and a block (`task-groups` → "A fenced block survives the blank line inside it"). Measured: 46 of 112 column-zero fenced blocks in the corpus contain a blank line, and a blank-terminates-always rule shreds every one of them into unpaired delimiters that `ui::markdown::lines` reflows as prose.
 - [x] 1.7 CHECK: Contract gate — `tasks::Item` and `tasks::Group` are public and consumed outside this module. Re-inspect the diff for every consumer of both types and confirm the two added fields break no caller silently: `grep -rn 'tasks::Item\|tasks::Group\|\.items\b' src tests` and read each hit.
 - [x] 1.8 REFACTOR: Fold the body/block accumulation into one named helper if the loop reads as three interleaved state machines, or record that the single pass is clearer left inline.
@@ -158,6 +158,15 @@ cargo test --lib
 whole `Tasks` value and now sees a block — the delta's amended scenario is its rewrite. The
 compile cost was **20** literal sites: `close_group`, the `fn item` helper, and 18
 `super::Group { … }` values, all inside `src/tasks.rs`.
+
+**This plant under-counts the behaviour change by one, and the reason is in its own method.**
+It planted the two fields and the continuation rule and stopped there — task 1.5's emission
+rule for a blocks-only leading group was not part of it. So it could not see
+`tasks::tests::an_empty_document_parses_to_no_tasks_and_no_problems`, whose prose-only half
+asserts `groups: vec![]` and which 1.5 falsifies. Implementation measured **two** behaviour
+changes, not one. A partial plant bounds a blast radius from below; reading its figure as
+exact is the error, and it is recorded here rather than in a repair log because the method,
+not the number, is what a later plant should copy differently.
 
 **The preamble gap — group 1.5.** With the existing headingless-group suppression kept, the
 same plant returned **zero groups** for `"Intro prose.\n\n"`, so 736 non-blank preamble lines
