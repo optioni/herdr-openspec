@@ -12,7 +12,7 @@ agent integrations the user has actually installed. On the reference machine tha
 `claude` for a Codex-only user launches the wrong client on a keypress, silently.
 
 **The prompt is hardcoded while the client is configurable.** `config.toml` already carries
-`agent_kind` (documented at `README.md:85`) and `launch::start_args` already passes it to
+`agent_kind` (documented at `README.md:88`) and `launch::start_args` already passes it to
 `herdr agent start --kind`, so `agent_kind = "codex"` launches Codex correctly today — and then
 sends it `/opsx:apply`, which it does not understand.
 
@@ -72,7 +72,7 @@ overlay — this change stops at a problem row.)*
 ## Why the prompts are not per-agent
 
 `openspec instructions apply --change <name> --json` returns the apply instructions and the
-context-file list for a change — measured working against `openspec` 1.12.0. `continue` and
+context-file list for a change — measured working against `openspec` 1.13.0. `continue` and
 `archive` have equivalent CLI paths (`openspec status --change <name> --json` names the next
 ready artifact; `openspec archive <name>` is mechanical). So the workflow is reachable from a
 shell, and an agent that can run a shell command can follow it.
@@ -128,27 +128,49 @@ The interactive picker is **not** here — it belongs to `settings-window`, whic
 - `agent-launch`: the kind is resolved by precedence and the prompt by kind.
 - `plugin-config`: per-kind prompt overrides; `agent_kind` becomes an override rather than a
   defaulted value.
-- `plugin-state`: the recorded choice, beside `agent-names.toml`.
-- `dashboard-loop`: no new route — step 4 is a problem row, not a mode.
+- `plugin-state`: the recorded choice is **read**, beside `agent-names.toml`; nothing here
+  writes it.
+- `dashboard-loop`: `ui::app::Launch::problems`' stated bound rises from two entries to four.
+- `responsive-layout`: the footer's two action hints stop sharing one condition — `a/c/s
+  launch` needs a resolved binary, `g focus` does not.
+
+An earlier draft claimed `dashboard-loop` needed no delta, on the grounds that step 4 is a
+problem row rather than a mode, `Dashboard` gains no field (`file_mode` already exists), and
+`action_for` binds no new key. All three are true and none of them was the question: the
+capability's prose **pins the `problems` bound**, and `degraded-states` carried a
+`dashboard-loop` delta when it made the same move from one entry to two. `responsive-layout`
+was missed the same way — it states the footer rule normatively, and every earlier change that
+touched those hints carried a delta for it. The lesson, recorded here because it generalises:
+ask what another capability's **prose** already fixes, not only whether this change moves its
+code.
 
 ## Impact
 
-- `src/launch.rs` — kind resolution and prompt resolution.
-- `src/config.rs` — `agent_kind` loses its `claude` default; overrides added.
-- `src/state.rs` — recording the choice.
+- `src/integration.rs` — **new**: parsing `herdr integration status` and the kind precedence,
+  pure and outside `src/ui/`. Moves `src/lib.rs`'s `pub mod` set from 14 to 15, and with it
+  `SPEC.md`'s module map and tested-modules list.
+- `src/launch.rs` — prompt resolution, `Settings`, and the worker's once-per-session kind
+  resolution.
+- `src/config.rs` — `agent_kind` loses its `claude` default; prompt overrides added.
+- `src/state.rs` — **reading** the recorded choice. This change never writes it;
+  `settings-window` does.
 - `README.md`, `SPEC.md` — the precedence table; `SPEC.md`'s degraded-states table gains rows,
   each bound in `tests/degraded-coverage.toml`.
 - One new `HerdrCli` call from an existing consumer — no new spawn, no new seam file, the
   `ALLOWED` list unchanged. No new dependency.
 
-## Open Questions for Review
+## Questions resolved before the specs were written
 
-1. **Is the precedence table right at step 3?** Auto-selecting a single installed integration
-   is convenient and also the one step that acts without asking.
-2. **Is a problem row enough on its own?** It is honest and costs no new machinery, but it asks
-   the user to leave the pane and edit a file. `settings-window` is the answer; the question is
-   whether this change is worth shipping before it.
-3. **Should step 5 warn loudly?** Reaching `claude` as a last resort with nothing installed is
-   exactly the case that used to be silent.
-4. **Is `integration status` read at startup or lazily on first `a`/`c`/`s`?** Lazy costs
-   nothing on panes that never launch anything.
+1. **Is the precedence table right at step 3?** **Yes — step 3 is kept.** Exactly one
+   installed integration is not a guess between candidates; it is the only candidate, and it
+   is what makes this change useful to a Codex-only reader who has never opened `config.toml`.
+2. **Is a problem row enough on its own?** **Yes, for this change.** The interactive picker is
+   `settings-window`'s, which absorbs it into one overlay rather than this change building a
+   second modal beside it. Step 4 stops at a row.
+3. **Should step 5 warn loudly?** **Yes — it records a problem row.** The launch still goes
+   ahead with `claude`, because refusing with no evidence at all would fail closed, but the
+   one genuinely blind guess stops being silent.
+4. **Is `integration status` read at startup or lazily?** **Lazily**, on the first `a`/`c`/`s`
+   press, inside the launcher's own worker thread — which is already allowed to block, unlike
+   the render path. A pane that never launches anything issues no `integration status` call,
+   startup grows no subprocess, and the answer is cached for the session.
