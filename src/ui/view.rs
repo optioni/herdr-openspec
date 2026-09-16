@@ -4900,7 +4900,7 @@ mod tests {
         let every = std::collections::BTreeSet::from([0, 1, 2, 3, 4, 5, 6]);
         let width = 60;
         let interior = interior_width(width);
-        let d = seven_section_dashboard(every, 0);
+        let d = seven_section_dashboard(every.clone(), 0);
         let buf = render_at(width, 40, &d);
         let rows = drawn_content_rows(&buf, interior);
 
@@ -4940,6 +4940,26 @@ mod tests {
                 "width {width}: row {i} ({row:?}) is not the content width"
             );
         }
+
+        // The mandated pair, named explicitly per WIDTHS: this rule moves
+        // body rows only, so the depth-2 header's own four-column indent is
+        // byte-identical at both the 120- and the 60-column frame.
+        for frame in [120, 60] {
+            let interior = interior_width(frame);
+            let rows = drawn_content_rows(
+                &render_at(frame, 40, &seven_section_dashboard(every.clone(), 0)),
+                interior,
+            );
+            let header = rows
+                .iter()
+                .position(|r| r.contains("Requirement: Alpha"))
+                .expect("Alpha's header is drawn");
+            assert_eq!(
+                rows[header],
+                expected_header_at("Requirement: Alpha", false, 2, None, interior),
+                "frame {frame}: the header row moved"
+            );
+        }
     }
 
     /// `artifact-content` :: "A body row is indented by its section's depth
@@ -4956,7 +4976,7 @@ mod tests {
         let every = std::collections::BTreeSet::from([0, 1, 2, 3, 4, 5, 6]);
         let width = 120;
         let interior = interior_width(width);
-        let d = seven_section_dashboard(every, 0);
+        let d = seven_section_dashboard(every.clone(), 0);
         let buf = render_at(width, 40, &d);
         let rows = drawn_content_rows(&buf, interior);
 
@@ -5006,6 +5026,26 @@ mod tests {
                 columns(row),
                 interior as usize,
                 "width {width}: row {i} ({row:?}) is not the content width"
+            );
+        }
+
+        // The mandated pair, named explicitly per WIDTHS: this rule moves
+        // body rows only, so the depth-2 header's own four-column indent is
+        // byte-identical at both the 120- and the 60-column frame.
+        for frame in [120, 60] {
+            let interior = interior_width(frame);
+            let rows = drawn_content_rows(
+                &render_at(frame, 40, &seven_section_dashboard(every.clone(), 0)),
+                interior,
+            );
+            let header = rows
+                .iter()
+                .position(|r| r.contains("Requirement: Alpha"))
+                .expect("Alpha's header is drawn");
+            assert_eq!(
+                rows[header],
+                expected_header_at("Requirement: Alpha", false, 2, None, interior),
+                "frame {frame}: the header row moved"
             );
         }
     }
