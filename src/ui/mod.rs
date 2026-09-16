@@ -207,6 +207,7 @@ pub fn start_collaborators(
         .and_then(|found| found.path.parent())
         .map(|parent| openspec_path_overlay(parent, env))
         .unwrap_or_default();
+    let resolved_bin = resolution.found.as_ref().map(|found| found.path.clone());
     let (cli, bin_problems) = crate::cli::worker_cli(resolution, repo, &overlay);
     let file_mode = cli.is_none();
     problems.extend(bin_problems);
@@ -236,6 +237,11 @@ pub fn start_collaborators(
             root.to_path_buf(),
             config.agent_kind.clone(),
             state_dir.map(Path::to_path_buf),
+            // The same path the CLI seam was built from, threaded on rather
+            // than re-probed: `Collaborators::file_mode` and the prompt's own
+            // `openspec` both follow this one fact.
+            resolved_bin.clone(),
+            config.prompts.clone(),
         ),
         None => crate::launch::none(),
     };

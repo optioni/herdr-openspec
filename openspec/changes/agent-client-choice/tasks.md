@@ -166,17 +166,17 @@
 ## 5. `launch::prompt_text`: the CLI-driven shape
 <!-- kind: behavior -->
 
-- [ ] 5.1 RED: Write failing tests for: "Each intent produces its own text against the same
+- [x] 5.1 RED: Write failing tests for: "Each intent produces its own text against the same
   binary and change", "The kind does not reach the prompt", "An empty change name and a lossy
   path are rendered, not refused", "An override replaces one intent's text and leaves the
   others built-in", "A placeholder appearing twice is substituted twice", "An unknown
   placeholder is left verbatim", "An override with no placeholder is sent as written".
-- [ ] 5.2 GREEN: Rewrite `prompt_text` to take `(intent, change, openspec, overrides)` and
+- [x] 5.2 GREEN: Rewrite `prompt_text` to take `(intent, change, openspec, overrides)` and
   produce `agent-prompts`' three built-in rows, substituting `{openspec}` and `{change}` in an
   override and leaving any other brace text verbatim.
-- [ ] 5.3 CHECK: Re-inspect the `prompt_text` signature against its one consumer,
+- [x] 5.3 CHECK: Re-inspect the `prompt_text` signature against its one consumer,
   `launch::run_request` (`src/launch.rs:326`), and review the diff.
-- [ ] 5.4 Run the group tests — `cargo test --lib launch::tests::prompt` — green, selecting more
+- [x] 5.4 Run the group tests — `cargo test --lib launch::tests::prompt` — green, selecting more
   than the **2** baseline; state that no refactor was needed if none was.
 
 ## 6. `launch::decide` gains `file_mode`

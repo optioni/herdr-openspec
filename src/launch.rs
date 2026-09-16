@@ -212,18 +212,72 @@ fn focus_args(pane_id: &str) -> Vec<String> {
     ]
 }
 
-/// The prompt text for `intent`: `/opsx:apply <change>`, `/opsx:continue <change>`, or
-/// `/opsx:archive <change>` — one argument-vector element containing exactly one space.
-/// `Intent::Focus` never reaches this function; `run_request` handles it through
-/// `focus_args` instead.
-pub fn prompt_text(intent: Intent, change: &str) -> String {
-    let command = match intent {
-        Intent::Apply => "apply",
+/// The intent's name as an override table is keyed by it, and as the built-in
+/// text's own `openspec` subcommand reads. `Intent::Focus` never reaches
+/// `prompt_text`; it is mapped to `apply`'s name only so this stays total.
+fn intent_name(intent: Intent) -> &'static str {
+    match intent {
+        Intent::Apply | Intent::Focus => "apply",
         Intent::Continue => "continue",
         Intent::Archive => "archive",
-        Intent::Focus => "apply",
-    };
-    format!("/opsx:{command} {change}")
+    }
+}
+
+/// The prompt text for `intent`: one CLI-driven shape serving every agent kind,
+/// `claude` included — a short instruction to run the plugin's own resolved
+/// `openspec` binary and follow what it returns. Pure, total, and dependent on
+/// the intent, the change name, and the resolved path **only**, never on the
+/// agent kind: adding a client therefore requires no mapping at all.
+///
+/// The `/opsx:*` shortcuts are gone. They are a Claude Code plugin's shortcut
+/// rather than a universal idea, they fail in any Claude Code without the
+/// `opsx` plugin installed, and no other client has an equivalent to translate
+/// to. What generalises is the CLI underneath.
+///
+/// `openspec` is the **resolved absolute path**, never the bare command:
+/// measured, a fresh interactive `zsh` with a reset `PATH` reports
+/// `openspec not found` even though `.zshrc` references nvm, because nvm is
+/// lazy-loaded, and the plugin's four-step probe is strictly more thorough than
+/// a shell lookup. It is rendered with `Path::to_string_lossy`, so a non-UTF-8
+/// path is spelled lossily rather than refusing the launch.
+///
+/// `overrides` is the resolved kind's own per-intent table from `config.toml`,
+/// looked up by the exact intent name `apply`, `continue`, or `archive`. In an
+/// override, `{openspec}` and `{change}` are substituted at **every**
+/// occurrence and any other brace-delimited text is left verbatim, so an
+/// override written for a future placeholder degrades to literal text rather
+/// than to a failed launch.
+///
+/// The result is a **single** argument-vector element; the seam passes it to
+/// the program directly with no shell, so no quoting is applied and none is
+/// needed. `Intent::Focus` never reaches this function; `run_request` handles
+/// it through `focus_args` instead. See `specs/agent-prompts/spec.md`.
+pub fn prompt_text(
+    intent: Intent,
+    change: &str,
+    openspec: &std::path::Path,
+    overrides: &std::collections::BTreeMap<String, String>,
+) -> String {
+    let bin = openspec.to_string_lossy();
+
+    if let Some(template) = overrides.get(intent_name(intent)) {
+        return template
+            .replace("{openspec}", &bin)
+            .replace("{change}", change);
+    }
+
+    match intent {
+        Intent::Apply | Intent::Focus => format!(
+            "Run: {bin} instructions apply --change {change} --json. \
+             Follow the instruction it returns to implement this OpenSpec change."
+        ),
+        Intent::Continue => format!(
+            "Run: {bin} status --change {change} --json. \
+             Create the next artifact it reports as ready, using \
+             {bin} instructions <artifact-id> --change {change} --json."
+        ),
+        Intent::Archive => format!("Run: {bin} archive {change} --yes. Report what it changed."),
+    }
 }
 
 /// Format a failed Herdr call's reason, on `agents::herdr_error_problem`'s established terms:
@@ -258,6 +312,8 @@ fn run_request(
     repo: &std::path::Path,
     kind: &str,
     state_dir: Option<&std::path::Path>,
+    openspec: &std::path::Path,
+    overrides: &std::collections::BTreeMap<String, String>,
     request: Request,
 ) -> Outcome {
     match request {
@@ -323,7 +379,7 @@ fn run_request(
                 problems.push(e.to_string());
             }
 
-            let prompt_text_value = prompt_text(intent, &change);
+            let prompt_text_value = prompt_text(intent, &change, openspec, overrides);
             let prompt = prompt_args(&agent, &prompt_text_value);
             let prompt_refs: Vec<&str> = prompt.iter().map(String::as_str).collect();
             if let Err(err) = cli.run(&prompt_refs) {
@@ -435,10 +491,16 @@ pub fn start(
     repo: std::path::PathBuf,
     kind: Option<String>,
     state_dir: Option<std::path::PathBuf>,
+    openspec: Option<std::path::PathBuf>,
+    prompts: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
 ) -> Box<dyn Launcher> {
     let (request_tx, request_rx) = std::sync::mpsc::channel();
     let (result_tx, result_rx) = std::sync::mpsc::channel::<Outcome>();
-    std::thread::spawn(move || worker_body(cli, repo, kind, state_dir, request_rx, result_tx));
+    std::thread::spawn(move || {
+        worker_body(
+            cli, repo, kind, state_dir, openspec, prompts, request_rx, result_tx,
+        )
+    });
     Box::new(RealLauncher {
         request_tx,
         result_rx,
@@ -484,11 +546,14 @@ pub fn settle(launcher: &mut dyn Launcher, budget: std::time::Duration) -> Optio
 /// The worker's whole body: consumes every request and runs it through `run_request`, sending
 /// its `Outcome` back. Returns when the request channel disconnects, on exactly
 /// `refresh::worker_body`'s and `agents::worker_body`'s lifecycle.
+#[allow(clippy::too_many_arguments)]
 fn worker_body(
     cli: std::sync::Arc<dyn crate::cli::HerdrCli>,
     repo: std::path::PathBuf,
     kind: Option<String>,
     state_dir: Option<std::path::PathBuf>,
+    openspec: Option<std::path::PathBuf>,
+    prompts: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
     request_rx: std::sync::mpsc::Receiver<Request>,
     result_tx: std::sync::mpsc::Sender<Outcome>,
 ) {
@@ -502,7 +567,35 @@ fn worker_body(
         let Ok(request) = request_rx.recv() else {
             return; // the launcher was dropped
         };
-        let outcome = run_request(cli.as_ref(), &repo, &kind, state_dir.as_deref(), request);
+        // `agent-prompts`: a `Request::Launch` carrying no resolved binary is
+        // refused before any Herdr call. `Collaborators::file_mode` is computed
+        // from the CLI handle, **not** from the launcher's own settings, so the
+        // two are separate values a defect can drive apart; this refusal is
+        // what makes that state observable instead of a prompt naming an empty
+        // path. `Focus` is unaffected: it sends no prompt and needs no binary.
+        let outcome = match (&openspec, &request) {
+            (None, Request::Launch { .. }) => Outcome {
+                named: None,
+                problems: vec![
+                    "no openspec binary was resolved, so there is no path to name in the \
+                     prompt an agent would be sent"
+                        .to_string(),
+                ],
+            },
+            _ => {
+                let empty = std::collections::BTreeMap::new();
+                let overrides = prompts.get(&kind).unwrap_or(&empty);
+                run_request(
+                    cli.as_ref(),
+                    &repo,
+                    &kind,
+                    state_dir.as_deref(),
+                    openspec.as_deref().unwrap_or(std::path::Path::new("")),
+                    overrides,
+                    request,
+                )
+            }
+        };
         if result_tx.send(outcome).is_err() {
             return; // nobody reads the result any more
         }
@@ -819,14 +912,14 @@ mod tests {
 
         #[test]
         fn prompt_args_are_exact() {
-            let args = prompt_args("c-2fa-support", "/opsx:apply 2fa-support");
+            let args = prompt_args("c-2fa-support", "Run: /opt/bin/openspec archive x --yes.");
             assert_eq!(
                 args,
                 vec![
                     "agent",
                     "prompt",
                     "c-2fa-support",
-                    "/opsx:apply 2fa-support"
+                    "Run: /opt/bin/openspec archive x --yes."
                 ]
             );
         }
@@ -852,28 +945,165 @@ mod tests {
 
     mod prompt {
         use crate::launch::{Intent, prompt_text};
+        use std::collections::BTreeMap;
+        use std::path::Path;
+
+        const BIN: &str = "/opt/bin/openspec";
+
+        fn no_overrides() -> BTreeMap<String, String> {
+            BTreeMap::new()
+        }
+
+        const APPLY: &str = "Run: /opt/bin/openspec instructions apply --change 2fa-support \
+                             --json. Follow the instruction it returns to implement this \
+                             OpenSpec change.";
+        const CONTINUE: &str = "Run: /opt/bin/openspec status --change 2fa-support --json. \
+                                Create the next artifact it reports as ready, using \
+                                /opt/bin/openspec instructions <artifact-id> --change \
+                                2fa-support --json.";
+        const ARCHIVE: &str =
+            "Run: /opt/bin/openspec archive 2fa-support --yes. Report what it changed.";
 
         #[test]
-        fn each_intent_has_its_own_opsx_command() {
+        fn each_intent_produces_its_own_text_against_the_same_binary_and_change() {
+            let overrides = no_overrides();
+            let bin = Path::new(BIN);
+
             assert_eq!(
-                prompt_text(Intent::Apply, "add-auth"),
-                "/opsx:apply add-auth"
+                prompt_text(Intent::Apply, "2fa-support", bin, &overrides),
+                APPLY
             );
             assert_eq!(
-                prompt_text(Intent::Continue, "add-auth"),
-                "/opsx:continue add-auth"
+                prompt_text(Intent::Continue, "2fa-support", bin, &overrides),
+                CONTINUE
             );
             assert_eq!(
-                prompt_text(Intent::Archive, "add-auth"),
-                "/opsx:archive add-auth"
+                prompt_text(Intent::Archive, "2fa-support", bin, &overrides),
+                ARCHIVE
+            );
+
+            for text in [APPLY, CONTINUE, ARCHIVE] {
+                assert!(!text.contains('\''), "{text}");
+                assert!(!text.contains('"'), "{text}");
+                assert!(!text.contains("/opsx:"), "{text}");
+            }
+        }
+
+        /// `prompt_text` takes no kind argument at all, so a fourth client
+        /// requires no change to this function and no new mapping entry
+        /// anywhere. Asserted by construction and by three byte-identical runs
+        /// made while three different kinds are resolved.
+        #[test]
+        fn the_kind_does_not_reach_the_prompt() {
+            let overrides = no_overrides();
+            let bin = Path::new(BIN);
+            let mut produced = Vec::new();
+            for _kind in ["claude", "codex", "not-a-kind"] {
+                produced.push(prompt_text(Intent::Apply, "2fa-support", bin, &overrides));
+            }
+            assert!(produced.windows(2).all(|w| w[0] == w[1]), "{produced:?}");
+        }
+
+        #[test]
+        fn an_empty_change_name_and_a_lossy_path_are_rendered_not_refused() {
+            use std::ffi::OsStr;
+            use std::os::unix::ffi::OsStrExt;
+
+            let lossy = Path::new(OsStr::from_bytes(b"/opt/\xff/openspec"));
+            let text = prompt_text(Intent::Apply, "", lossy, &no_overrides());
+
+            assert!(text.contains('\u{FFFD}'), "{text}");
+            assert!(text.starts_with("Run: "), "{text}");
+            assert!(text.contains("--change  --json"), "{text}");
+        }
+
+        #[test]
+        fn an_override_replaces_one_intent_and_leaves_the_others_built_in() {
+            let mut overrides = BTreeMap::new();
+            overrides.insert(
+                "apply".to_string(),
+                "work on {change} using {openspec}".to_string(),
+            );
+            let bin = Path::new(BIN);
+
+            assert_eq!(
+                prompt_text(Intent::Apply, "2fa-support", bin, &overrides),
+                "work on 2fa-support using /opt/bin/openspec"
+            );
+            assert_eq!(
+                prompt_text(Intent::Continue, "2fa-support", bin, &overrides),
+                CONTINUE
+            );
+            assert_eq!(
+                prompt_text(Intent::Archive, "2fa-support", bin, &overrides),
+                ARCHIVE
+            );
+
+            // The override is keyed by kind at the call site: another kind's
+            // table is a different map, and an empty one uses the built-in.
+            assert_eq!(
+                prompt_text(Intent::Apply, "2fa-support", bin, &no_overrides()),
+                APPLY
             );
         }
 
         #[test]
+        fn a_placeholder_appearing_twice_is_substituted_twice() {
+            let mut overrides = BTreeMap::new();
+            overrides.insert(
+                "apply".to_string(),
+                "{change}: run {openspec}, then {openspec} status, for {change}".to_string(),
+            );
+
+            let text = prompt_text(Intent::Apply, "2fa-support", Path::new(BIN), &overrides);
+            assert_eq!(
+                text,
+                "2fa-support: run /opt/bin/openspec, then /opt/bin/openspec status, \
+                 for 2fa-support"
+            );
+            assert!(!text.contains("{change}"), "{text}");
+            assert!(!text.contains("{openspec}"), "{text}");
+        }
+
+        #[test]
+        fn an_unknown_placeholder_is_left_verbatim() {
+            let mut overrides = BTreeMap::new();
+            overrides.insert(
+                "apply".to_string(),
+                "apply {change} with {agent} at {schema}".to_string(),
+            );
+
+            let text = prompt_text(Intent::Apply, "2fa-support", Path::new(BIN), &overrides);
+            assert_eq!(text, "apply 2fa-support with {agent} at {schema}");
+        }
+
+        #[test]
+        fn an_override_with_no_placeholder_is_sent_as_written() {
+            let mut overrides = BTreeMap::new();
+            overrides.insert("archive".to_string(), "follow AGENTS.md".to_string());
+
+            let text = prompt_text(Intent::Archive, "2fa-support", Path::new(BIN), &overrides);
+            assert_eq!(text, "follow AGENTS.md");
+
+            // One argument-vector element, so a space needs no quoting and is
+            // given none.
+            let args = crate::launch::prompt_args("c-2fa-support", &text);
+            assert_eq!(args.len(), 4);
+            assert_eq!(args[3], "follow AGENTS.md");
+        }
+
+        /// The prompt is a single argument-vector element in every built-in
+        /// shape too, containing no quote character a reader would have to
+        /// strip before comparing the logged vector against the spec's table.
+        #[test]
         fn the_prompt_text_is_one_argument() {
-            let text = prompt_text(Intent::Apply, "add-auth");
-            assert_eq!(text.matches(' ').count(), 1);
-            assert!(!text.contains('"'));
+            for intent in [Intent::Apply, Intent::Continue, Intent::Archive] {
+                let text = prompt_text(intent, "2fa-support", Path::new(BIN), &no_overrides());
+                let args = crate::launch::prompt_args("c-2fa-support", &text);
+                assert_eq!(args.len(), 4, "{intent:?}");
+                assert_eq!(args[3], text, "{intent:?}");
+                assert!(!text.contains('"'), "{intent:?}: {text}");
+            }
         }
     }
 
@@ -922,6 +1152,22 @@ mod tests {
 
         const REPO: &str = "/repo";
         const KIND: &str = "codex";
+        /// The resolved `openspec` path every launch in this module names in
+        /// the prompt it sends. Never probed and never touched: `prompt_text`
+        /// takes a `&Path` that need not exist.
+        const OPENSPEC: &str = "/opt/bin/openspec";
+
+        /// The built-in prompt text for `intent` against [`OPENSPEC`] and
+        /// `change`, produced by the very function the worker calls, so the
+        /// expectation cannot drift from the implementation by a word.
+        fn built_in(intent: Intent, change: &str) -> String {
+            crate::launch::prompt_text(
+                intent,
+                change,
+                std::path::Path::new(OPENSPEC),
+                &std::collections::BTreeMap::new(),
+            )
+        }
 
         fn split_ok(fake: &FakeCli, pane: &str) {
             fake.register_herdr(
@@ -965,7 +1211,11 @@ mod tests {
             let fake = FakeCli::new();
             split_ok(&fake, "wD:pJ");
             start_ok(&fake, "c-2fa-support", "wD:pJ");
-            prompt_ok(&fake, "c-2fa-support", "/opsx:apply 2fa-support");
+            prompt_ok(
+                &fake,
+                "c-2fa-support",
+                &built_in(Intent::Apply, "2fa-support"),
+            );
             let state = ScratchDir::new();
 
             let outcome = run_request(
@@ -973,6 +1223,8 @@ mod tests {
                 Path::new(REPO),
                 KIND,
                 Some(state.path()),
+                std::path::Path::new(OPENSPEC),
+                &std::collections::BTreeMap::new(),
                 Request::Launch {
                     change: "2fa-support".to_string(),
                     agent: "c-2fa-support".to_string(),
@@ -1011,7 +1263,7 @@ mod tests {
                     "agent",
                     "prompt",
                     "c-2fa-support",
-                    "/opsx:apply 2fa-support"
+                    built_in(Intent::Apply, "2fa-support").as_str()
                 ]
             );
             assert_eq!(
@@ -1051,6 +1303,8 @@ mod tests {
                 Path::new(REPO),
                 KIND,
                 Some(state.path()),
+                std::path::Path::new(OPENSPEC),
+                &std::collections::BTreeMap::new(),
                 Request::Launch {
                     // A change/agent pair that genuinely differ, so a `state::record` call
                     // that erroneously ran before this failure would produce a file — an
@@ -1100,6 +1354,8 @@ mod tests {
                 Path::new(REPO),
                 KIND,
                 Some(state.path()),
+                std::path::Path::new(OPENSPEC),
+                &std::collections::BTreeMap::new(),
                 Request::Launch {
                     change: "add-auth".to_string(),
                     agent: "add-auth".to_string(),
@@ -1134,6 +1390,8 @@ mod tests {
                 Path::new(REPO),
                 KIND,
                 None,
+                std::path::Path::new(OPENSPEC),
+                &std::collections::BTreeMap::new(),
                 Request::Launch {
                     change: "2fa-support".to_string(),
                     agent: "c-2fa-support".to_string(),
@@ -1164,13 +1422,9 @@ mod tests {
             let fake = FakeCli::new();
             split_ok(&fake, "wD:pJ");
             start_ok(&fake, "c-2fa-support", "wD:pJ");
+            let prompt = built_in(Intent::Apply, "2fa-support");
             fake.register_herdr(
-                &[
-                    "agent",
-                    "prompt",
-                    "c-2fa-support",
-                    "/opsx:apply 2fa-support",
-                ],
+                &["agent", "prompt", "c-2fa-support", &prompt],
                 failed(
                     1,
                     r#"{"error":{"code":"agent_blocked","message":"agent is blocked"}}"#,
@@ -1183,6 +1437,8 @@ mod tests {
                 Path::new(REPO),
                 KIND,
                 Some(state.path()),
+                std::path::Path::new(OPENSPEC),
+                &std::collections::BTreeMap::new(),
                 Request::Launch {
                     change: "2fa-support".to_string(),
                     agent: "c-2fa-support".to_string(),
@@ -1212,7 +1468,11 @@ mod tests {
             let fake = FakeCli::new();
             split_ok(&fake, "wD:pJ");
             start_ok(&fake, "c-2fa-support", "wD:pJ");
-            prompt_ok(&fake, "c-2fa-support", "/opsx:apply 2fa-support");
+            prompt_ok(
+                &fake,
+                "c-2fa-support",
+                &built_in(Intent::Apply, "2fa-support"),
+            );
             let scratch = ScratchDir::new();
             let blocked = scratch.path().join("blocked");
             std::fs::write(&blocked, b"not a directory").expect("write blocking file");
@@ -1222,6 +1482,8 @@ mod tests {
                 Path::new(REPO),
                 KIND,
                 Some(&blocked),
+                std::path::Path::new(OPENSPEC),
+                &std::collections::BTreeMap::new(),
                 Request::Launch {
                     change: "2fa-support".to_string(),
                     agent: "c-2fa-support".to_string(),
@@ -1261,13 +1523,9 @@ mod tests {
             let fake = FakeCli::new();
             split_ok(&fake, "wD:pJ");
             start_ok(&fake, "c-2fa-support", "wD:pJ");
+            let prompt = built_in(Intent::Apply, "2fa-support");
             fake.register_herdr(
-                &[
-                    "agent",
-                    "prompt",
-                    "c-2fa-support",
-                    "/opsx:apply 2fa-support",
-                ],
+                &["agent", "prompt", "c-2fa-support", &prompt],
                 failed(
                     1,
                     r#"{"error":{"code":"agent_blocked","message":"agent is blocked"}}"#,
@@ -1282,6 +1540,8 @@ mod tests {
                 Path::new(REPO),
                 KIND,
                 Some(&blocked),
+                std::path::Path::new(OPENSPEC),
+                &std::collections::BTreeMap::new(),
                 Request::Launch {
                     change: "2fa-support".to_string(),
                     agent: "c-2fa-support".to_string(),
@@ -1333,7 +1593,7 @@ mod tests {
                     r#"{{"id":"cli:agent:start","result":{{"agent":{{"name":"{derived}"}},"type":"agent_started"}}}}"#
                 )),
             );
-            let text = format!("/opsx:apply {change}");
+            let text = built_in(Intent::Apply, change);
             fake.register_herdr(&["agent", "prompt", &derived, &text], Ok(String::new()));
             let state = ScratchDir::new();
 
@@ -1342,6 +1602,8 @@ mod tests {
                 Path::new(REPO),
                 KIND,
                 Some(state.path()),
+                std::path::Path::new(OPENSPEC),
+                &std::collections::BTreeMap::new(),
                 Request::Launch {
                     change: change.to_string(),
                     agent: derived.clone(),
@@ -1374,7 +1636,7 @@ mod tests {
             let fake = FakeCli::new();
             split_ok(&fake, "wD:pJ");
             start_ok(&fake, &derived, "wD:pJ");
-            let text = format!("/opsx:apply {change}");
+            let text = built_in(Intent::Apply, change);
             prompt_ok(&fake, &derived, &text);
             let state = ScratchDir::new();
 
@@ -1383,6 +1645,8 @@ mod tests {
                 Path::new(REPO),
                 KIND,
                 Some(state.path()),
+                std::path::Path::new(OPENSPEC),
+                &std::collections::BTreeMap::new(),
                 Request::Launch {
                     change: change.to_string(),
                     agent: derived.clone(),
@@ -1406,7 +1670,7 @@ mod tests {
             let fake = FakeCli::new();
             split_ok(&fake, "wD:pJ");
             start_ok(&fake, "add-auth", "wD:pJ");
-            prompt_ok(&fake, "add-auth", "/opsx:apply add-auth");
+            prompt_ok(&fake, "add-auth", &built_in(Intent::Apply, "add-auth"));
             let state = ScratchDir::new();
             let before = snapshot(state.path());
 
@@ -1415,6 +1679,8 @@ mod tests {
                 Path::new(REPO),
                 KIND,
                 Some(state.path()),
+                std::path::Path::new(OPENSPEC),
+                &std::collections::BTreeMap::new(),
                 Request::Launch {
                     change: "add-auth".to_string(),
                     agent: "add-auth".to_string(),
@@ -1449,6 +1715,8 @@ mod tests {
                 Path::new(REPO),
                 KIND,
                 None,
+                std::path::Path::new(OPENSPEC),
+                &std::collections::BTreeMap::new(),
                 Request::Launch {
                     change: "2fa-support".to_string(),
                     agent: "c-2fa-support".to_string(),
@@ -1525,6 +1793,8 @@ mod tests {
                 Path::new("/repo"),
                 "codex",
                 None,
+                std::path::Path::new("/opt/bin/openspec"),
+                &std::collections::BTreeMap::new(),
                 Request::Focus {
                     pane_id: "wD:pJ".to_string(),
                 },
@@ -1569,6 +1839,8 @@ mod tests {
                 Path::new("/repo"),
                 "codex",
                 None,
+                std::path::Path::new("/opt/bin/openspec"),
+                &std::collections::BTreeMap::new(),
                 Request::Focus {
                     pane_id: "wD:pJ".to_string(),
                 },
@@ -1611,6 +1883,8 @@ mod tests {
                     PathBuf::from("/repo"),
                     Some("codex".to_string()),
                     None,
+                    Some(PathBuf::from("/opt/bin/openspec")),
+                    std::collections::BTreeMap::new(),
                     request_rx,
                     result_tx,
                 );
@@ -1686,8 +1960,14 @@ mod tests {
             let cli: std::sync::Arc<dyn crate::cli::HerdrCli> = std::sync::Arc::new(GatedCli {
                 release_rx: std::sync::Mutex::new(Some(release_rx)),
             });
-            let mut launcher =
-                super::super::start(cli, PathBuf::from("/repo"), Some("codex".to_string()), None);
+            let mut launcher = super::super::start(
+                cli,
+                PathBuf::from("/repo"),
+                Some("codex".to_string()),
+                None,
+                Some(PathBuf::from("/opt/bin/openspec")),
+                std::collections::BTreeMap::new(),
+            );
             launcher.request(Request::Launch {
                 change: "add-auth".to_string(),
                 agent: "add-auth".to_string(),
@@ -1820,8 +2100,14 @@ mod tests {
                 Ok(r#"{"id":"cli:agent:focus","result":{}}"#.to_string()),
             );
             let cli: std::sync::Arc<dyn crate::cli::HerdrCli> = std::sync::Arc::new(fake);
-            let mut launcher =
-                super::super::start(cli, PathBuf::from("/repo"), Some("codex".to_string()), None);
+            let mut launcher = super::super::start(
+                cli,
+                PathBuf::from("/repo"),
+                Some("codex".to_string()),
+                None,
+                Some(PathBuf::from("/opt/bin/openspec")),
+                std::collections::BTreeMap::new(),
+            );
             launcher.request(Request::Focus {
                 pane_id: "wD:pJ".to_string(),
             });
@@ -1864,7 +2150,12 @@ mod tests {
                     "agent",
                     "prompt",
                     "c-2fa-support",
-                    "/opsx:apply 2fa-support",
+                    &crate::launch::prompt_text(
+                        Intent::Apply,
+                        "2fa-support",
+                        std::path::Path::new("/opt/bin/openspec"),
+                        &std::collections::BTreeMap::new(),
+                    ),
                 ],
                 Ok(String::new()),
             );
@@ -1882,6 +2173,8 @@ mod tests {
                 PathBuf::from("/repo"),
                 Some("codex".to_string()),
                 Some(state.path().to_path_buf()),
+                Some(PathBuf::from("/opt/bin/openspec")),
+                std::collections::BTreeMap::new(),
             );
             launcher.request(Request::Launch {
                 change: "2fa-support".to_string(),
