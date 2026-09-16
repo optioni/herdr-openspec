@@ -184,9 +184,9 @@ grep -c "fn mouse_table_claims\|fn compare_mouse_claims" tests/doc_contract.rs; 
 ## 6. Change Review
 <!-- kind: operational -->
 
-- [ ] 6.1 CHECK: Dispatch an independent reviewer against proposal, specs, design, and tasks.
-- [ ] 6.2 CHANGE: Fix every CRITICAL, resolve or accept each WARNING, re-run affected tests.
-- [ ] 6.3 VERIFY: Confirm no blocking or unowned finding remains.
+- [x] 6.1 CHECK: Dispatch an independent reviewer against proposal, specs, design, and tasks.
+- [x] 6.2 CHANGE: Fix every CRITICAL, resolve or accept each WARNING, re-run affected tests.
+- [x] 6.3 VERIFY: Confirm no blocking or unowned finding remains.
 
 ## 7. Documentation
 <!-- kind: operational -->

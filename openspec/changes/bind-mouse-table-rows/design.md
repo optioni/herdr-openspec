@@ -238,6 +238,15 @@ be rediscovered. Alternative considered: have `mouse_action` return the zone. Re
 changes production code for a test's convenience, and this change touches no file under
 `src/`.
 
+**The out-of-frame rule is bound by a test of its own, because the sweep cannot exercise it.**
+The sweep visits `0..height` × `0..width` and so never leaves the frame. `Zone::Outside` does
+reach the claim set — from in-frame chrome, the footer row — so the agree-at-HEAD six-zone
+assertion would go on passing if this rule broke.
+`a_point_outside_the_frame_resolves_to_outside_under_both_overlay_states` is the exercise: a
+handful of points rather than a fourth sweep. Writing it turned up the one exception, which is
+documented rather than excused — a left drag **extending a selection already in progress**
+clamps from `Zone::Outside` too, which is precisely why the table's drag row names that zone.
+
 ## Risks / Trade-offs
 
 - **The vacuity direction is blind to rows sharing a claim.** → Decision 10 bounds it: the one

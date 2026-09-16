@@ -2603,8 +2603,13 @@ fn a_binding_with_no_row_fails_as_undocumented() {
     assert!(err.contains("List"), "{err}");
     assert!(err.contains("ToggleHelp"), "{err}");
     // The catch-all does not absorb it: it covers only `Ignore` claims, so a new
-    // **active** binding can never hide in it.
-    assert!(err.contains("closed") || err.contains("help_open"), "{err}");
+    // **active** binding can never hide in it. That is what `undocumented`
+    // asserted above already proves - the claim reached the uncovered list
+    // rather than the catch-all's tally - so there is nothing weaker to add.
+    assert!(
+        err.contains("overlay closed"),
+        "all four axes are named: {err}"
+    );
 }
 
 #[test]
@@ -3956,6 +3961,59 @@ fn the_overlay_state_is_its_own_axis() {
         open.contains(&claim("ScrollDown", true, None, "ScrollDown")),
         "the wheel scrolls the overlay from anywhere in the frame: {open:?}"
     );
+}
+
+#[test]
+fn a_point_outside_the_frame_resolves_to_outside_under_both_overlay_states() {
+    // `design.md` -> Decision 11's **second** precedence rule. The sweep cannot
+    // exercise it: it visits `0..height` x `0..width` and so never leaves the
+    // frame. `Zone::Outside` does appear in the claim set, but from in-frame
+    // chrome - the footer row - so the sweep's six-zone assertion would go on
+    // passing if this rule broke. This is the rule's own exercise, and it is
+    // cheap: a handful of points rather than a fourth sweep.
+    let area = Rect::new(0, 0, 120, 40);
+    let outside = [(120u16, 0u16), (0, 40), (200, 200), (u16::MAX, u16::MAX)];
+    for route in [Route::List, Route::Detail] {
+        for (column, row) in outside {
+            assert_eq!(
+                herdr_openspec::ui::layout::zone(area, route, column, row),
+                Zone::Outside,
+                "({column}, {row}) is outside a 120x40 frame"
+            );
+            for (fixture, help_open) in [
+                (SweepFixture::SelectionAbsent, false),
+                (SweepFixture::SelectionAbsent, true),
+                (SweepFixture::SelectionPresent, false),
+                (SweepFixture::SelectionPresent, true),
+            ] {
+                let dashboard = sweep_dashboard(route, help_open, fixture);
+                for kind in MOUSE_KINDS {
+                    let mouse = MouseEvent {
+                        kind,
+                        column,
+                        row,
+                        modifiers: KeyModifiers::NONE,
+                    };
+                    // The one exception, and it is documented rather than
+                    // excused: a left drag extending a selection already in
+                    // progress clamps to the content area's nearest edge from
+                    // anywhere, `Zone::Outside` included, which is why the
+                    // table's drag row names that zone. Everything else outside
+                    // the frame is not a gesture the pane received.
+                    let clamps = !help_open
+                        && fixture == SweepFixture::SelectionPresent
+                        && kind == MouseEventKind::Drag(MouseButton::Left);
+                    let expected = if clamps { "Select(Extend)" } else { "Ignore" };
+                    assert_eq!(
+                        outcome_name(mouse_action(&dashboard, area, &mouse)),
+                        expected,
+                        "{kind:?} at ({column}, {row}), overlay open = {help_open}, \
+                         fixture = {fixture:?}"
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[test]
