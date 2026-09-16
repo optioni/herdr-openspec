@@ -12,7 +12,14 @@ with:
 - `named` `None` — no agent was started, so nothing may reach `Dashboard::agent_names`, on
   exactly the failed-split path's terms;
 - `problems` holding **exactly one** entry, naming every installed kind in Herdr's own printed
-  order and telling the reader to set `agent_kind` in `config.toml`.
+  order and telling the reader to set `agent_kind`.
+
+The entry SHALL be **front-loaded**: the key to set and the kinds to choose between come
+first, before any explanation. This row is the whole answer to the key the reader just
+pressed, and `pad_or_truncate_right` cuts it to the list region's **38**-column interior at
+the wide layout — an explanation-first wording put both candidate kinds past that cut, so the
+row said nothing the reader could act on at either mandated width. Both kinds and the key
+SHALL survive the cut at 38 and at 58 for a two-kind fixture.
 
 No Herdr call beyond `integration status` SHALL be issued: no pane is created, so none can be
 left behind. `Dashboard::launch.in_flight` SHALL be cleared by the same `drain` that adopts the
@@ -53,7 +60,9 @@ routes are untouched — a launch that could not choose a client is not a broken
 #### Scenario: The ambiguous stop renders as one leading problem row at both widths
 
 - **WHEN** that `Dashboard` is rendered at 120x20 and 60x20
-- **THEN** the list region's interior row 0 begins `! ` and names both installed kinds
+- **THEN** the list region's interior row 0 begins `! ` and names both installed kinds and
+  `agent_kind` at **both** widths — which is what the front-loading above is for, since the
+  38-column interior cuts everything after roughly the first thirty-six columns
 - **AND** the row is exactly the interior width — 38 at 120 and 58 at 60 — on the same
   `pad_or_truncate_right` terms as every other row
 - **AND** the change list is drawn below it, so the pane stays usable

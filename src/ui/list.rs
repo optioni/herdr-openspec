@@ -2423,8 +2423,8 @@ mod tests {
     /// `agent-launch`: "The ambiguous stop renders as one leading problem row at both widths."
     #[test]
     fn the_ambiguous_stop_renders_as_one_leading_problem_row() {
-        let refusal = "more than one herdr agent integration is installed (claude, codex) - \
-                       set agent_kind in config.toml to choose between them";
+        let refusal =
+            "set agent_kind (claude, codex): more than one agent integration is installed";
         let mut d = dashboard_with(
             vec![fixture::active("2fa-support", 4, 9)],
             Vec::new(),
@@ -2440,6 +2440,20 @@ mod tests {
                 rows[0].text,
                 problem_row_text(refusal, width),
                 "width {width}"
+            );
+            // Both installed kinds and the key to set survive the cut at both
+            // mandated widths — the reason this message is front-loaded. A row
+            // that truncated before either candidate would be the whole answer
+            // to the keypress and would say nothing actionable.
+            assert!(
+                rows[0].text.contains("claude") && rows[0].text.contains("codex"),
+                "width {width}: {:?}",
+                rows[0].text
+            );
+            assert!(
+                rows[0].text.contains("agent_kind"),
+                "width {width}: {:?}",
+                rows[0].text
             );
             assert!(
                 rows.iter().any(|r| matches!(r.kind, RowKind::Item { .. })),

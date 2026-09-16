@@ -688,9 +688,15 @@ fn handle(
         // exactly the guess `agent-attribution` refuses to make. No pane is
         // split, so none can be left behind.
         crate::integration::Choice::Ambiguous { installed } => {
+            // Front-loaded deliberately: this row **is** the answer to the key
+            // the reader just pressed, and `pad_or_truncate_right` cuts it to
+            // the list region's 38-column interior at the wide layout. Written
+            // with the explanation first, neither candidate kind survived that
+            // cut and the row said nothing actionable at either mandated width.
+            // The key to set and the kinds to choose between come first, so the
+            // reader can act on the row without widening the pane.
             problems.push(format!(
-                "more than one herdr agent integration is installed ({}) - \
-                 set agent_kind in config.toml to choose between them",
+                "set agent_kind ({}): more than one agent integration is installed",
                 installed.join(", ")
             ));
             return Outcome {
@@ -2745,12 +2751,33 @@ mod tests {
             );
         }
 
-        /// The maximum: no combination produces a fifth entry.
+        /// The maximum: no combination produces a fifth entry. Run twice over
+        /// the two ways the resolution can contribute two problems — a **failed**
+        /// status call, and a seventeen-line **unparseable** one — because the
+        /// scenario's last clause is specifically that the unparseable variant
+        /// still yields four and not twenty. Without the second arm that clause
+        /// is asserted nowhere at this level.
         #[test]
         fn two_resolution_problems_a_failed_recording_and_a_failed_prompt_are_all_four_reported() {
+            for unparseable in [false, true] {
+                four_problem_launch(unparseable);
+            }
+        }
+
+        /// One run of the four-problem launch, with the resolution's two problems
+        /// coming either from a failed `integration status` call or from a
+        /// seventeen-line answer none of whose lines parse.
+        fn four_problem_launch(unparseable: bool) {
             let state = ScratchDir::new();
             let fake = FakeCli::new();
-            status_failed(&fake);
+            if unparseable {
+                status_ok(
+                    &fake,
+                    &vec!["this is not an integration line"; 17].join("\n"),
+                );
+            } else {
+                status_failed(&fake);
+            }
             split_ok(&fake, "wD:pJ");
             start_ok(&fake, "c-2fa-support", "claude", "wD:pJ");
             fake.register_herdr(
@@ -2784,8 +2811,32 @@ mod tests {
                 launch("2fa-support", Intent::Apply),
             );
 
-            assert_eq!(outcome.problems.len(), 4, "{:?}", outcome.problems);
-            assert!(outcome.problems[0].contains("integration_unavailable"));
+            assert_eq!(
+                outcome.problems.len(),
+                4,
+                "unparseable={unparseable}: seventeen unparseable lines still yield four, \
+                 not twenty — the per-line problems are summarised into one on the way to \
+                 the outcome: {:?}",
+                outcome.problems
+            );
+            if unparseable {
+                assert!(
+                    outcome.problems[0].contains("17"),
+                    "the summary names how many lines could not be read: {:?}",
+                    outcome.problems
+                );
+                assert_eq!(
+                    crate::integration::parse(
+                        &vec!["this is not an integration line"; 17].join("\n")
+                    )
+                    .1
+                    .len(),
+                    17,
+                    "while `parse` itself still returns one problem per line"
+                );
+            } else {
+                assert!(outcome.problems[0].contains("integration_unavailable"));
+            }
             assert!(outcome.problems[1].contains("last resort"));
             assert!(
                 outcome.problems[2].contains(&blocked.display().to_string()),

@@ -355,12 +355,12 @@
 ## 12. Change Review
 <!-- kind: operational -->
 
-- [ ] 12.1 CHECK: Dispatch the `outside-in-tdd-reviewer` subagent against proposal.md, all
+- [x] 12.1 CHECK: Dispatch the `outside-in-tdd-reviewer` subagent against proposal.md, all
   seven spec files, design.md, and tasks.md with only the diff — not the implementing session's
   reasoning.
-- [ ] 12.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
+- [x] 12.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
   one-line reason, note SUGGESTIONs, and re-run affected tests.
-- [ ] 12.3 VERIFY: Confirm no blocking or unowned finding remains.
+- [x] 12.3 VERIFY: Confirm no blocking or unowned finding remains.
 
 ## 13. Documentation
 <!-- kind: operational -->

@@ -3726,8 +3726,8 @@ mod tests {
         let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
         let mut dashboard = dashboard();
         dashboard.launch.in_flight = true;
-        let refusal = "more than one herdr agent integration is installed (claude, codex) - \
-                       set agent_kind in config.toml to choose between them";
+        let refusal =
+            "set agent_kind (claude, codex): more than one agent integration is installed";
         let mut events = Script::new(vec![Ok(Some(press(
             KeyCode::Char('q'),
             KeyModifiers::NONE,
