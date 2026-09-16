@@ -179,8 +179,15 @@ re-run by 1.9 and 4.5, not rewrites.
       before its straddle guard ran, so a regression would have surfaced as a slice panic
       instead of the message written for it — the guard moved above the slices.
       `cargo test --lib ui::tasks` — 41 passed.
-- [ ] 2.3 VERIFY: Confirm no blocking or unowned finding remains, and that any artifact a
+- [x] 2.3 VERIFY: Confirm no blocking or unowned finding remains, and that any artifact a
       finding changed was updated rather than only the code.
+      **No blocking finding was raised** — the review reported no CRITICAL and no WARNING — and
+      no finding is unowned: all three SUGGESTIONs were taken, none deferred. Two of the three
+      changed an artifact as well as the code: the tautology finding reworded the *Segmentation
+      is total* scenario's non-interleaving bullet, and the restored identity added an AND
+      clause to *Two groups of unequal size…*. The third was a test-internal ordering fix with
+      no contract to move. `openspec validate gauge-fill-contrast --strict` is valid after both
+      spec edits.
 
 ## 3. Documentation
 
@@ -218,17 +225,27 @@ this change's own MODIFIED grammar requirement and lands when `openspec archive`
 
 <!-- kind: operational -->
 
-- [ ] 4.1 CHECK: Inspect the intended verification commands and affected tiers — `make check`
+- [x] 4.1 CHECK: Inspect the intended verification commands and affected tiers — `make check`
       is the single gate and runs format, lint, gates, test, and coverage.
-- [ ] 4.2 VERIFY: `cargo fmt --all -- --check` — clean.
-- [ ] 4.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors. This
+- [x] 4.2 VERIFY: `cargo fmt --all -- --check` — clean.
+- [x] 4.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors. This
       is the crate's type checker for this purpose; `cargo check` is subsumed by it.
-- [ ] 4.4 VERIFY: `make gates` — exits 0, every script included. Requires the change directory
+- [x] 4.4 VERIFY: `make gates` — exits 0, every script included. Requires the change directory
       to be tracked (0.2): `OPENSPEC-UNTOUCHED` fails on any untracked file under `openspec/`.
-- [ ] 4.5 VERIFY: `cargo test --all-features` — green, at or above the 1624 passing rows 0.2
+- [x] 4.5 VERIFY: `cargo test --all-features` — green, at or above the 1624 passing rows 0.2
       recorded plus the three tests 1.1 adds.
-- [ ] 4.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` — passes, and the production-slice
-      floor from `scripts/coverage-prod.py` passes with it.
-- [ ] 4.7 VERIFY: `openspec validate gauge-fill-contrast --strict` — valid.
-- [ ] 4.8 VERIFY: `make check` — exits 0 as a whole. If it fails, name the failing
+- [x] 4.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` — passes (total 95.48%), and the
+      production-slice floor from `scripts/coverage-prod.py` passes with it (96.33% >= 96%).
+      **One repair was needed and is not a waiver.** `coverage-prod.py` also checks that every
+      `covers` range in `tests/degraded-coverage.toml` names instrumented, covered lines. The
+      row *A tasks file exists and yields no task **items*** pointed at
+      `src/ui/tasks.rs:341-347`, which had already drifted off the branch its own `why`
+      describes — at HEAD that range sat inside `split_at_columns`, and it passed only because
+      any instrumented line in the range satisfies the check. Group 1's doc-comment rewrite
+      shifted the file by thirteen lines, moving the range onto a struct literal that
+      instruments nothing, which is what surfaced the staleness. Repointed to `591-597`, the
+      `if tasks.progress().total == 0` branch that actually pushes `No tasks yet`. No floor was
+      lowered and no exclusion added.
+- [x] 4.7 VERIFY: `openspec validate gauge-fill-contrast --strict` — valid.
+- [x] 4.8 VERIFY: `make check` — exits 0 as a whole. If it fails, name the failing
       sub-command here rather than the composite.

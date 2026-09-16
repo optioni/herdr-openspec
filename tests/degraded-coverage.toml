@@ -105,7 +105,7 @@ tier = "view"
 proof = ["prose_only_reads_no_tasks_yet"]
 verdict = "confirmed"
 why = "the tracked-tasks tab's No tasks yet state, rendered through render_at"
-covers = ["src/ui/tasks.rs:341-347"]
+covers = ["src/ui/tasks.rs:591-597"]
 
 [[row]]
 condition = "A marked tab's artifact resolves to no file while the change's `progress` is non-zero (the `tasks.md` fallback above counted a file the artifact itself did not)"

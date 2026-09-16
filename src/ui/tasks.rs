@@ -1256,7 +1256,7 @@ mod tests {
             // gauge's length — not only its glyphs.
             let plain = progress_bar(&progress, &[], width);
             assert_eq!(
-                bar.replace('▒', "█").replace('⢕', "░").replace('⠌', "░"),
+                bar.replace('▒', "█").replace(['⢕', '⠌'], "░"),
                 plain,
                 "width {width}: segmentation moved something other than a glyph"
             );
