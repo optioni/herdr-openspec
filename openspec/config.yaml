@@ -78,6 +78,7 @@ rules:
     - 'Concentration point: coverage counts the whole crate. Logic added to the spawn implementations or to `main` is effectively untestable — that is the reason to keep it out of there.'
     - 'Concentration point: Herdr agent names are capped at 32 characters and match `[a-z][a-z0-9_-]{0,31}`. Any change naming an agent needs a test for a change name that exceeds it.'
     - Add a contract gate to any group changing the plugin manifest or the config format — re-read SPEC.md and confirm the documented format still matches.
+    - 'Parallelism veto, standing: this is one crate, one compile, and every gate sweeps the whole tree (`make gates`, `make lint`, the entire `--lib` suite), so a group''s gate run always reaches every other group''s half-written files. Criterion 3 fails for every pair in every change here. Cite this rule in the ordering line rather than walking the pairs; mark `parallel-after` only if you can show a gate that reaches nothing outside the group.'
     - 'End with the required validation sequence: `make check` as the single gate, with the failing sub-command named if it fails.'
   planning-review:
     - Delegate the finding pass to subagents that did not write the plan; never fork the planning session.
