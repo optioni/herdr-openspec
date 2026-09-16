@@ -614,6 +614,14 @@ pub fn lines(
             "No tasks yet",
             width as usize,
         )));
+        // A document with zero items may still hold retained prose — a
+        // leading group carrying a block and no items, per `task-groups`'
+        // Decision 1a — and that prose is drawn beneath the row rather than
+        // discarded with the items it does not have. `group_body` with an
+        // empty `items` slice draws exactly that group's own blocks.
+        for group in &tasks.groups {
+            out.extend(group_body(group, width));
+        }
         return out;
     }
 

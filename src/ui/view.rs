@@ -5600,6 +5600,13 @@ mod tests {
     /// `artifact-folds` :: "A task file holding no items does not split" — the
     /// `total > 0` half of the gate, which is what keeps "no heading line even
     /// where the source carries headings" true by construction.
+    ///
+    /// `task-item-bodies` -> tasks.md 5.3a: the source's own `some prose` is
+    /// retained as `1. Setup`'s leading block, and `No tasks yet` no longer
+    /// discards it — it now draws beneath the row, `1. Setup`'s own heading
+    /// still gone (headings are drawn by neither the zero-item branch nor
+    /// `group_body`, matching the non-`No tasks yet` groups loop just below
+    /// it).
     #[test]
     fn a_task_file_holding_no_items_does_not_split() {
         let progress = crate::tasks::Progress {
@@ -5619,8 +5626,10 @@ mod tests {
                     padded(&bar, interior),
                     padded("", interior),
                     padded("No tasks yet", interior),
+                    padded("", interior),
+                    padded("some prose", interior),
                 ],
-                "width {width}: no header row and no heading line"
+                "width {width}: no header row and no heading line, but the retained prose draws"
             );
         }
     }
