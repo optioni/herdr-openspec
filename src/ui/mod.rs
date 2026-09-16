@@ -3771,6 +3771,15 @@ esac
                     run_wired_staged(width, root, &config, &herdr, Some(state.path()), stages);
                 let dashboard = result.expect("run_wired must return Ok for a supported state");
 
+                // Asserted **before** the log, so the two recorded plants are told apart by
+                // their assertion sets rather than both merely being red: a `run_loop` that
+                // never hands `pending` to the launcher fails here, while `launch::none()`
+                // takes the request and discards it and fails on the log below.
+                assert_eq!(
+                    dashboard.launch.pending, None,
+                    "width {width}: the request must have been taken"
+                );
+
                 let calls = non_agent_list_lines(&herdr_log);
                 assert_eq!(
                     calls.len(),
@@ -3831,10 +3840,6 @@ esac
                     dashboard.agent_names.names.get("c-2fa-support"),
                     Some(&"2fa-support".to_string()),
                     "width {width}: the returned dashboard's mapping must hold the same pair"
-                );
-                assert_eq!(
-                    dashboard.launch.pending, None,
-                    "width {width}: the request must have been taken"
                 );
                 assert!(
                     dashboard.launch.problems.is_empty(),

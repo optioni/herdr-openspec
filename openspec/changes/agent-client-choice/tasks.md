@@ -306,22 +306,22 @@
 ## 10. Acceptance Test — Outer Loop GREEN
 <!-- kind: behavior -->
 
-- [ ] 10.1 VERIFY: Confirm group 0's test passes end to end, plus "Pressing `g` after the launch
+- [x] 10.1 VERIFY: Confirm group 0's test passes end to end, plus "Pressing `g` after the launch
   focuses the pane the launch created" and "An unreachable socket leaves every key inert and the
   pane a working TUI".
-- [ ] 10.2 VERIFY: Run the three recorded plants for "The wiring test fails when the launcher is
+- [x] 10.2 VERIFY: Run the three recorded plants for "The wiring test fails when the launcher is
   replaced by the inert double" — `launch::none()` substituted, `run_loop` not handing `pending`
   over, and `Settings::openspec_bin` hardcoded to `None` — and confirm each fails a distinct
   assertion set. The third fails on a missing `integration status` **and** `pane split`, which
   is only true because the worker refuses a `Launch` carrying `None` (per `agent-prompts`);
   `Collaborators::file_mode` comes from `cli.is_none()` at `src/ui/mod.rs:211`, not from
   `Settings`, so `decide` still returns `Go` under that plant.
-- [ ] 10.3 VERIFY: Measure both wiring scenarios' wall time at 120x20 and 60x20 and record it
+- [x] 10.3 VERIFY: Measure both wiring scenarios' wall time at 120x20 and 60x20 and record it
   against `testutil::Stages`' 30-second deadline (`src/lib.rs:689`), which is shared across
   every stage. This change takes "Pressing `a`" to four non-`agent list` entries and "Pressing
   `g`" to five under that unchanged budget; `ui::tests::wiring` measured **43.4 s for 29 tests**
   at HEAD, so the per-scenario margin is what needs stating, not assuming.
-- [ ] 10.4 REFACTOR: Clean up harness setup and the scratch programs if warranted.
+- [x] 10.4 REFACTOR: Clean up harness setup and the scratch programs if warranted.
 
 ## 11. Gates and doc-conformance
 <!-- kind: operational -->
