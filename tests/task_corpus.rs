@@ -279,8 +279,7 @@ fn the_exposed_skip_agrees_with_the_one_label_of_performs() {
 
                 if let Some(label) = tasks::label_of(&item.text) {
                     assert_eq!(
-                        label.start,
-                        n,
+                        label.start, n,
                         "{relative}: label_of and task_number_len disagree on {:?}",
                         item.text
                     );

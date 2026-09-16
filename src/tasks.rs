@@ -144,7 +144,7 @@ pub struct Label {
 /// and would still have missed `DEFERRED`.
 pub fn label_of(text: &str) -> Option<Label> {
     let bytes = text.as_bytes();
-    let start = skip_task_number(bytes);
+    let start = task_number_len(text);
 
     let mut end = start;
     while end < bytes.len() && bytes[end].is_ascii_uppercase() {
@@ -178,6 +178,23 @@ pub fn label_of(text: &str) -> Option<Label> {
         len,
         role: role_of(&text[start..end]).unwrap_or(LabelRole::Other),
     })
+}
+
+/// The byte length of `text`'s leading task number, including its single
+/// trailing space — `0` when it carries none. Pure and **total**: every
+/// `&str` returns a value, it never exceeds `text.len()`, and it always falls
+/// on a character boundary, so a caller may `split_at` it without checking.
+///
+/// The skip itself, without [`label_of`]'s recognition rules around it, on
+/// exactly the terms [`crate::specs::clause_of`] calls [`role_of`] rather
+/// than restating its token table. Two readers now need this one rule —
+/// `label_of`, to find where a label starts, and `ui::tasks`, to decide the
+/// column an item's wrapped text and its body hang at — and two
+/// implementations of one rule drift. It is not a substitute for
+/// [`Label::start`], which is the label's own offset and equals this only
+/// when a label immediately follows the number.
+pub fn task_number_len(text: &str) -> usize {
+    skip_task_number(text.as_bytes())
 }
 
 /// How many bytes of `bytes` a leading task number occupies, including its
