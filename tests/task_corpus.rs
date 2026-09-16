@@ -238,3 +238,61 @@ fn every_retained_line_appears_exactly_once() {
         "no non-task line was compared: the partition assertion proved nothing"
     );
 }
+
+/// `task-labels` :: "The exposed skip agrees with the one `label_of` performs".
+///
+/// The binding that makes `task_number_len` a second *reader* of the skip rule
+/// rather than a second *copy* of it: asserted over every item text in the
+/// archive, so a divergent copy that only differed on an unusual number —
+/// a three-segment number, a lettered one, a bare `.` — could not pass.
+#[test]
+fn the_exposed_skip_agrees_with_the_one_label_of_performs() {
+    let files = corpus();
+    println!(
+        "the_exposed_skip_agrees_with_the_one_label_of_performs: swept {} files",
+        files.len()
+    );
+    assert!(
+        !files.is_empty(),
+        "the corpus sweep selected zero files: a mistyped path finds nothing and passes vacuously"
+    );
+
+    let mut items_seen = 0;
+    let mut labelled = 0;
+    for relative in &files {
+        let text = read(relative);
+        for group in tasks::parse(&text).groups {
+            for item in group.items {
+                items_seen += 1;
+                let n = tasks::task_number_len(&item.text);
+
+                // Totality, over real text rather than literals: never past the
+                // end, and always on a character boundary, so `split_at` stands
+                // in for the boundary assertion by panicking otherwise.
+                assert!(
+                    n <= item.text.len(),
+                    "{relative}: {:?} skipped {n} of {} bytes",
+                    item.text,
+                    item.text.len()
+                );
+                let _ = item.text.split_at(n);
+
+                if let Some(label) = tasks::label_of(&item.text) {
+                    assert_eq!(
+                        label.start,
+                        n,
+                        "{relative}: label_of and task_number_len disagree on {:?}",
+                        item.text
+                    );
+                    labelled += 1;
+                }
+            }
+        }
+    }
+
+    println!("  compared {labelled} labelled items of {items_seen} item texts");
+    assert!(
+        labelled > 0,
+        "no labelled item was compared: the agreement assertion proved nothing"
+    );
+}

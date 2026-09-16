@@ -1606,7 +1606,7 @@ mod tests {
     // under test is pure and total — there is no schema, no filesystem, and
     // no `Schema` value anywhere in scope.
 
-    use super::{Label, LabelRole, label_of, role_of};
+    use super::{Label, LabelRole, label_of, role_of, task_number_len};
 
     /// `task-labels` :: "The plain and compound label forms are both recognised".
     #[test]
@@ -1911,6 +1911,53 @@ mod tests {
             label_of("NOTE: see design.md").unwrap().role,
             LabelRole::Other
         );
+    }
+
+    /// `task-labels` :: "A numbered item reports its number's width".
+    #[test]
+    fn a_numbered_item_reports_its_numbers_width() {
+        let cases = [
+            ("1.1 CHECK: move the count", 4usize),
+            ("10.11a GREEN: ship it", 7),
+            ("2. RED: write it", 3),
+        ];
+        for (text, n) in cases {
+            assert_eq!(task_number_len(text), n, "{text:?}");
+            // The prefix is exactly the number with its one trailing space,
+            // and `split_at` at that offset does not panic — the two halves of
+            // the totality claim, asserted rather than assumed.
+            let (number, rest) = text.split_at(n);
+            assert!(number.ends_with(' '), "{text:?}: {number:?} has no space");
+            assert!(
+                number[..n - 1]
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || b == b'.' || b.is_ascii_lowercase()),
+                "{text:?}: {number:?} is not a task number"
+            );
+            assert!(
+                rest.starts_with(|c: char| c.is_ascii_uppercase()),
+                "{text:?}: the rest {rest:?} does not open with the label"
+            );
+        }
+    }
+
+    /// `task-labels` :: "An unnumbered item reports zero".
+    #[test]
+    fn an_unnumbered_item_reports_zero() {
+        for text in ["CHECK: move the count", "Commit the parser", "", " "] {
+            assert_eq!(task_number_len(text), 0, "{text:?}");
+        }
+    }
+
+    /// `task-labels` :: "A malformed number is not a number".
+    #[test]
+    fn a_malformed_number_is_not_a_number() {
+        // Exactly one trailing space, and at most one lowercase letter.
+        assert_eq!(task_number_len("1.1CHECK: no space"), 0);
+        assert_eq!(task_number_len("1.1ab GREEN: two letters"), 0);
+        // The third is the existing rule applied rather than a new exception:
+        // a lone `.` is a digits-and-dots run, and one space closes it.
+        assert_eq!(task_number_len(".  leading dot then two spaces"), 2);
     }
 
     // `task-item-bodies`: non-task content is **retained** rather than
