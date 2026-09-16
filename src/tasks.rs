@@ -798,6 +798,15 @@ mod tests {
             checked,
             text: text.to_string(),
             indent,
+            body: String::new(),
+        }
+    }
+
+    /// A [`super::Block`] of `text` sitting after `after` of its group's items.
+    fn block(text: &str, after: usize) -> super::Block {
+        super::Block {
+            text: text.to_string(),
+            after,
         }
     }
 
@@ -819,10 +828,12 @@ mod tests {
                     super::Group {
                         heading: Some(heading(2, "1. First")),
                         items: vec![item(true, "a", 0), item(false, "b", 0)],
+                        blocks: vec![],
                     },
                     super::Group {
                         heading: Some(heading(2, "2. Second")),
                         items: vec![item(false, "c", 0)],
+                        blocks: vec![],
                     },
                 ],
                 problems: vec![],
@@ -855,10 +866,12 @@ mod tests {
                     super::Group {
                         heading: None,
                         items: vec![item(true, "loose", 0)],
+                        blocks: vec![],
                     },
                     super::Group {
                         heading: Some(heading(2, "Group")),
                         items: vec![item(false, "inside", 0)],
+                        blocks: vec![],
                     },
                 ],
                 problems: vec![],
@@ -879,10 +892,12 @@ mod tests {
                     super::Group {
                         heading: Some(heading(1, "Implementation Tasks")),
                         items: vec![],
+                        blocks: vec![],
                     },
                     super::Group {
                         heading: Some(heading(2, "1. Group")),
                         items: vec![item(false, "a", 0)],
+                        blocks: vec![],
                     },
                 ],
                 problems: vec![],
@@ -925,10 +940,12 @@ mod tests {
                     super::Group {
                         heading: Some(heading(2, "Outer")),
                         items: vec![item(false, "a", 0)],
+                        blocks: vec![],
                     },
                     super::Group {
                         heading: Some(heading(3, "Inner")),
                         items: vec![item(false, "b", 0)],
+                        blocks: vec![],
                     },
                 ],
                 problems: vec![],
@@ -951,6 +968,11 @@ mod tests {
         assert!(tasks.groups[3].items.is_empty());
     }
 
+    /// `task-groups` :: "Prose between items is dropped and does not split a
+    /// group". "Dropped" means dropped from the **item list**, which is what
+    /// retention leaves untouched: the prose is still not an item, still does
+    /// not close group `G`, and still opens no group of its own — it is now a
+    /// block of `G` rather than nothing at all.
     #[test]
     fn prose_between_items_is_dropped_and_does_not_split_a_group() {
         let text = "## G\n- [ ] a\n\nSome explanatory prose.\n- [ ] b";
@@ -961,10 +983,13 @@ mod tests {
                 groups: vec![super::Group {
                     heading: Some(heading(2, "G")),
                     items: vec![item(false, "a", 0), item(false, "b", 0)],
+                    blocks: vec![block("Some explanatory prose.", 1)],
                 }],
                 problems: vec![],
             }
         );
+        assert_eq!(tasks.groups.len(), 1);
+        assert_eq!(tasks.groups[0].items.len(), 2);
     }
 
     #[test]
@@ -981,6 +1006,7 @@ mod tests {
                         item(false, "child", 2),
                         item(false, "tabbed", 1),
                     ],
+                    blocks: vec![],
                 }],
                 problems: vec![],
             }
@@ -1005,10 +1031,12 @@ mod tests {
                     super::Group {
                         heading: Some(heading(2, "G")),
                         items: vec![item(false, "deeply indented", 8)],
+                        blocks: vec![],
                     },
                     super::Group {
                         heading: Some(heading(2, "H")),
                         items: vec![],
+                        blocks: vec![],
                     },
                 ],
                 problems: vec![],
@@ -1026,6 +1054,7 @@ mod tests {
                 groups: vec![super::Group {
                     heading: Some(heading(2, "Group")),
                     items: vec![item(true, "done", 0), item(false, "todo", 0)],
+                    blocks: vec![],
                 }],
                 problems: vec![],
             }
@@ -1052,6 +1081,7 @@ mod tests {
                 groups: vec![super::Group {
                     heading: Some(heading(2, "G")),
                     items: vec![item(true, "a", 0), item(false, "b", 0)],
+                    blocks: vec![],
                 }],
                 problems: vec![],
             }
@@ -1089,13 +1119,37 @@ mod tests {
             }
         );
 
+        // A document of blank lines alone still yields no group at all. Prose
+        // alone now yields one — the headingless leading group carrying the
+        // prose as a block, per `task-groups`' amended leading-group clause —
+        // and it moves no count: `Progress { 0, 0 }` either way.
+        let blanks_only = super::parse("\n\n   \n\n");
+        assert_eq!(
+            blanks_only,
+            super::Tasks {
+                groups: vec![],
+                problems: vec![],
+            }
+        );
+
         let prose_only =
             super::parse("\n\n   \nSome prose that mentions nothing checkbox-shaped.\n\n");
         assert_eq!(
             prose_only,
             super::Tasks {
-                groups: vec![],
+                groups: vec![super::Group {
+                    heading: None,
+                    items: vec![],
+                    blocks: vec![block("Some prose that mentions nothing checkbox-shaped.", 0)],
+                }],
                 problems: vec![],
+            }
+        );
+        assert_eq!(
+            prose_only.progress(),
+            super::Progress {
+                completed: 0,
+                total: 0
             }
         );
     }
@@ -1115,6 +1169,7 @@ mod tests {
                         item(false, "c", 0),
                         item(true, "d", 0),
                     ],
+                    blocks: vec![],
                 }],
                 problems: vec![],
             }
@@ -1131,6 +1186,7 @@ mod tests {
                 groups: vec![super::Group {
                     heading: None,
                     items: vec![item(true, "done", 0), item(false, "todo", 3)],
+                    blocks: vec![],
                 }],
                 problems: vec![],
             }
@@ -1162,6 +1218,7 @@ mod tests {
                         item(true, "3.11 Run the group tests — `cargo test` green", 0),
                         item(false, "10.5a **VERIFY:** coverage", 0),
                     ],
+                    blocks: vec![],
                 }],
                 problems: vec![],
             }
@@ -1633,6 +1690,286 @@ mod tests {
         assert_eq!(
             label_of("NOTE: see design.md").unwrap().role,
             LabelRole::Other
+        );
+    }
+
+    // `task-item-bodies`: non-task content is **retained** rather than
+    // discarded, attributed to exactly one of two places and never to both —
+    // an item's own `body` when it continues that item, and its group's
+    // `blocks` otherwise. Every test below mirrors one `#### Scenario:` of the
+    // `task-groups` delta; each fixture is a `[&str]` array joined with `\n`
+    // rather than one escaped literal, because indentation *is* the rule under
+    // test and a `\`-continued string literal eats it.
+
+    /// `task-groups` :: "An item's continuation lines are retained as its
+    /// body".
+    #[test]
+    fn an_items_continuation_lines_are_retained_as_its_body() {
+        let text = [
+            "- [x] 2.2 GREEN: Add the seventh trait method, its",
+            "      implementation writing the OSC 52 sequence, and the",
+            "      arm. Entry and teardown order is untouched.",
+        ]
+        .join("\n");
+        let tasks = super::parse(&text);
+        assert_eq!(tasks.groups.len(), 1);
+        let items = &tasks.groups[0].items;
+        assert_eq!(items.len(), 1);
+        assert_eq!(
+            items[0].text,
+            "2.2 GREEN: Add the seventh trait method, its"
+        );
+        assert_eq!(
+            items[0].body,
+            "implementation writing the OSC 52 sequence, and the\n\
+             arm. Entry and teardown order is untouched."
+        );
+        // The two body lines shared one indent, so both land at column zero
+        // and their relative indentation is preserved.
+        assert!(tasks.groups[0].blocks.is_empty());
+    }
+
+    /// `task-groups` :: "A nested sub-task is a sibling item and takes its own
+    /// body".
+    #[test]
+    fn a_nested_sub_task_is_a_sibling_item_and_takes_its_own_body() {
+        let text = [
+            "- [x] parent",
+            "  continues the parent",
+            "  - [ ] child",
+            "    continues the child",
+        ]
+        .join("\n");
+        let tasks = super::parse(&text);
+        assert_eq!(tasks.groups.len(), 1);
+        let items = &tasks.groups[0].items;
+        assert_eq!(items.len(), 2);
+        assert_eq!((items[0].text.as_str(), items[0].indent), ("parent", 0));
+        assert_eq!((items[1].text.as_str(), items[1].indent), ("child", 2));
+        // The parent's body stops at the child's bullet: a checkbox line is
+        // never body text, at any indent.
+        assert_eq!(items[0].body, "continues the parent");
+        assert_eq!(items[1].body, "continues the child");
+        assert!(tasks.groups[0].blocks.is_empty());
+    }
+
+    /// `task-groups` :: "A fenced block indented under an item is that item's
+    /// body".
+    #[test]
+    fn a_fenced_block_indented_under_an_item_is_that_items_body() {
+        let text = [
+            "- [ ] run the gate",
+            "      ```",
+            "      make check",
+            "      ```",
+        ]
+        .join("\n");
+        let tasks = super::parse(&text);
+        let items = &tasks.groups[0].items;
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].body, "```\nmake check\n```");
+        // The dedent is what makes the body parse as a *fenced* block rather
+        // than a four-space-indented one: every line sits at column zero and
+        // the opening delimiter is the body's first three bytes.
+        assert!(items[0].body.starts_with("```"));
+        for line in items[0].body.lines() {
+            assert!(!line.starts_with("    "), "{line:?} is indented as code");
+        }
+        assert!(tasks.groups[0].blocks.is_empty());
+    }
+
+    /// `task-groups` :: "A dedented line ends the body and is not attributed to
+    /// the item".
+    #[test]
+    fn a_dedented_line_ends_the_body_and_is_not_attributed_to_the_item() {
+        let text = [
+            "## G",
+            "  - [ ] indented item",
+            "    continues it",
+            "A line at column zero",
+        ]
+        .join("\n");
+        let tasks = super::parse(&text);
+        assert_eq!(tasks.groups.len(), 1);
+        assert_eq!(tasks.groups[0].items[0].body, "continues it");
+        assert_eq!(
+            tasks.groups[0].blocks,
+            vec![block("A line at column zero", 1)]
+        );
+    }
+
+    /// `task-groups` :: "An item with nothing after it carries an empty body".
+    #[test]
+    fn an_item_with_nothing_after_it_carries_an_empty_body() {
+        let text = ["## G", "- [ ] a", "", "- [ ] b"].join("\n");
+        let tasks = super::parse(&text);
+        let items = &tasks.groups[0].items;
+        assert_eq!(items.len(), 2);
+        for parsed in items {
+            assert_eq!(parsed.body, "", "{:?} carries a body", parsed.text);
+            // Not a string of one blank line, which is what a rule that kept
+            // trailing blanks would produce here.
+            assert!(!parsed.body.contains('\n'));
+        }
+        assert!(tasks.groups[0].blocks.is_empty());
+    }
+
+    /// `task-groups` :: "A group's lifecycle marker is retained as a block
+    /// before its first item".
+    #[test]
+    fn a_groups_lifecycle_marker_is_retained_as_a_block_before_its_first_item() {
+        let text = [
+            "## 2. Terminal ops",
+            "<!-- kind: behavior -->",
+            "",
+            "- [x] 2.1 RED: write the failing test",
+        ]
+        .join("\n");
+        let tasks = super::parse(&text);
+        assert_eq!(tasks.groups.len(), 1);
+        assert_eq!(tasks.groups[0].items.len(), 1);
+        assert_eq!(
+            tasks.groups[0].blocks,
+            vec![block("<!-- kind: behavior -->", 0)]
+        );
+    }
+
+    /// `task-groups` :: "A fenced block at group level is retained between the
+    /// items it sits between".
+    #[test]
+    fn a_fenced_block_at_group_level_is_retained_between_the_items_it_sits_between() {
+        let text = ["- [ ] a", "", "```", "make check", "```", "", "- [ ] b"].join("\n");
+        let tasks = super::parse(&text);
+        assert_eq!(tasks.groups.len(), 1);
+        assert_eq!(tasks.groups[0].items.len(), 2);
+        assert_eq!(
+            tasks.groups[0].blocks,
+            vec![block("```\nmake check\n```", 1)]
+        );
+        // The block is not the preceding item's body: it is not indented past
+        // that item's bullet.
+        assert_eq!(tasks.groups[0].items[0].body, "");
+    }
+
+    /// `task-groups` :: "A fenced block survives the blank line inside it".
+    #[test]
+    fn a_fenced_block_survives_the_blank_line_inside_it() {
+        let text = [
+            "## G",
+            "- [ ] a",
+            "",
+            "```",
+            "make check",
+            "",
+            "make coverage",
+            "```",
+            "",
+            "- [ ] b",
+        ]
+        .join("\n");
+        let tasks = super::parse(&text);
+        assert_eq!(tasks.groups[0].items.len(), 2);
+        // Exactly one block: a blank-terminates-always rule would shred this
+        // into two or three whose delimiters no longer pair.
+        assert_eq!(
+            tasks.groups[0].blocks,
+            vec![block("```\nmake check\n\nmake coverage\n```", 1)]
+        );
+    }
+
+    /// `task-groups` :: "A group with no interstitial content carries no
+    /// blocks".
+    #[test]
+    fn a_group_with_no_interstitial_content_carries_no_blocks() {
+        let text = ["## G", "- [ ] a", "- [ ] b"].join("\n");
+        let tasks = super::parse(&text);
+        assert_eq!(tasks.groups.len(), 1);
+        assert!(tasks.groups[0].blocks.is_empty());
+        assert_eq!(tasks.groups[0].items.len(), 2);
+    }
+
+    /// `task-groups` :: "Prose between items is retained as a block".
+    #[test]
+    fn prose_between_items_is_retained_as_a_block() {
+        let text = ["## G", "- [ ] a", "", "Some explanatory prose.", "- [ ] b"].join("\n");
+        let tasks = super::parse(&text);
+        assert_eq!(
+            tasks.groups[0].blocks,
+            vec![block("Some explanatory prose.", 1)]
+        );
+        // Item `a`'s body is empty: the prose is separated from it by a blank
+        // line and is not indented past its bullet.
+        assert_eq!(tasks.groups[0].items[0].body, "");
+    }
+
+    /// `task-groups` :: "A checkbox inside a fenced block is an item, not body
+    /// text".
+    #[test]
+    fn a_checkbox_inside_a_fenced_block_is_an_item_not_body_text() {
+        let text = [
+            "## G",
+            "- [ ] a",
+            "      ```",
+            "      - [ ] trapped",
+            "      ```",
+        ]
+        .join("\n");
+        let tasks = super::parse(&text);
+        let items = &tasks.groups[0].items;
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].text, "a");
+        assert_eq!(items[1].text, "trapped");
+        // `count` has no fence exemption, deliberately, so `parse` may not
+        // grow one: the two entry points must agree about the trapped line.
+        assert_eq!(
+            super::count(&text),
+            super::Progress {
+                completed: 0,
+                total: 2
+            }
+        );
+        assert_eq!(super::parse(&text).progress(), super::count(&text));
+    }
+
+    /// `task-groups` :: "A leading group of prose is emitted so its blocks
+    /// survive".
+    #[test]
+    fn a_leading_group_of_prose_is_emitted_so_its_blocks_survive() {
+        let text = ["Intro prose.", "", "## G", "- [ ] a"].join("\n");
+        let tasks = super::parse(&text);
+        assert_eq!(
+            tasks,
+            super::Tasks {
+                groups: vec![
+                    super::Group {
+                        heading: None,
+                        items: vec![],
+                        blocks: vec![block("Intro prose.", 0)],
+                    },
+                    super::Group {
+                        heading: Some(heading(2, "G")),
+                        items: vec![item(false, "a", 0)],
+                        blocks: vec![],
+                    },
+                ],
+                problems: vec![],
+            }
+        );
+        // Emitting the leading group moved no count: a block is not a checkbox.
+        assert_eq!(
+            tasks.groups[0].progress(),
+            super::Progress {
+                completed: 0,
+                total: 0
+            }
+        );
+        assert_eq!(tasks.progress(), super::count(&text));
+        assert_eq!(
+            tasks.progress(),
+            super::Progress {
+                completed: 0,
+                total: 1
+            }
         );
     }
 }
