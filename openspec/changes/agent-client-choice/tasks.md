@@ -254,30 +254,30 @@
 ## 8. The view layer: the footer, the problem rows, and the stale descriptions
 <!-- kind: behavior -->
 
-- [ ] 8.1 RED: Write failing tests for: `agent-launch` :: "The action hints appear at both
+- [x] 8.1 RED: Write failing tests for: `agent-launch` :: "The action hints appear at both
   mandated widths when the socket is reachable", "File mode drops the launch hint and keeps the
   focus hint", "An unreachable socket hides both hints at both widths", "The count is dropped
   before the action hints as the width falls", "The action keys type into the query while
   filtering", and `responsive-layout` :: "File mode drops `a/c/s launch` and keeps `g focus`" —
   each at 60 **and** 120 columns.
-- [ ] 8.2 RED: Write failing tests for: "A refused launch renders one row at both widths", "A
+- [x] 8.2 RED: Write failing tests for: "A refused launch renders one row at both widths", "A
   file-mode refusal renders one row at both widths", "Four outcome problems render as four
   leading rows", "The ambiguous stop renders as one leading problem row at both widths", "A
   launch problem leads the refresh and change-set problems", "A later success clears an earlier
   failure" — each at the mandated 38 and 58 interior widths.
-- [ ] 8.3 GREEN: Gate the `a/c/s launch` hint in `render_footer` on `reachable && !file_mode`
+- [x] 8.3 GREEN: Gate the `a/c/s launch` hint in `render_footer` on `reachable && !file_mode`
   while leaving `g focus` on `reachable` alone.
-- [ ] 8.4 GREEN: Rewrite the three `/opsx:`-naming `description` strings in `src/ui/help.rs`
+- [x] 8.4 GREEN: Rewrite the three `/opsx:`-naming `description` strings in `src/ui/help.rs`
   and the one `/opsx:` doc comment in `src/ui/app.rs` to name the CLI shape.
   CHECK at HEAD (RED for the behavior this change adds):
   `for f in $(git ls-files 'src/*.rs' 'src/**/*.rs'); do awk '/^#\[cfg\(test\)\]/{exit} {print}' "$f"; done | grep -c '/opsx:'`
   → **8 matched** (`src/launch.rs` 4, `src/ui/help.rs` 3, `src/ui/app.rs` 1). It must read
   **0** when this change lands; 8 is the RED state and the count is what proves the sweep
   reaches the files.
-- [ ] 8.5 CHECK: Run `cargo test --test doc_contract` and confirm the key-binding and
+- [x] 8.5 CHECK: Run `cargo test --test doc_contract` and confirm the key-binding and
   mouse-table claims still pass — descriptions are not compared there
   (`grep -n description tests/doc_contract.rs` → **0 matches**), so 8.4 must not move them.
-- [ ] 8.6 Run the group tests — `cargo test --lib -- ui::view:: ui::list:: ui::app::` — green,
+- [x] 8.6 Run the group tests — `cargo test --lib -- ui::view:: ui::list:: ui::app::` — green,
   selecting more than the **376** baseline (159 + 48 + 169); state that no refactor was needed
   if none was.
 

@@ -70,9 +70,11 @@ pub enum Action {
     /// `live-refresh`'s addition: request a full refresh. Route-agnostic in
     /// a stronger sense than `Next`/`Prev` — it names no region at all.
     Refresh,
-    /// `agent-launch`'s additions: launch the selected change with
-    /// `/opsx:apply`, `/opsx:continue`, or `/opsx:archive`, or focus the
-    /// agent already attributed to it. Four flat variants rather than one
+    /// `agent-launch`'s additions: launch an agent onto the selected change
+    /// to apply it, to create its next artifact, or to archive it, or focus
+    /// the agent already attributed to it. What each sends is `launch`'s own
+    /// CLI-driven prompt for that intent, built from the resolved `openspec`
+    /// path — never a client's own slash command. Four flat variants rather than one
     /// carrying an `Intent`, so a hand-written enumeration cannot silently
     /// omit one. Route-agnostic in the same stronger sense as `Refresh`:
     /// they act on the selected change, which is the same change at either
@@ -1326,9 +1328,10 @@ impl Dashboard {
             && self.changes.archived_total > 0
     }
 
-    /// The one place all four launch actions gather the same five values — the selected
+    /// The one place all four launch actions gather the same six values — the selected
     /// change's name, the focus pane `attribution().panes` holds for it, whether the socket is
-    /// reachable, and the live agents' names — and hand them to `launch::decide`.
+    /// reachable, the live agents' names, whether a launch is already in flight, and whether
+    /// the pane is in file mode — and hand them to `launch::decide`.
     /// `Decision::Nothing` changes nothing; `Decision::Refuse` replaces `launch.problems` with
     /// the one reason and leaves `launch.pending` alone; `Decision::Go` sets `launch.pending`
     /// and clears `launch.problems`.

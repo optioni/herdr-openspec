@@ -440,9 +440,10 @@ pub fn rows(dashboard: &Dashboard, width: u16) -> Vec<Row> {
     // `agent-launch`: launch problems lead the whole list, ahead of even refresh problems —
     // they are the only rows that answer a key the reader has just pressed, and burying the
     // reply under a standing condition is how a reader concludes the key did nothing.
-    // `launch.problems` holds at most **two** entries (`degraded-states`' repair of row 23: a
-    // recording failure and a prompt failure can co-occur) and is replaced wholesale, so this
-    // costs at most two rows.
+    // `launch.problems` holds at most **four** entries — `agent-client-choice` raised the
+    // bound from `degraded-states`' two: the kind resolution contributes at most two, and a
+    // recording failure and a prompt failure are the only other pair that can co-occur. It is
+    // replaced wholesale, so this costs at most four rows and never grows.
     for problem in &dashboard.launch.problems {
         push_problem(&mut out, problem);
     }
@@ -842,6 +843,21 @@ mod tests {
             loaded: None,
             expanded: std::collections::BTreeSet::new(),
             drawn_width: None,
+        }
+    }
+
+    /// A live Herdr agent named `name`, in scope at `/tmp/demo-repo` — enough for
+    /// `launch::decide`'s live-name test to match it.
+    fn live_agent(name: &str) -> crate::agents::Agent {
+        crate::agents::Agent {
+            name: Some(name.to_string()),
+            kind: None,
+            status: crate::agents::AgentStatus::Working,
+            cwd: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+            pane_id: "w8:p1".to_string(),
+            tab_id: "w8:t1".to_string(),
+            workspace_id: "w8".to_string(),
+            terminal_title: None,
         }
     }
 
@@ -2265,6 +2281,200 @@ mod tests {
             );
             assert_eq!(rows(&without, width)[1].kind, RowKind::Item { index: 0 });
         }
+    }
+
+    /// `agent-launch`: "A refused launch renders one row at both widths", and its file-mode
+    /// sibling. Both are `decide`'s own refusal text, adopted by `Dashboard::apply` rather
+    /// than written by hand, so the row cannot drift from the reason the key produced.
+    #[test]
+    fn a_refused_launch_renders_one_row_at_both_widths() {
+        use crate::ui::app::Action;
+
+        // The live-name refusal: a derived name already running for the selected change.
+        let mut d = dashboard_with(
+            vec![fixture::active("2fa-support", 4, 9)],
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
+        d.selected = 1;
+        d.agents.reachable = true;
+        d.agents.agents = vec![live_agent("c-2fa-support")];
+        d.apply(Action::LaunchApply);
+
+        for width in [38u16, 58u16] {
+            let rows = rows(&d, width);
+            assert_eq!(rows[0].kind, RowKind::Problem, "width {width}");
+            assert!(
+                rows[0].text.starts_with("! "),
+                "width {width}: {:?}",
+                rows[0].text
+            );
+            assert!(rows[0].text.contains("c-2fa-support"), "width {width}");
+            assert!(rows[0].text.contains('g'), "width {width}");
+            assert_eq!(
+                rows[0].text,
+                problem_row_text(&d.launch.problems[0], width),
+                "width {width}"
+            );
+        }
+
+        // Pressing `a` twice more leaves exactly one such row: replaced, never grown.
+        d.apply(Action::LaunchApply);
+        d.apply(Action::LaunchApply);
+        assert_eq!(d.launch.problems.len(), 1);
+        for width in [38u16, 58u16] {
+            assert_eq!(
+                rows(&d, width)
+                    .iter()
+                    .filter(|r| r.kind == RowKind::Problem)
+                    .count(),
+                1,
+                "width {width}"
+            );
+        }
+    }
+
+    /// `agent-launch`: "A file-mode refusal renders one row at both widths."
+    #[test]
+    fn a_file_mode_refusal_renders_one_row_at_both_widths() {
+        use crate::ui::app::Action;
+
+        let mut d = dashboard_with(
+            vec![fixture::active("2fa-support", 4, 9)],
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
+        d.selected = 1;
+        d.agents.reachable = true;
+        d.file_mode = true;
+        d.apply(Action::LaunchApply);
+
+        assert_eq!(d.launch.problems.len(), 1, "{:?}", d.launch.problems);
+        for width in [38u16, 58u16] {
+            let rows = rows(&d, width);
+            assert_eq!(rows[0].kind, RowKind::Problem, "width {width}");
+            assert!(rows[0].text.starts_with("! "), "width {width}");
+            assert!(
+                rows[0].text.contains("openspec"),
+                "width {width}: the row must name the absent binary: {:?}",
+                rows[0].text
+            );
+            assert_eq!(
+                rows[0].text,
+                problem_row_text(&d.launch.problems[0], width),
+                "width {width}"
+            );
+        }
+
+        // Pressing `c` and then `s` leaves exactly one such row.
+        d.apply(Action::LaunchContinue);
+        d.apply(Action::LaunchArchive);
+        assert_eq!(d.launch.problems.len(), 1);
+    }
+
+    /// `agent-launch`: "Four outcome problems render as four leading rows" — the bound this
+    /// requirement states is the bound the pane shows, and the change list is still reachable
+    /// below them at 20 rows.
+    #[test]
+    fn four_outcome_problems_render_as_four_leading_rows() {
+        let problems = vec![
+            "herdr exited with code 1: integration_unavailable".to_string(),
+            "no herdr agent integration is installed and no agent_kind is configured".to_string(),
+            "/tmp/state: Not a directory".to_string(),
+            "herdr exited with code 1: agent_blocked".to_string(),
+        ];
+        let mut d = dashboard_with(
+            vec![fixture::active("2fa-support", 4, 9)],
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
+        d.launch.problems = problems.clone();
+
+        for width in [38u16, 58u16] {
+            let rows = rows(&d, width);
+            for (i, problem) in problems.iter().enumerate() {
+                assert_eq!(rows[i].kind, RowKind::Problem, "width {width} row {i}");
+                assert_eq!(
+                    rows[i].text,
+                    problem_row_text(problem, width),
+                    "width {width} row {i}"
+                );
+            }
+            assert_ne!(
+                rows[4].kind,
+                RowKind::Problem,
+                "width {width}: no fifth problem row"
+            );
+            assert!(
+                rows.len() <= 20,
+                "width {width}: the worst case still leaves a usable list: {}",
+                rows.len()
+            );
+            assert!(
+                rows.iter().any(|r| matches!(r.kind, RowKind::Item { .. })),
+                "width {width}: the change list is still reachable below them"
+            );
+        }
+    }
+
+    /// `agent-launch`: "The ambiguous stop renders as one leading problem row at both widths."
+    #[test]
+    fn the_ambiguous_stop_renders_as_one_leading_problem_row() {
+        let refusal = "more than one herdr agent integration is installed (claude, codex) - \
+                       set agent_kind in config.toml to choose between them";
+        let mut d = dashboard_with(
+            vec![fixture::active("2fa-support", 4, 9)],
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
+        d.launch.problems = vec![refusal.to_string()];
+
+        for width in [38u16, 58u16] {
+            let rows = rows(&d, width);
+            assert_eq!(rows[0].kind, RowKind::Problem, "width {width}");
+            assert_eq!(
+                rows[0].text,
+                problem_row_text(refusal, width),
+                "width {width}"
+            );
+            assert!(
+                rows.iter().any(|r| matches!(r.kind, RowKind::Item { .. })),
+                "width {width}: the change list is drawn below it, so the pane stays usable"
+            );
+        }
+    }
+
+    /// `agent-launch`: "A later success clears an earlier failure" — the rows are byte-identical
+    /// to the frame before the first failure.
+    #[test]
+    fn a_later_success_clears_an_earlier_failure() {
+        let mut d = dashboard_with(
+            vec![fixture::active("2fa-support", 4, 9)],
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
+        let before: Vec<Vec<String>> = [38u16, 58u16]
+            .iter()
+            .map(|w| rows(&d, *w).into_iter().map(|r| r.text).collect())
+            .collect();
+
+        d.launch.problems = vec!["herdr exited with code 1: agent_blocked".to_string()];
+        for width in [38u16, 58u16] {
+            assert_eq!(rows(&d, width)[0].kind, RowKind::Problem, "width {width}");
+        }
+
+        // The next outcome replaces the vector wholesale; a success empties it.
+        d.launch.problems = Vec::new();
+        let after: Vec<Vec<String>> = [38u16, 58u16]
+            .iter()
+            .map(|w| rows(&d, *w).into_iter().map(|r| r.text).collect())
+            .collect();
+        assert_eq!(before, after);
     }
 
     #[test]

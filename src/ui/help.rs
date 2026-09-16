@@ -160,17 +160,17 @@ pub const INVENTORY: &[Group] = &[
         bindings: &[
             Binding {
                 input: "a",
-                description: "Launch an agent with /opsx:apply.",
+                description: "Launch an agent to apply the change.",
                 action: Action::LaunchApply,
             },
             Binding {
                 input: "c",
-                description: "Launch an agent with /opsx:continue.",
+                description: "Launch an agent to create the next artifact.",
                 action: Action::LaunchContinue,
             },
             Binding {
                 input: "s",
-                description: "Launch an agent with /opsx:archive.",
+                description: "Launch an agent to archive the change.",
                 action: Action::LaunchArchive,
             },
             Binding {

@@ -627,7 +627,9 @@ fn repo_heading_name(dashboard: &Dashboard) -> String {
 ///   dropped last rather than first, with the count still last;
 /// - otherwise: `? help`, `q quit`, `Enter detail`, and `Esc back`, then —
 ///   `agent-launch`'s addition — `a/c/s launch` and `g focus`, each its own
-///   hint, when `Dashboard::agents.reachable`, then — `agent-attribution`'s
+///   hint, the first when `Dashboard::agents.reachable` **and** not
+///   `Dashboard::file_mode`, the second when `reachable` alone, then —
+///   `agent-attribution`'s
 ///   addition — `<n> unattributed` when `Dashboard::attribution().unattributed`
 ///   is greater than zero. Hints are dropped whole, one at a time, from the
 ///   **end** of this list as the width falls: `<n> unattributed` first, then
@@ -649,8 +651,16 @@ fn render_footer(frame: &mut Frame, footer: Rect, dashboard: &Dashboard) {
         // `agent-launch`: the action hints, offered only when the socket is reachable — read
         // from `Dashboard::agents` and nowhere else, never from `ChangeSet::problems`, which
         // `adopt` replaces wholesale on every refresh.
+        //
+        // `agent-client-choice` splits their conditions, because the keys part company in file
+        // mode: `g` focuses an agent that is already running and needs no `openspec` binary,
+        // while `a`, `c`, and `s` must name an absolute path to one in the prompt they send,
+        // and with none they can only refuse. The footer is the always-visible minimum and
+        // must not offer a key that can only refuse; the overlay keeps all four.
         if dashboard.agents.reachable {
-            hints.push("a/c/s launch".to_string());
+            if !dashboard.file_mode {
+                hints.push("a/c/s launch".to_string());
+            }
             hints.push("g focus".to_string());
         }
         let unattributed = dashboard.attribution().unattributed;
@@ -8159,6 +8169,153 @@ mod tests {
                     row_text(&reachable_buf, y),
                     row_text(&unreachable_buf, y),
                     "width {width} row {y}: the reachability flag moves the footer and nothing else"
+                );
+            }
+        }
+    }
+
+    /// `agent-launch` and `responsive-layout`: "File mode drops `a/c/s launch` and keeps
+    /// `g focus`." The two hints part company because the keys do — `g` focuses an agent that
+    /// is already running and needs no `openspec` binary, while `a`, `c`, and `s` must name an
+    /// absolute path to one in the prompt they send.
+    #[test]
+    fn file_mode_drops_the_launch_hint_and_keeps_the_focus_hint() {
+        let mut d = dashboard(Some("/tmp/demo-repo"), Route::List);
+        d.agents.reachable = true;
+        d.file_mode = true;
+
+        let expected = "? help  q quit  Enter detail  Esc back  g focus";
+        assert_eq!(columns(expected), 47);
+
+        for (width, pad) in [(120u16, 73usize), (60u16, 13usize)] {
+            let buf = render_at(width, 20, &d);
+            assert_eq!(
+                row_text(&buf, 19),
+                format!("{expected}{}", " ".repeat(pad)),
+                "width {width}"
+            );
+            assert!(
+                !buffer_contains(&buf, "a/c/s launch"),
+                "width {width}: the launch hint must appear nowhere in the buffer"
+            );
+        }
+
+        // `g focus` survives at 60 here, unlike the reachable non-file-mode case where the
+        // 61-column row drops it, precisely because the hint it was competing with is absent.
+        let mut with_binary = d.clone();
+        with_binary.file_mode = false;
+        assert!(
+            !row_text(&render_at(60, 20, &with_binary), 19).contains("g focus"),
+            "the control: with the launch hint present, g focus is dropped at 60"
+        );
+
+        // The header still badges `file mode` at 120, so the reason the hint is gone is on
+        // screen in the same frame.
+        assert!(
+            buffer_contains(&render_at(120, 20, &d), "file mode"),
+            "the badge and the dropped hint follow one fact"
+        );
+    }
+
+    /// `agent-launch`: "An unreachable socket hides both hints at both widths" — and file mode
+    /// does not make it noisier.
+    #[test]
+    fn an_unreachable_socket_hides_both_hints_at_both_widths() {
+        for file_mode in [false, true] {
+            let mut d = dashboard(Some("/tmp/demo-repo"), Route::List);
+            d.agents.reachable = false;
+            d.file_mode = file_mode;
+
+            for (width, pad) in [(120u16, 82usize), (60u16, 22usize)] {
+                let buf = render_at(width, 20, &d);
+                assert_eq!(
+                    row_text(&buf, 19),
+                    format!("? help  q quit  Enter detail  Esc back{}", " ".repeat(pad)),
+                    "file_mode {file_mode}, width {width}"
+                );
+                assert!(
+                    !buffer_contains(&buf, "a/c/s launch") && !buffer_contains(&buf, "g focus"),
+                    "file_mode {file_mode}, width {width}: no action key is offered"
+                );
+            }
+        }
+    }
+
+    /// `agent-launch`: "The count is dropped before the action hints as the width falls."
+    #[test]
+    fn the_count_is_dropped_before_the_action_hints_as_the_width_falls() {
+        let mut d = dashboard(Some("/tmp/demo-repo"), Route::List);
+        d.agents.reachable = true;
+        d.file_mode = false;
+        d.agents.agents = vec![unattributed_agent("stray")];
+        assert_eq!(d.attribution().unattributed, 1);
+
+        let full = "? help  q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed";
+        assert_eq!(columns(full), 77);
+        assert_eq!(
+            row_text(&render_at(120, 20, &d), 19),
+            format!("{full}{}", " ".repeat(43))
+        );
+
+        // At 60 the count goes whole first, then `g focus` whole, in that order.
+        assert_eq!(
+            row_text(&render_at(60, 20, &d), 19),
+            format!(
+                "? help  q quit  Enter detail  Esc back  a/c/s launch{}",
+                " ".repeat(8)
+            )
+        );
+
+        // With the socket unreachable the count reappears at 60, because the two hints it
+        // was competing with are absent.
+        let mut unreachable = d.clone();
+        unreachable.agents.reachable = false;
+        let expected = "? help  q quit  Enter detail  Esc back  1 unattributed";
+        assert_eq!(columns(expected), 54);
+        assert_eq!(
+            row_text(&render_at(60, 20, &unreachable), 19),
+            format!("{expected}{}", " ".repeat(6))
+        );
+    }
+
+    /// `agent-launch`: "The action keys type into the query while filtering" — and file mode
+    /// changes what they do only outside filter mode.
+    #[test]
+    fn the_action_keys_type_into_the_query_while_filtering() {
+        use crate::ui::app::{Action, action_for};
+        use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+
+        for c in ['a', 'c', 's', 'g'] {
+            assert_eq!(
+                action_for(
+                    &crate::testutil::press(KeyCode::Char(c), KeyModifiers::NONE),
+                    true
+                ),
+                Action::FilterPush(c),
+                "{c} must type itself while filtering"
+            );
+        }
+
+        for file_mode in [false, true] {
+            let mut d = dashboard(Some("/tmp/demo-repo"), Route::List);
+            d.agents.reachable = true;
+            d.file_mode = file_mode;
+            d.filter.active = true;
+            for c in ['a', 'c', 's', 'g'] {
+                d.apply(Action::FilterPush(c));
+            }
+            assert_eq!(d.filter.query, "acsg", "file_mode {file_mode}");
+            assert_eq!(
+                d.launch.pending, None,
+                "file_mode {file_mode}: no launch request is produced by any of the four"
+            );
+
+            for width in [120u16, 60u16] {
+                let row = row_text(&render_at(width, 20, &d), 19);
+                assert!(row.starts_with("/acsg_"), "file_mode {file_mode}: {row}");
+                assert!(
+                    !row.contains("a/c/s launch") && !row.contains("g focus"),
+                    "file_mode {file_mode}, width {width}: {row}"
                 );
             }
         }
