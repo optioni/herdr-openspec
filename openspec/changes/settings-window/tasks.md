@@ -82,7 +82,7 @@ establish (design.md → Test Strategy).
 ## 2. Settings and provenance
 <!-- kind: behavior -->
 
-- [ ] 2.1 RED: Write failing tests in a new `src/settings.rs` for `setting-provenance` ::
+- [x] 2.1 RED: Write failing tests in a new `src/settings.rs` for `setting-provenance` ::
       "Three settings in a fixed order, whatever the inputs", "Every `integration::Source`
       maps to a `Provenance` and back to one label", "Every probe step is named by the step
       that won", "`Unresolved` is file mode's own label and is not an error", "The
@@ -90,26 +90,26 @@ establish (design.md → Test Strategy).
       however they were resolved", "An empty shortlist never reaches the view as `Kind`", "A
       pending kind renders as resolving and edits nothing", "An ambiguous kind has no effective
       value and offers both candidates".
-- [ ] 2.2 GREEN: Implement `Setting`, `Provenance`, `Editable`, `Reason`, `KindResolution`, and
+- [x] 2.2 GREEN: Implement `Setting`, `Provenance`, `Editable`, `Reason`, `KindResolution`, and
       `settings(config, binary, kind)`. `Provenance` derives from `integration::Source` by a
       total `From` with no wildcard arm and carries `resolve::BinSource` whole — the real type
       names are `BinSource` and `BinResolution` (`src/resolve.rs:75,97`); `resolve::Step` and
       `resolve::Resolved` do not exist. `Pending` and `Ambiguous` come from `kind: None` and
       `Choice::Ambiguous`, neither of which carries a `Source` (design.md → Decisions 6).
-- [ ] 2.3 GREEN: Register `pub mod settings;` in `src/lib.rs`, and in the same task add its row
+- [x] 2.3 GREEN: Register `pub mod settings;` in `src/lib.rs`, and in the same task add its row
       to `SPEC.md`'s Module map and the `settings::` token under `SPEC.md` → `### Unit-tested
       modules`. `tests/doc_contract.rs:251 module_map_matches_lib_rs` and `:353
       tested_modules_names_every_module` both go red on a `pub mod` with no row, so this is one
       task, not a documentation afterthought.
-- [ ] 2.4 GREEN: Add the `tests/doc_contract.rs` claim that `src/settings.rs`' production slice
+- [x] 2.4 GREEN: Add the `tests/doc_contract.rs` claim that `src/settings.rs`' production slice
       names no I/O API, no clock, and no `ratatui` type — the **sixteenth** claim
       (`CLAIM_COUNT` is 15 at HEAD), on the eleventh's and fourteenth's pattern, since no
       `make gates` script sweeps outside `src/ui/`. Raising the claim count moves four sites
       together; that is task 13.6.
-- [ ] 2.5 CHECK: Plant `use std::fs;` above the `#[cfg(test)]` line in `src/settings.rs`,
+- [x] 2.5 CHECK: Plant `use std::fs;` above the `#[cfg(test)]` line in `src/settings.rs`,
       confirm `cargo test --test doc_contract` goes red naming that file, remove it, confirm
       green. Record both halves.
-- [ ] 2.6 Run the group tests — `cargo test settings::` **and** `cargo test --test doc_contract`
+- [x] 2.6 Run the group tests — `cargo test settings::` **and** `cargo test --test doc_contract`
       as two commands. One command cannot do both: `--test doc_contract` restricts to that
       binary, so it would skip the `src/settings.rs` unit tests entirely, and no doc_contract
       test name contains `settings::`, so the filter would select zero and still exit 0.
