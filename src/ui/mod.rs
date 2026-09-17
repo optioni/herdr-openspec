@@ -10,6 +10,7 @@ pub mod layout;
 pub mod list;
 pub mod markdown;
 pub mod palette;
+pub mod settings;
 pub mod tasks;
 pub mod terminal;
 pub mod view;
