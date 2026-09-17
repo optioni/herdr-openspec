@@ -64,18 +64,18 @@ establish (design.md → Test Strategy).
 ## 1. Rename the overlay layer
 <!-- kind: refactor -->
 
-- [ ] 1.1 CHARACTERIZE: Run `cargo test -- ui::help ui::app ui::layout ui::driver ui::view` and
+- [x] 1.1 CHARACTERIZE: Run `cargo test -- ui::help ui::app ui::layout ui::driver ui::view` and
       record the passing count. These are the tests that must stay green and unchanged in
       substance through the rename.
-- [ ] 1.2 REFACTOR: Rename `ui::app::Help` to `Overlay`, replace `open: bool` with
+- [x] 1.2 REFACTOR: Rename `ui::app::Help` to `Overlay`, replace `open: bool` with
       `panel: Option<Panel>` where `Panel` is `Help | Settings`, and add `edit: Option<Edit>`
       — three fields, per `dashboard-loop` :: "`Dashboard` carries sixteen fields". `Dashboard`
       stays at sixteen: `help` becomes `overlay`. 75 references measured by
       `grep -rno "help\.open\|help\.scroll" src/ | wc -l`.
-- [ ] 1.3 REFACTOR: Rename `ui::layout::help_band` to `overlay_band` across its 24 call sites
+- [x] 1.3 REFACTOR: Rename `ui::layout::help_band` to `overlay_band` across its 24 call sites
       (`grep -rn "help_band" src/ | wc -l`). Geometry unchanged — same `x`, `width`, `height`,
       `y`.
-- [ ] 1.4 VERIFY: Run the characterization tests from 1.1 — same count, all green, no
+- [x] 1.4 VERIFY: Run the characterization tests from 1.1 — same count, all green, no
       assertion weakened. Then `make gates` — `NODEFAULT-UI` must still pass with `Overlay`,
       `Panel`, and `Edit` in its scanned sets.
 
