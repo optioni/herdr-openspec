@@ -545,12 +545,19 @@ that works: hints are dropped from the end, and the one key that reveals every o
 must be the last hint standing rather than the first one lost. It costs eight columns with
 its separator and takes the base footer from **30** to **38**.
 
-`agent-launch` adds **two further hints, placed after `Esc back`**: when
-`Dashboard::agents.reachable` is `true` the footer SHALL append `a/c/s launch` and then
-`g focus`, joined by the same two-space separator. When it is `false` both SHALL be absent
-entirely, so a pane with no reachable Herdr socket renders the footer this requirement
-specified before `agent-launch` existed — which is the whole of `SPEC.md` → Degraded states'
-"action keys hidden".
+`agent-launch` adds **two further hints, placed after `Esc back`**, joined by the same
+two-space separator, and `agent-client-choice` splits their conditions: the footer SHALL append
+`a/c/s launch` when `Dashboard::agents.reachable` is `true` **and** `Dashboard::file_mode` is
+`false`, and SHALL append `g focus` when `Dashboard::agents.reachable` is `true`. When
+`reachable` is `false` both SHALL be absent entirely, so a pane with no reachable Herdr socket
+renders the footer this requirement specified before `agent-launch` existed — which is the
+whole of `SPEC.md` → Degraded states' "action keys hidden".
+
+The two conditions differ because the keys do. `g` focuses an agent that is already running and
+needs no `openspec` binary; `a`, `c`, and `s` must name an absolute path to one in the prompt
+they send, and in file mode there is none, so they can only refuse. The footer is the
+always-visible minimum and SHALL NOT offer a key that can only refuse; the overlay is the full
+list and keeps all four.
 
 They are **one compound hint plus one**, not four separate ones, and that is a width decision
 rather than a stylistic one: `? help  q quit  Enter detail  Esc back  a apply  c continue  s archive`
@@ -808,6 +815,16 @@ well, so a region's interior grows from sixteen rows to seventeen. That count is
   `/be  ? help  q quit  Enter detail  Esc back  a/c/s launch` — 57
   characters — followed by three spaces at 60, so the query still leads, the count is still
   the first thing dropped, and `g focus` is the second
+
+#### Scenario: File mode drops `a/c/s launch` and keeps `g focus`
+
+- **WHEN** a `Dashboard` with `agents.reachable` `true` and `file_mode` `true`, no filter and
+  no unattributed agents, is rendered at 120x20 and at 60x20
+- **THEN** the footer row reads exactly `? help  q quit  Enter detail  Esc back  g focus` —
+  **47** columns — padded to the frame width at both
+- **AND** `a/c/s launch` appears nowhere in either buffer
+- **AND** `g focus` survives at 60 here, unlike the reachable non-file-mode case where the
+  61-column row drops it, because the hint it was competing with is absent
 
 ### Requirement: A region is a heading row, a padding row, and a gutter-padded interior
 
