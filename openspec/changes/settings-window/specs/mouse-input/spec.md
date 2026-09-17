@@ -139,7 +139,9 @@ interesting.
   rows 51 through 58 are outside it — and `mouse_action` is called with
   `Down(MouseButton::Left)` at row 4 over a change row, then at row 55, then at row 59
   (the footer row)
-- **THEN** every one of the three returns `Action::ToggleHelp`
+- **THEN** every one of the three returns `Action::Back` — **not** `Action::ToggleHelp`,
+  which this requirement's own mapping table corrects: with two panels sharing one layer,
+  `ToggleHelp` means *swap to help* rather than *close*
 - **AND** applying the first sets `overlay.panel` `None`, `overlay.scroll` `0`, and leaves
   `selected` at `2` — the click that dismissed the overlay did not also move the cursor to
   the row under it
@@ -147,7 +149,7 @@ interesting.
   `Action::Click(Target::Change(…))` per the click table this requirement took precedence
   over, so the precedence is conditional on `overlay.panel` being `Some` and not permanent
 - **AND** a fourth call, at column 200 — past the frame's right edge — returns
-  `Action::Ignore` and **not** `Action::ToggleHelp`, so a click the pane never received does
+  `Action::Ignore` and **not** `Action::Back`, so a click the pane never received does
   not dismiss the overlay, on the same terms the wheel scenario above establishes for
   `ScrollDown` at that column
 
@@ -155,7 +157,7 @@ interesting.
 
 - **WHEN** the band at 120x60 occupies rows 7 through 50 and `mouse_action` is called with
   `Down(MouseButton::Left)` at rows 6, 7, 50, and 51, each at column 60
-- **THEN** the calls at rows 6 and 51 return `Action::ToggleHelp` and the calls at rows 7
+- **THEN** the calls at rows 6 and 51 return `Action::Back` and the calls at rows 7
   and 50 return `Action::Ignore`, so both rule rows belong to the band and the boundary is
   pinned from both sides
 
@@ -173,7 +175,9 @@ interesting.
 - **WHEN** every gesture this requirement maps to a non-`Ignore` action is collected
 - **THEN** it is exactly `ScrollDown`, `ScrollUp`, and the dismissing click
 - **AND** each has a key that does the same thing: `j` and the down arrow for
-  `ScrollDown`, `k` and the up arrow for `ScrollUp`, and `Esc` and `?` for the dismissal
+  `ScrollDown`, `k` and the up arrow for `ScrollUp`, and `Esc` for the dismissal —
+  `Action::Back` is exactly what `Esc` already produces, which is why the key and the
+  gesture agree by construction
 - **AND** the overlay is therefore fully operable with no mouse at all, which is the same
   guarantee "Nothing becomes mouse-only" already makes of every other gesture
 

@@ -268,11 +268,17 @@ the route beneath, on exactly the help panel's terms.
 - **WHEN** the settings panel is rendered at **120x8** and at **60x8** — a body of 7 rows, so
   the band is `min(7 + 2, 7)` = 7 and cannot hold the heading, six setting rows, and two rules
   — and the cursor is moved from the first setting to the last
-- **THEN** the band's first visible row is `0` while the cursor's rows are already visible
-- **AND** it advances only once the cursor's value row would fall below the band, and by the
-  least it can
-- **AND** the window at every step is the one `ui::layout::viewport` returns for that cursor
-  and that height, so the panel and the foldable detail path cannot disagree about scrolling
+- **THEN** the band's first visible row is `0` at the first setting, whose value row is
+  already the second row of the band
+- **AND** the cursor's own value row is inside the window at every step, and the window
+  never advances past the last one the content allows — `content_rows - interior_height`,
+  which is `2` here — so the band cannot scroll past its own end
+- **AND** the window at every step is **exactly** the one `ui::layout::viewport` returns for
+  that cursor row and that height, asserted by equality against that function rather than by
+  restating its rule, so the panel and the foldable detail path cannot disagree about
+  scrolling. `viewport` keeps the cursor near the middle of the band rather than scrolling by
+  the least possible amount; that is the primitive's established behaviour and this panel
+  adopts it whole rather than adding the crate's second scrolling rule
 
 ### Requirement: `Enter` begins and commits an edit, `Esc` cancels it, and only `agent_kind` is editable
 

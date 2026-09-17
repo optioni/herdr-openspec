@@ -70,11 +70,11 @@ object to.
 #### Scenario: The inventory's shape is asserted, not described
 
 - **WHEN** `INVENTORY` is read
-- **THEN** it holds six groups whose titles, in order, are `Changes`, `Artifact`,
-  `Agents`, `Pane`, `While filtering`, and `Mouse`
+- **THEN** it holds seven groups whose titles, in order, are `Changes`, `Artifact`,
+  `Agents`, `Pane`, `While filtering`, `Mouse`, and `While settings is open`
 - **AND** their `scope` values, in order, are `List`, `Detail`, `Any`, `Any`, `Filter`,
-  and `Any`
-- **AND** their binding counts, in order, are 5, 7, 4, 4, 5, and 7, summing to 32
+  `Any`, and `Settings`
+- **AND** their binding counts, in order, are 5, 7, 4, 5, 5, 7, and 4, summing to 37
 - **AND** no group is empty, and no two groups share a title
 
 #### Scenario: `Space` and `Esc` each appear under their route
