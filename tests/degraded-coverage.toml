@@ -89,7 +89,7 @@ tier = "view"
 proof = ["an_empty_visible_list_leaves_the_whole_detail_interior_blank"]
 verdict = "confirmed"
 why = "the whole detail interior stays blank, rendered through render_at"
-covers = ["src/ui/view.rs:69-71"]
+covers = ["src/ui/view.rs:128-130"]
 
 [[row]]
 condition = "Markdown source holds a construct the parser does not model (a footnote), on a tab **other** than the tracked-tasks one"
@@ -400,7 +400,7 @@ tier = "unit"
 proof = ["prefers_the_workspace_cwd_and_falls_back_when_there_is_none", "a_herdr_context_with_no_workspace_cwd_is_the_fallback_case_not_a_failure"]
 verdict = "confirmed"
 why = "startup_dir's own unit tests drive both arms of the fallback decision directly"
-covers = ["src/ui/mod.rs:388-393"]
+covers = ["src/ui/mod.rs:402-407"]
 
 [[row]]
 condition = "The terminal refuses mouse capture (`enable_mouse` fails)"
