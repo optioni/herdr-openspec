@@ -6608,7 +6608,7 @@ mod tests {
         }
 
         /// `settings-window` -> "An edit begins, changes a candidate, and
-        /// commits" (the in-memory half — `state::record_kind` and
+        /// commits" (the in-memory half — writing `settings.toml` and calling
         /// `Launcher::set_kind` are later groups' work; see design.md -> Test
         /// Strategy).
         #[test]
