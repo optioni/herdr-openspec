@@ -158,3 +158,40 @@ group in order, gating each with `cargo test --all-features --no-fail-fast` plus
 `cargo fmt --all -- --check` and `cargo clippy --all-targets --all-features -- -D warnings`
 before marking its `tasks.md` lines. Group **12** is the Change Review group — dispatch
 `outside-in-tdd-reviewer` there, not a fork.
+
+## BLOCKER found after the pause — group 11 cannot pass as group 0's tests are written
+
+Found by verifying the paused checkpoint, **not** by the group that will hit it. Read this
+before dispatching group 7, and fix it in group 11 (task 11.1) at the latest.
+
+Both group-0 acceptance tests drive the key sequence task 0.2 literally specifies —
+`,` `Enter` `j` `Enter` `a` `q` — with **no `Esc` between the commit and `a`**
+(`src/ui/mod.rs`, the `stages` vectors in
+`committed_kind_reaches_the_launch_without_a_second_status_call` and
+`committing_an_agent_kind_writes_settings_toml_and_touches_nothing_else`).
+
+Committing an edit does **not** close the settings panel: `OpenDetail` commits and leaves
+the panel open, and only `ToggleSettings` or `Back` closes it
+(`specs/settings-window/spec.md` -> "`Enter` begins and commits an edit..."). So when `a`
+arrives, the panel is still open — and `settings-window` -> "The settings panel answers
+nine actions and every other one is inert" makes `LaunchApply` **inert** there, with a
+load-bearing argument this change must not weaken:
+
+> This panel is the one `agent-launch` opens on an ambiguous refusal, so the reader arrives
+> at it having just pressed `a`. If `a` still launched from inside it, the key that could
+> not choose a client would start an agent the moment the reader pressed it again while
+> reading the very row that explains why it could not.
+
+That requirement is correct and stays. **The test's key sequence is what is wrong.**
+`agent-launch` -> "The next launch uses the committed kind and issues no status call" says
+only "the reader commits `codex` in the settings panel, and `a` is pressed again" — it
+never says the panel is still open, and the panel being open is exactly the state in which
+`a` must do nothing.
+
+**The fix is one keystroke**: insert `Esc` (`Action::Back`, which with no edit in progress
+closes the panel) between the fourth stage and `a`, giving `,` `Enter` `j` `Enter` `Esc`
+`a` `q`. Do **not** instead make `a` live inside the panel, and do **not** make a commit
+close the panel — either would contradict a landed requirement to make a test pass.
+
+Task 0.2's wording in `tasks.md` should be corrected in the same commit, so the sequence
+and the task agree.
