@@ -400,7 +400,7 @@ tier = "unit"
 proof = ["prefers_the_workspace_cwd_and_falls_back_when_there_is_none", "a_herdr_context_with_no_workspace_cwd_is_the_fallback_case_not_a_failure"]
 verdict = "confirmed"
 why = "startup_dir's own unit tests drive both arms of the fallback decision directly"
-covers = ["src/ui/mod.rs:402-407"]
+covers = ["src/ui/mod.rs:443-448"]
 
 [[row]]
 condition = "The terminal refuses mouse capture (`enable_mouse` fails)"
@@ -408,7 +408,7 @@ tier = "outer"
 proof = ["a_refused_capture_is_named_last", "a_successful_capture_adds_no_row"]
 verdict = "confirmed"
 why = "mouse-input: run_wired is driven with Startup::mouse_problem set and with it None; the first proves the reason lands as refresh.startup's LAST entry, below the binary probe's own, and renders as a `!`-marked row above the change rows while the loop runs normally; the second proves a successful capture adds no entry and leaves the frame unchanged"
-covers = ["src/ui/mod.rs:329-331", "src/ui/terminal.rs:83-83", "src/ui/terminal.rs:91-93"]
+covers = ["src/ui/mod.rs:355-357", "src/ui/terminal.rs:83-83", "src/ui/terminal.rs:91-93"]
 
 [[row]]
 condition = "The clipboard write fails locally (`TerminalOps::write_clipboard` returns an error)"

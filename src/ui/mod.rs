@@ -280,6 +280,20 @@ pub fn start_collaborators(
     }
 }
 
+/// `settings-window`'s addition: the `agent_kind` row's current value, read out of
+/// `dashboard.settings.rows` rather than re-derived — `run_wired`'s one use, comparing this
+/// value from before and after the interactive loop runs to detect whether a commit
+/// happened. `None` only when the row itself is absent, which `settings::settings` never
+/// produces (`agent_kind` is always one of its three rows).
+fn agent_kind_value(dashboard: &Dashboard) -> Option<String> {
+    dashboard
+        .settings
+        .rows
+        .iter()
+        .find(|row| row.key == "agent_kind")
+        .map(|row| row.value.clone())
+}
+
 /// Everything `run` does once a terminal exists: load startup state, start
 /// the live tier's collaborators, fold any starting problem into
 /// `dashboard.refresh.problems`, build the loop's `Live`, and run it to
@@ -342,6 +356,20 @@ pub fn run_wired<B: Backend, E: EventSource>(
         dashboard.refresh.startup.push(reason.clone());
     }
     dashboard.file_mode = collaborators.file_mode;
+    // `settings-window`: `state::record_kind`'s one call site. `src/ui/driver.rs` and
+    // `src/ui/app.rs` are both swept by `NOIO-VIEW`/`READONLY-UI` and neither may name a
+    // filesystem-write API; `src/ui/mod.rs` is the one file under `src/ui/` permitted to
+    // touch the filesystem at all (`READONLY-UI`'s own comment: `ui::read_artifact`,
+    // `ui::load`, `ui::run`). `Dashboard::apply` (`src/ui/app.rs`) decides a commit
+    // happened — `apply_settings_open_detail` is the only place in the crate that ever
+    // changes a `Setting::value` after `load` constructs it — and this function performs
+    // the write, by comparing the `agent_kind` row's value from before the loop below runs
+    // against its value once it returns. At most the session's *last* committed kind is
+    // ever written, which is what "a commit rewrites rather than merges" already means one
+    // level up. Nothing re-reads `settings.toml` mid-session (`recorded_kind` runs once, in
+    // `start_collaborators`, before the loop below starts), so holding the write until the
+    // loop returns costs nothing a reader would notice.
+    let initial_kind = agent_kind_value(&dashboard);
     let result = {
         let mut live = crate::ui::driver::Live {
             fs: &mut *collaborators.fs,
@@ -374,6 +402,19 @@ pub fn run_wired<B: Backend, E: EventSource>(
             dashboard.agent_names.names.insert(agent, change);
         }
         dashboard.launch.problems = outcome.problems;
+    }
+    // `settings-window` :: `specs/plugin-state/spec.md` -> "The settings panel's commit
+    // writes `settings.toml` atomically". A failed write is reported as a problem row
+    // (`launch.problems`, the existing `!`-row channel this composition root already
+    // overwrites wholesale above on a settled launch) rather than panicking or silently
+    // dropping the reader's choice — the in-memory value stays exactly what was committed
+    // either way, since this block only ever reads it, never rewrites it.
+    let committed_kind = agent_kind_value(&dashboard);
+    if let Some(kind) = &committed_kind
+        && committed_kind != initial_kind
+        && let Err(e) = crate::state::record_kind(startup.state_dir, kind)
+    {
+        dashboard.launch.problems = vec![e.to_string()];
     }
     result?;
     Ok(dashboard)
