@@ -56,6 +56,7 @@ to that layer. It adds no second mechanism.
 | `ui::settings::render` | **new** `src/ui/settings.rs` | `src/ui/help.rs` — a pure view drawing a band, its own `*widths` gate |
 | `Overlay { panel, scroll, edit }`, `Panel`, `Edit` | `src/ui/app.rs` | renames and widens `help-overlay`'s `Help`; joins `NODEFAULT-UI`'s scanned sets |
 | `Dashboard::settings: settings::PanelState { rows, cursor }` | `src/ui/app.rs` | a seventeenth field, on `agents::AgentSnapshot`'s terms — plain data produced outside `src/ui/` |
+| `ui::load` gains a `FoundBin` parameter and stops ignoring `_config` | `src/ui/mod.rs` | the existing startup signature; no new read |
 | `Request::Resolve`, `Outcome::{picker, resolution}` | `src/launch.rs` | the existing request/answer pair; `Outcome` goes from two fields to four |
 | `Action::ToggleSettings`, `,` in `action_for` | `src/ui/app.rs` | `help-overlay`'s `ToggleHelp` and `?` |
 | `Target::Setting(usize)`, band-relative hit test | `src/ui/driver.rs` | `mouse-input`'s existing overlay capture |
@@ -111,7 +112,7 @@ renders.
 | Input | Where it is read | How it reaches the view |
 |---|---|---|
 | `Config` | startup, by the composition root | `ui::load` already takes `&Config` — today as `_config`, an unused parameter. The underscore is dropped. |
-| `resolve::BinResolution` | startup, by the composition root, which already derives `file_mode` from it | passed to `ui::load` beside the config |
+| `resolve::FoundBin` (the winning probe step) | startup — but **discarded today**: `run_at` moves the `BinResolution` into `cli::worker_cli`, which keeps only `found.path`, and `found.source` has no production reader anywhere in the crate | `run_at` retains the `FoundBin` and passes it to `ui::load` as a further parameter. No second probe: the answer is already in hand |
 | the agent kind + installed list | **lazily, on the launcher's worker**, per `agent-client-choice` | `Request::Resolve` out, `Outcome::resolution` back, adopted by the same `drain` that adopts every other outcome |
 
 `settings::settings(config, binary, kind)` runs at exactly three moments — startup, the
@@ -293,6 +294,7 @@ missing.
 | agent-launch :: The next launch uses the committed kind and issues no status call | invocation-log assertion against a scratch `herdr` | run-time | Herdr **replaced** by a scratch `herdr` program | `cargo test launch::` |
 | agent-launch :: A cancelled edit changes nothing the launcher sees | invocation-log + scratch state dir assertion | run-time | Herdr replaced; filesystem real | `cargo test launch::` |
 | agent-launch :: Opening the panel resolves the kind once and launches nothing | invocation-log assertion against a scratch `herdr` | run-time | Herdr **replaced** by a scratch `herdr` program | `cargo test launch::` |
+| agent-launch :: File mode answers both additions inertly | `#[test]` in `src/ui/mod.rs` wiring + `src/launch.rs` | run-time + view | launcher is the real `NoLauncher`; terminal `TestBackend` | `cargo test -- launch:: ui::tests::wiring` |
 | agent-launch :: `set_kind` returns while the worker is blocked mid-launch | `#[test]` in `src/launch.rs` — FIFO ordering, no clock | run-time | worker thread **real**; Herdr replaced by a scratch program blocking on a FIFO | `cargo test launch::` |
 | quality-gates :: Both hygiene gates are checked-in files invoked from the Makefile | `tests/ci_workflow.rs` equality against `scripts/gates/` | contract | repository tree | `cargo test --test ci_workflow` |
 | quality-gates :: Each extracted gate's default floor is the measured one | `tests/ci_workflow.rs` equality against `scripts/gates/` | contract | repository tree | `cargo test --test ci_workflow` |

@@ -488,10 +488,10 @@ launch tier's state defined by `agent-launch`; `file_mode: bool`, `degraded-stat
 addition; `overlay: Overlay`, the overlay layer's state defined by `help-overlay` and
 `settings-window` — `help-overlay`'s one addition to this type, renamed from `help: Help`
 and generalised here to carry either panel; `selection: Option<Selection>`,
-`text-selection`'s one addition; and `settings: settings::Panel`, `settings-window`'s one
+`text-selection`'s one addition; and `settings: settings::PanelState`, `settings-window`'s one
 addition.
 
-`settings: settings::Panel` is `settings-window`'s one addition to this type and the
+`settings: settings::PanelState` is `settings-window`'s one addition to this type and the
 seventeenth field, carrying exactly two members: `rows: Vec<settings::Setting>` — what the
 panel renders, produced by `settings::settings` outside the render path — and `cursor: usize`,
 the row cursor over those rows.
@@ -500,7 +500,9 @@ It is a field rather than a computation because the three inputs it needs are **
 type and two of them cannot be: `Config` and the `BinResolution` are read once at startup by
 the composition root, and the agent kind is resolved lazily on the launcher's worker thread,
 on the first `a`/`c`/`s` or on the first `,`. A view that derived the rows per frame would
-have to reach all three, which `NOIO-VIEW` forbids under `src/ui/`. `rows` is therefore
+have to reach all three, which `NOIO-VIEW` forbids under `src/ui/`. The `FoundBin` reaches
+`ui::load` as a further parameter, which `setting-provenance` requires because `run_at` today
+moves the whole `BinResolution` into `cli::worker_cli` and keeps only its path. `rows` is therefore
 recomputed at exactly three moments — at startup, when the launcher's kind resolution is
 adopted, and on a commit — and read on every frame.
 
@@ -533,14 +535,20 @@ cleared by one. The clearing is a rule `text-selection` states, not an accident 
 field sits. `problem` lives here rather than on any existing `!`-marked list because every one of those —
 `launch.problems`, `refresh.problems`, `changes.problems`, `refresh.startup`,
 `agents.problem` — is replaced wholesale on its own producer's cadence and would drop a reason
-before the reader saw it, and because this requirement pins `Dashboard` at sixteen fields, so a
-dedicated field is not available. It is created and cleared at exactly the moments the reason
+before the reader saw it. It also argued that this requirement pinned `Dashboard` at sixteen
+fields, so a dedicated field was not available; `settings-window` takes the count to seventeen,
+which removes that second argument without touching the first — `problem` stays where
+`text-selection` put it because the `!`-marked lists would drop it, not because no field was
+available. It is created and cleared at exactly the moments the reason
 becomes and stops being true.
 
 It carries plain data — no trait, no handle, no thread — so the state value stays
 `Clone`, `PartialEq`, and constructible in a test, and it joins `NODEFAULT-UI`'s scanned sets
-on exactly `Filter`, `Refresh`, and `Launch`'s terms. `settings::PanelState`, `Setting`,
-`Provenance`, and `Editable` join them on the same terms.
+on exactly `Filter`, `Refresh`, and `Launch`'s terms. `settings::PanelState`, `Setting`, and
+`KindResolution` join them on the same terms — the **structs** of `src/settings.rs`.
+`Provenance`, `Editable`, and `Reason` do **not**: they are enums, and the gate's positive
+control is anchored on `struct <T> {`. They are covered by an exhaustive `match` with no
+wildcard arm, on exactly `launch::Intent`'s terms.
 
 `file_mode` is true exactly when the `openspec` binary probe resolved no usable binary, so the
 pane's change list is file-sourced for the whole session and no CLI result will ever correct
@@ -672,8 +680,9 @@ the attribution derived from all of it.
 through the state value, so `Dashboard` stays `Clone`, `PartialEq`, and constructible in a test
 with no thread and no filesystem.
 
-None of `Dashboard`, `Filter`, `Detail`, `Refresh`, `Launch`, `Help`, `help::Binding`, and
-`help::Group` SHALL implement `Default` —
+None of `Dashboard`, `Filter`, `Detail`, `Refresh`, `Launch`, `Overlay`, `Edit`,
+`help::Binding`, `help::Group`, `settings::PanelState`, `settings::Setting`, and
+`settings::KindResolution` SHALL implement `Default` —
 neither derived nor hand-written, anywhere in the crate — and every construction and every
 destructuring of any of them SHALL name every field, with no `..` rest, so a field added later
 fails to compile at each site rather than defaulting silently. The same SHALL hold for
@@ -718,12 +727,12 @@ stated over `Change`, `ChangeSet`, `ArtifactRef`, and `Origin` in `src/changes.r
 these is one of those nor there.
 
 `src/ui/app.rs`, `src/ui/detail.rs`, `src/ui/help.rs`, `src/ui/layout.rs`, `src/ui/list.rs`,
-`src/ui/markdown.rs`, `src/ui/palette.rs`, `src/ui/tasks.rs`, `src/ui/view.rs`, and
-`src/ui/driver.rs` SHALL name
+`src/ui/markdown.rs`, `src/ui/palette.rs`, `src/ui/settings.rs`, `src/ui/tasks.rs`,
+`src/ui/view.rs`, and `src/ui/driver.rs` SHALL name
 no filesystem, process, environment, network, or standard-I/O API. Terminal work lives in
 `src/ui/terminal.rs`, event reading in `src/ui/event.rs`, and startup loading, the one
 artifact-read binding, the mapping read, and the composition root in `src/ui/mod.rs`; the
-**ten** files above are the pure side of the render seam. None of `agent-polling`,
+**eleven** files above are the pure side of the render seam. None of `agent-polling`,
 `agent-attribution`, and `agent-launch` added one — `src/watch.rs`, `src/refresh.rs`,
 `src/agents.rs`, and `src/launch.rs` sit outside `src/ui/` entirely, which is what kept this
 set and the `NOCLI-SHELL` set unchanged through all three;
@@ -733,11 +742,12 @@ its own spec — `NOIO-VIEW`'s `PURE` list of **nine** files — but did not car
 back into the sentence above, which still read **eight** and omitted the file; that drift is
 repaired here rather than left for the next reader to trip over. `help-overlay` adds
 `src/ui/help.rs`, the inventory and the overlay's renderer, taking the set to **ten** and
-`src/ui/` to **thirteen** `*.rs` files.
+`src/ui/` to **thirteen** `*.rs` files. `settings-window` adds `src/ui/settings.rs`, the
+settings panel's renderer, taking the set to **eleven** and `src/ui/` to **fourteen**.
 A view test that needs a real directory means logic leaked across that seam.
 
 `state::read` is a filesystem call and SHALL be named only in `src/ui/mod.rs` among the files
-under `src/ui/`, on exactly `tasks::read`'s terms below: the ten pure files SHALL
+under `src/ui/`, on exactly `tasks::read`'s terms below: the eleven pure files SHALL
 additionally be searched for `state::read`, so the one filesystem call an attribution renderer
 would plausibly reach for is caught by the same check rather than by nothing. `agent-launch`
 adds two more names to that same search for the same reason: `state::record`, which is the
@@ -774,13 +784,13 @@ The scenario's name is kept verbatim from `tui-shell` because a delta's scenario
 its merge key; its subject is unchanged and only the type list and the field count move.
 
 - **WHEN** every `*.rs` file under `src/` is searched, for each of the type names
-  `Dashboard`, `Filter`, `Detail`, `Refresh`, `Launch`, `Help`, `Binding`, `Group`, `Agent`,
-  `Listed`, `AgentSnapshot`,
-  `Attribution`, and `Outcome`, for `impl Default for <name>` — the target path-qualified or
+  `Dashboard`, `Filter`, `Detail`, `Refresh`, `Launch`, `Overlay`, `Edit`, `Binding`, `Group`,
+  `Agent`, `Listed`, `AgentSnapshot`, `Attribution`, `Outcome`, `PanelState`, `Setting`, and
+  `KindResolution`, for `impl Default for <name>` — the target path-qualified or
   bare — for a `Default` inside the `#[derive(...)]` immediately preceding `struct <name>`, and
   for a `..` appearing inside a `<name> { … }` literal or pattern, brace-matched from the
   opening `{` to its partner so a multi-line elision rustfmt spread over several lines is seen
-- **THEN** there is no match for any of the thirteen
+- **THEN** there is no match for any of the seventeen
 - **AND** the check fails when its positive-control file is absent, and it is paired with a
   positive control asserting that `src/ui/app.rs` **does** contain `struct Dashboard`,
   `struct Filter`, `struct Detail`, `struct Refresh`, `struct Launch`, and `struct Overlay` —

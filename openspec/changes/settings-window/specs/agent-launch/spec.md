@@ -173,6 +173,15 @@ is step 1; a setting that `config.toml` owns is refused before an edit can begin
 (`settings-window`), so a commit can never install a value that the precedence would have
 overruled.
 
+`NoLauncher` — the inert implementation `start_collaborators` uses when no repository was
+found, and a second **production** impl rather than a test double — SHALL answer both
+additions inertly: `set_kind` SHALL do nothing and `Request::Resolve` SHALL produce no
+`Outcome`, on exactly the terms its existing `request` discards and its `drain` returns
+`None`. In **file mode** the launch keys are refused anyway, so there is no kind to commit;
+the settings panel still opens, still shows `openspec_bin` and `prompts` with their real
+provenance, and leaves `agent_kind` at `Provenance::Pending` for the life of the session
+rather than resolving something no launch will use.
+
 `set_kind` SHALL NOT reach the worker through the request channel. It SHALL store into a
 cache the worker shares, so that a launch already queued behind it cannot be resolved under
 the old kind.
@@ -221,6 +230,18 @@ evidence, and it is written to fail if the discipline is broken.
   the count at one
 - **AND** the scratch state directory is byte-identical throughout, since opening a panel
   writes nothing
+
+#### Scenario: File mode answers both additions inertly
+
+- **WHEN** a dashboard in **file mode** — no repository found, so the launcher is `NoLauncher`
+  — opens the settings panel with `,` and the frame is drawn at 120x40 and 60x20
+- **THEN** no `Outcome` is ever produced, `overlay.panel` is `Some(Panel::Settings)`, and the
+  panel renders at both widths
+- **AND** the `agent_kind` row stays at the `Pending` label rather than resolving or erroring,
+  and is not editable
+- **AND** `openspec_bin` and `prompts` carry their real values and provenance, so the panel is
+  still useful in the mode where the dashboard has no CLI at all
+- **AND** `set_kind` called against `NoLauncher` changes nothing and does not panic
 
 #### Scenario: `set_kind` returns while the worker is blocked mid-launch
 

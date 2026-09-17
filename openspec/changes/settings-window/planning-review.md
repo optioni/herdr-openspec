@@ -9,8 +9,12 @@ falsifiability audit; **C** task alignment, lifecycle discipline, ordering; **D*
 verification of every empirical claim. They reported findings and edited nothing. This
 session merged them, repaired the owning artifact, and wrote this log.
 
-**Outcome: 11 CRITICAL, 17 WARNING, 6 SUGGESTION. All CRITICALs fixed. All WARNINGs fixed or
-consciously accepted with a reason below. `openspec validate settings-window --strict` passes.**
+Two of them (A and D) were then sent back over the **repaired** files, which caught four more
+defects the first round could not have seen — three introduced by the repairs themselves.
+
+**Outcome: 14 CRITICAL, 22 WARNING, 8 SUGGESTION. All CRITICALs fixed. All WARNINGs fixed or
+consciously accepted with a reason below. `openspec validate settings-window --strict` passes;
+123 spec scenarios bind to 123 matrix rows in both directions.**
 
 ## The three findings that changed the design
 
@@ -62,6 +66,40 @@ scenarios were added.
   with a FIFO-ordering scenario that deadlocks against an implementation holding the lock
   across `agent start`, plus a stated hold discipline (Decision 14).
 
+### 4. The winning probe step has no reader, so `Provenance::Probe` had no data (D, second round)
+
+`design.md` claimed the composition root "already holds the `BinResolution` it derived
+`file_mode` from". It does not. `run_at` computes `resolve::openspec_bin(...)` and then
+**moves** the resolution into `cli::worker_cli`, which takes it by value and keeps only
+`found.path`. What survives is `resolved_bin: Option<PathBuf>` and `file_mode: bool`;
+`found.source` — the `BinSource` this change wanted to render — has **zero production readers
+anywhere in the crate**. The scenario "Every probe step is named by the step that won" was
+unimplementable as the tasks stood.
+
+**Repaired**: `run_at` retains the `FoundBin` before the move and passes it to `ui::load` as a
+further parameter, with an explicit prohibition on probing twice. Specified in
+`setting-provenance`, `dashboard-loop`, `design.md` → Contracts, and task 4.2.
+
+This is the same class of error as finding 1 and was missed by the same reasoning: I checked
+that a value was *computed* at startup without checking that it *survived*.
+
+### 5. The repairs left three stale lists behind (A, second round)
+
+The seventeen-fields block copies text from the live sixteen-fields requirement, and three
+carried passages did not move with it:
+
+- the `Default`-prohibition list and the scenario's search list still named `Help` while the
+  positive control in the same block had been changed to `Overlay` — so every search leg would
+  look for a name that no longer exists while the control passed, which is exactly the failure
+  the anchoring paragraph says it prevents;
+- the `NOIO-VIEW` enumeration still listed **ten** pure view files and omitted
+  `src/ui/settings.rs`, contradicting this change's own `responsive-layout` delta and
+  `design.md`, both of which say ten → eleven;
+- a carried sentence still argued that "this requirement pins `Dashboard` at sixteen fields, so
+  a dedicated field is not available", refuted by the header of the block containing it.
+
+All three repaired, and the type count moved from thirteen to seventeen with it.
+
 ## Repairs by artifact
 
 | Artifact | Repairs |
@@ -79,6 +117,11 @@ scenarios were added.
 | `specs/doc-conformance/` | **new delta** — the sixteenth claim and its four bound sites |
 | `design.md` | the Contracts subsection; Decisions 13 and 14; the config-directory row in Test Boundaries; every command corrected; matrix regenerated at 122 rows |
 | `tasks.md` | commands corrected; the `pub mod settings;` doc sites (three machine-bound); `NODEFAULT-UI`'s `TYPES` and the `Makefile:46` rename; the `quality-gates` figure moved to the delta; a persistence gate in group 7; the `AGENTS.md` sites enumerated to **nine**; a task for the one uncovered scenario |
+
+Second round also corrected: `NoLauncher` is a **second production implementation** (what file
+mode gets), not a test double, and there are **five** `impl Launcher` sites across **two**
+files — none in `src/ui/mod.rs`, where tasks 7.3/7.4 had placed two of them. `set_kind` and
+`Request::Resolve` are now specified as inert there, with a file-mode scenario.
 
 ## Two claims the reviewers got wrong
 
@@ -109,7 +152,7 @@ is genuinely recorded, so it is cited rather than re-walked. No group carries `p
 ## Verification
 
 - `openspec validate settings-window --strict` → **valid**.
-- 122 spec scenarios ↔ 122 matrix rows, names matching in both directions (set comparison, not
+- 123 spec scenarios ↔ 123 matrix rows, names matching in both directions (set comparison, not
   a count).
 - `cargo test --lib` at HEAD → **1562 passed, 0 failed**, the baseline group 14 compares against.
 - `scripts/gates/noio-view.sh` negative control reproduced: exit 0 → planted `use std::fs;` →

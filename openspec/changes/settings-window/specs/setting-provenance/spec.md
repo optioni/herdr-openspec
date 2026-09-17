@@ -43,9 +43,20 @@ panel whose job is to say what is deciding each setting.
 
 Producing this list SHALL perform no I/O.
 
-`config` and `binary` are available at **startup**: `ui::load` already receives a `&Config` —
-today as `_config`, an unused parameter — and the composition root already holds the
-`BinResolution` it derived `file_mode` from. `kind` is **not**, and that asymmetry is the
+`config` is available at **startup**: `ui::load` already receives a `&Config`, today as
+`_config`, an unused parameter.
+
+`binary` is **not**, and this is a smaller version of the same problem. `run_at` computes
+`resolve::openspec_bin(...)` and then **moves** the `BinResolution` into
+`cli::worker_cli(resolution, ...)`, which takes it by value and keeps only `found.path`. What
+survives into the dashboard is `resolved_bin: Option<PathBuf>` and `file_mode: bool`; the
+winning probe step, `found.source`, has **no reader anywhere in the crate's production code**.
+So `Provenance::Probe` has no data source today.
+
+This change SHALL make one available, and SHALL do it without a second probe: `run_at` SHALL
+retain the `FoundBin` — by cloning it before the move, or by returning it on `Collaborators` —
+and SHALL pass it to `ui::load` as a further parameter beside the `&Config`. `resolve` SHALL
+NOT be called twice; probing is filesystem work and the answer is already in hand. `kind` is **not**, and that asymmetry is the
 whole of this requirement's difficulty. `agent-client-choice` resolves the agent kind
 **lazily, once per session, on the launcher's worker thread, on the first `a`/`c`/`s` press
 and never at startup**, and that rule does not move here: resolving on the render path would

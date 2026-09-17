@@ -143,9 +143,13 @@ establish (design.md → Test Strategy).
       :: "`?` and `,` swap panels rather than stacking them", "`,` swaps to the settings panel
       from inside the help".
 - [ ] 4.2 GREEN: Add `Dashboard::settings: settings::PanelState { rows, cursor }` — the
-      **seventeenth** field — and populate `rows` at startup from `ui::load`, which already
-      receives the `&Config` it currently ignores as `_config`. Update every construction site
-      and the compile-time companion that destructures all fields with no `..` rest.
+      **seventeenth** field — and populate `rows` at startup from `ui::load`. Two plumbing
+      edits, not one: drop the underscore on `_config` (`src/ui/mod.rs:481`), and retain the
+      `FoundBin` in `run_at` before `resolution` is **moved** into `cli::worker_cli`
+      (`src/ui/mod.rs:215`), passing it to `load` as a further parameter — `found.source` has
+      no production reader today, so `Provenance::Probe` has no data source until this lands.
+      Do not probe twice. Update every construction site and the compile-time companion that
+      destructures all fields with no `..` rest.
 - [ ] 4.3 GREEN: Add `Action::ToggleSettings` (25 → 26) and bind `,` under
       `KeyModifiers::NONE` only, typing as `FilterPush(',')` while filtering.
 - [ ] 4.4 GREEN: Add the settings dispatch layer to `Dashboard::apply`, taking precedence over
@@ -205,11 +209,16 @@ establish (design.md → Test Strategy).
       `Request::Resolve`, sent when `,` opens the panel and answered from the worker's session
       cache when it has one. Open the settings panel on the `agent_kind` row when `drain` adopts
       an outcome whose `picker` is set.
-- [ ] 7.3 GREEN: Add `Launcher::set_kind(&self, kind: String)`, replacing the session cache
-      with `Choice::Use { kind, source: Source::Recorded }`. Update the one production
-      implementation and both test doubles (`src/launch.rs`, `src/ui/mod.rs`).
-- [ ] 7.4 CHECK: Contract gate — `Launcher` gains a method, which breaks every implementor.
-      Confirm by compiling that all three named in design.md → Contracts are updated.
+- [ ] 7.3 GREEN: Add `Launcher::set_kind(&mut self, kind: String)` and `Request::Resolve`,
+      replacing the session cache with `Choice::Use { kind, source: Source::Recorded }`. There
+      are **five** `impl Launcher` sites across **two** files — `NoLauncher`, `RealLauncher`,
+      `TestLauncher` in `src/launch.rs`; `RecordingLauncher`, `ScriptedLauncher` in
+      `src/lib.rs`; none in `src/ui/mod.rs`. `NoLauncher` is a second **production** impl, not
+      a double — it is what file mode gets — so `set_kind` there is a no-op and `Resolve`
+      answers nothing.
+- [ ] 7.4 CHECK: Contract gate — `Launcher` gains a method and `Request` a variant, which
+      breaks every implementor. Confirm by compiling that all **five** named in 7.3 are
+      updated, and that `NoLauncher`'s no-op is deliberate rather than inherited.
 - [ ] 7.5 VERIFY: `make gates` — `NOBLOCK` must still pass and no file under `src/ui/` names the
       lock type. Do **not** treat this as evidence that `set_kind` is non-blocking:
       `noblock.sh`'s `BLOCK3_RE` (`:105`) names no `Mutex`, `RwLock`, or `lock()`, and its
