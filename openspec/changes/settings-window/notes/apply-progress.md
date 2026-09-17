@@ -226,3 +226,46 @@ close the panel — either would contradict a landed requirement to make a test 
 
 Task 0.2's wording in `tasks.md` should be corrected in the same commit, so the sequence
 and the task agree.
+
+### The second half is now VERIFIED, and the whole corrected sequence is settled
+
+Checked directly against the tree, so the resume does not have to re-derive any of it.
+
+Evidence:
+
+- `src/settings.rs` emits the rows in the order `openspec_bin` (index **0**), `agent_kind`
+  (**1**), `prompts` (**2**) — `grep -n 'key: "' src/settings.rs`.
+- `openspec_bin` is `Editable::No { reason: Reason::SetOnce }` (`src/settings.rs:209`), and
+  `settings-window` -> "`Enter` on a read-only setting begins no edit" makes `OpenDetail`
+  there a no-op.
+- `ui::load` seeds `settings.cursor: 0` on **both** branches (`src/ui/mod.rs:589`, `:645`),
+  so `,` opens with the cursor on `openspec_bin`.
+- Both group-0 tests' `stages` vectors drive exactly
+  `key(',')`, `enter_key()`, `key('j')`, `enter_key()`, `key('a')`, `key('q')`.
+
+So the drive task 0.2 specifies resolves as: open on `openspec_bin`; `Enter` begins nothing;
+`j` moves the cursor to `agent_kind`; `Enter` begins an edit whose candidate is the **first**
+shortlist entry; then `a` while the panel is open **and an edit is in progress**. It never
+steps a candidate and never commits — so both defects are real and the one-keystroke fix
+is not enough.
+
+**The corrected sequence is `,` `j` `Enter` `j` `Enter` `Esc` `a` `q`:**
+
+| Key | Effect |
+|---|---|
+| `,` | opens the panel, cursor on `openspec_bin` |
+| `j` | cursor to `agent_kind` |
+| `Enter` | begins the edit; the fixture is `Choice::Ambiguous { installed: [claude, codex] }`, so there is no committed kind and the candidate starts at the **first** entry, `claude` |
+| `j` | steps the candidate to `codex` |
+| `Enter` | commits — writes `settings.toml`, calls `Launcher::set_kind`, ends the edit, leaves the panel open |
+| `Esc` | no edit in progress, so this closes the panel |
+| `a` | launches, now that the panel is closed, under the committed `codex` |
+| `q` | quits |
+
+That lands `agent_kind = "codex"` and `agent start --kind codex`, which is exactly what both
+tests already assert. Correct task 0.2's wording to this sequence in the same commit.
+
+**For group 12's reviewer:** point it at the acceptance tests' key sequences specifically,
+not only at the production diff. This is the third time on this change that a test was green
+or plausible while the thing underneath it was wrong — group 4's shifted `covers` ranges,
+group 6's write deferred past `run_loop` with the whole suite green, and now group 0's drive.
