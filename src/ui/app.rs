@@ -1164,23 +1164,30 @@ impl Dashboard {
     /// actions act; the other seventeen — the closed remainder
     /// `specs/settings-window/spec.md` names — change nothing at all.
     ///
-    /// `OpenDetail` and `Back`'s edit semantics — "begin/commit the edit in progress" and
-    /// "cancel the edit in progress; else close the panel" — are `settings-window`'s later
-    /// task group 5 (`Overlay::edit` is never set to `Some` by any code this group adds, so
-    /// `Back` reduces to "close the panel" here, forward-compatible with the conditional
-    /// group 5 adds). `OpenDetail` is therefore still part of the closed remainder in this
-    /// group's own scope, and moves to the answered nine when group 5 lands.
-    ///
-    /// `Next`/`ScrollDown` and `Prev`/`ScrollUp` move `settings.cursor` through
-    /// `ui::layout::viewport` rather than scrolling `overlay.scroll`, which stays unread while
-    /// this panel is open — see `move_settings_cursor`.
+    /// `OpenDetail` begins an edit on the cursor's setting when none is in progress, and
+    /// commits the one in progress otherwise — see `apply_settings_open_detail`. `Back`
+    /// cancels an edit in progress and leaves the panel open; only when no edit is in
+    /// progress does it close the panel, on exactly the requirement's own "innermost layer"
+    /// rule. `Next`/`ScrollDown` and `Prev`/`ScrollUp` step the edit's candidate while one is
+    /// in progress and move `settings.cursor` through `ui::layout::viewport` otherwise —
+    /// `settings.cursor`, not `overlay.scroll`, which stays unread while this panel is open —
+    /// see `apply_settings_step` and `move_settings_cursor`.
     fn apply_settings_action(&mut self, action: Action) {
         match action {
             Action::Quit => self.quit = true,
-            Action::ToggleSettings | Action::Back => {
+            Action::ToggleSettings => {
                 self.overlay.panel = None;
                 self.overlay.scroll = 0;
                 self.overlay.edit = None;
+            }
+            // `settings-window`: an edit in progress is the innermost layer — cancel it and
+            // leave the panel open; only with no edit in progress does `Back` close the panel,
+            // on exactly `ToggleSettings`'s terms for the panel itself.
+            Action::Back => {
+                if self.overlay.edit.take().is_none() {
+                    self.overlay.panel = None;
+                    self.overlay.scroll = 0;
+                }
             }
             // `settings-window`: swap rather than close or stack, symmetric with
             // `apply_help_action`'s own `ToggleSettings` arm.
@@ -1189,10 +1196,10 @@ impl Dashboard {
                 self.overlay.scroll = 0;
                 self.overlay.edit = None;
             }
-            Action::Next | Action::ScrollDown => self.move_settings_cursor(1),
-            Action::Prev | Action::ScrollUp => self.move_settings_cursor(-1),
-            Action::OpenDetail
-            | Action::SelectTab(_)
+            Action::OpenDetail => self.apply_settings_open_detail(),
+            Action::Next | Action::ScrollDown => self.apply_settings_step(1),
+            Action::Prev | Action::ScrollUp => self.apply_settings_step(-1),
+            Action::SelectTab(_)
             | Action::NextTab
             | Action::PrevTab
             | Action::FilterStart
@@ -1210,6 +1217,93 @@ impl Dashboard {
             | Action::Select(_)
             | Action::Ignore => {}
         }
+    }
+
+    /// `settings-window`'s addition: `OpenDetail` inside the settings panel — begin an edit
+    /// on the cursor's setting when none is in progress, or commit the one in progress
+    /// otherwise.
+    ///
+    /// Beginning consults `settings.rows[settings.cursor].editable` directly rather than
+    /// re-deriving any precedence rule: `Editable::No` (whatever the `Reason`) begins nothing,
+    /// and `Editable::Kind { shortlist }` begins on the committed value's own position in the
+    /// shortlist when it is there, and on the first entry otherwise (`settings-window` ::
+    /// "A committed kind outside the shortlist starts the edit at the first entry"). An empty
+    /// shortlist begins nothing either, though `setting-provenance` never hands one as `Kind`.
+    ///
+    /// Committing writes the candidate's own shortlist entry back to `Setting::value` — the
+    /// in-memory half `settings-window`'s later groups build on: writing `settings.toml`
+    /// (group 6) and replacing the launcher's session cache (group 7) are reached from
+    /// `run_loop`, never from here, on exactly `NOIO-VIEW`'s terms — and ends the edit. The
+    /// row cursor itself is untouched by either half.
+    fn apply_settings_open_detail(&mut self) {
+        match self.overlay.edit {
+            Some(edit) => {
+                if let Some(crate::settings::Editable::Kind { shortlist }) = self
+                    .settings
+                    .rows
+                    .get(edit.setting)
+                    .map(|setting| &setting.editable)
+                {
+                    if let Some(candidate) = shortlist.get(edit.candidate).cloned() {
+                        if let Some(row) = self.settings.rows.get_mut(edit.setting) {
+                            row.value = candidate;
+                        }
+                    }
+                }
+                self.overlay.edit = None;
+            }
+            None => {
+                let cursor = self.settings.cursor;
+                if let Some(crate::settings::Editable::Kind { shortlist }) = self
+                    .settings
+                    .rows
+                    .get(cursor)
+                    .map(|setting| &setting.editable)
+                {
+                    if !shortlist.is_empty() {
+                        let committed = &self.settings.rows[cursor].value;
+                        let candidate = shortlist.iter().position(|k| k == committed).unwrap_or(0);
+                        self.overlay.edit = Some(Edit {
+                            setting: cursor,
+                            candidate,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    /// `settings-window`'s addition: `Next`/`ScrollDown` (`step` `1`) and `Prev`/`ScrollUp`
+    /// (`step` `-1`) inside the settings panel — step the edit's candidate through its own
+    /// shortlist, wrapping at both ends, while an edit is in progress, and move the row
+    /// cursor via `move_settings_cursor` otherwise (`settings-window` :: "The shortlist is
+    /// the installed kinds, in Herdr's order, and wraps").
+    fn apply_settings_step(&mut self, step: isize) {
+        let Some(edit) = self.overlay.edit else {
+            self.move_settings_cursor(step);
+            return;
+        };
+        let Some(crate::settings::Editable::Kind { shortlist }) = self
+            .settings
+            .rows
+            .get(edit.setting)
+            .map(|setting| &setting.editable)
+        else {
+            return;
+        };
+        let len = shortlist.len();
+        if len == 0 {
+            return;
+        }
+        let candidate = if step.is_negative() {
+            (edit.candidate + len - 1) % len
+        } else {
+            (edit.candidate + 1) % len
+        };
+        self.overlay.edit = Some(Edit {
+            setting: edit.setting,
+            candidate,
+        });
     }
 
     /// Move `settings.cursor` by `step` (`1` or `-1`) over `settings.rows`, saturating at
