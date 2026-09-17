@@ -134,7 +134,7 @@ establish (design.md → Test Strategy).
 ## 4. The key, the layer, and the cursor
 <!-- kind: behavior -->
 
-- [ ] 4.1 RED: Write failing tests for `settings-window` :: "`,` toggles the panel and its near
+- [x] 4.1 RED: Write failing tests for `settings-window` :: "`,` toggles the panel and its near
       misses do not", "The panels swap rather than stacking", "`Esc` closes the settings panel
       before any other layer", "The cursor walks settings, not rendered rows, and saturates",
       "The band scrolls only when the cursor would leave it"; `dashboard-loop` :: "`,` maps to
@@ -142,7 +142,7 @@ establish (design.md → Test Strategy).
       after the overlay is generalised", "Both panels open is unrepresentable"; `help-overlay`
       :: "`?` and `,` swap panels rather than stacking them", "`,` swaps to the settings panel
       from inside the help".
-- [ ] 4.2 GREEN: Add `Dashboard::settings: settings::PanelState { rows, cursor }` — the
+- [x] 4.2 GREEN: Add `Dashboard::settings: settings::PanelState { rows, cursor }` — the
       **seventeenth** field — and populate `rows` at startup from `ui::load`. Two plumbing
       edits, not one: drop the underscore on `_config` (`src/ui/mod.rs:481`), and retain the
       `FoundBin` in `run_at` before `resolution` is **moved** into `cli::worker_cli`
@@ -150,16 +150,16 @@ establish (design.md → Test Strategy).
       no production reader today, so `Provenance::Probe` has no data source until this lands.
       Do not probe twice. Update every construction site and the compile-time companion that
       destructures all fields with no `..` rest.
-- [ ] 4.3 GREEN: Add `Action::ToggleSettings` (25 → 26) and bind `,` under
+- [x] 4.3 GREEN: Add `Action::ToggleSettings` (25 → 26) and bind `,` under
       `KeyModifiers::NONE` only, typing as `FilterPush(',')` while filtering.
-- [ ] 4.4 GREEN: Add the settings dispatch layer to `Dashboard::apply`, taking precedence over
+- [x] 4.4 GREEN: Add the settings dispatch layer to `Dashboard::apply`, taking precedence over
       the route and filter dispatches on the help layer's terms, and extend the help layer's
       answered set to eight with `ToggleSettings` swapping the panel.
-- [ ] 4.5 GREEN: Move the row cursor with `Next`/`Prev` through `ui::layout::viewport`, the
+- [x] 4.5 GREEN: Move the row cursor with `Next`/`Prev` through `ui::layout::viewport`, the
       primitive the foldable detail path already uses.
-- [ ] 4.6 GREEN: Wire `ui::settings::render` into `ui::view::render` behind
+- [x] 4.6 GREEN: Wire `ui::settings::render` into `ui::view::render` behind
       `overlay.panel == Some(Panel::Settings)`.
-- [ ] 4.7 Run the group tests — `cargo test -- ui::app ui::help ui::view ui::settings` — no
+- [x] 4.7 Run the group tests — `cargo test -- ui::app ui::help ui::view ui::settings` — no
       regressions.
 
 ## 5. Editing `agent_kind`
