@@ -39,13 +39,14 @@ pub enum Route {
     Detail,
 }
 
-/// The twenty-five outcomes a terminal event can map to, under either filter mode. The
-/// count has moved six times since this comment was last true: to thirteen with
+/// The twenty-six outcomes a terminal event can map to, under either filter mode. The
+/// count has moved seven times since this comment was last true: to thirteen with
 /// `live-refresh`'s `Refresh`, to seventeen with `agent-launch`'s `LaunchApply`,
 /// `LaunchContinue`, `LaunchArchive`, and `FocusAgent`, to eighteen with `list-sections`'s
 /// `ToggleSection`, to twenty-three with `mouse-input`'s `SelectNext`, `SelectPrev`,
 /// `ScrollDown`, `ScrollUp`, and `Click`, to twenty-four with `help-overlay`'s
-/// `ToggleHelp`, and to twenty-five with `text-selection`'s `Select`.
+/// `ToggleHelp`, to twenty-five with `text-selection`'s `Select`, and to twenty-six
+/// with `settings-window`'s `ToggleSettings`.
 /// `action_for` is total over every `Event`. `Back` replaces the earlier
 /// `BackToList`: it now dismisses one of several layers rather than only
 /// ever returning to the list route. `Next` and `Prev` are renamed from
@@ -137,6 +138,17 @@ pub enum Action {
     /// cell through `Selection::granularity` alone, with no clock
     /// (design.md -> Decision 2).
     Select(SelectPhase),
+    /// `settings-window`'s addition: open the settings panel when no panel is
+    /// open, swap to it from the help panel, and close it when it is already
+    /// open — `,`'s own three-way toggle, on exactly `ToggleHelp`'s terms but
+    /// for the second panel (design.md -> Decisions 1 and 2). Mapped from
+    /// `Char(',')` outside filter mode, under `KeyModifiers::NONE` only —
+    /// unlike `?`, `,` carries no shifted-character ambiguity. Inside filter
+    /// mode, `,` types into the query on the same terms as every other
+    /// printable character. Route-agnostic in the same stronger sense as
+    /// `Refresh` and `ToggleHelp`: it opens a layer over whichever route is
+    /// current and leaves `route` alone.
+    ToggleSettings,
     Ignore,
 }
 
@@ -765,7 +777,7 @@ pub enum Granularity {
 /// pure and cannot tell it (design.md -> Decision 13). It is never a source of
 /// what is drawn. Deliberately implements no
 /// `Default`, anywhere in the crate: every construction and every
-/// destructuring names all sixteen fields, so a field added later fails to
+/// destructuring names all seventeen fields, so a field added later fails to
 /// compile at each site rather than defaulting silently. See
 /// `specs/dashboard-loop/spec.md` and the `NODEFAULT-UI` check.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -822,6 +834,16 @@ pub struct Dashboard {
     /// never by living inside `Detail` and being silently discarded by one. See
     /// `specs/text-selection/spec.md` and design.md -> Decision 3 and Decision 4.
     pub selection: Option<Selection>,
+    /// `settings-window`'s addition, the seventeenth field: the settings panel's own
+    /// rows and row cursor. `rows` is produced by `settings::settings` outside the
+    /// render path — at startup, on an adopted kind resolution, and on a commit — and
+    /// the view derives nothing from it. `cursor` is a sibling of `overlay` rather than
+    /// a member of it: `overlay.scroll` already means the help band's first visible
+    /// row, and the settings panel needs a selected **setting** instead, windowed by
+    /// `ui::layout::viewport`; living beside the rows it indexes also lets it outlive
+    /// the panel, so reopening `,` returns the reader to the setting they left. See
+    /// `specs/dashboard-loop/spec.md` and design.md -> Decision 13.
+    pub settings: crate::settings::PanelState,
 }
 
 impl Dashboard {
@@ -834,14 +856,16 @@ impl Dashboard {
     /// holds, so a future key that opens a section cannot forget to trigger
     /// its resolution. See design.md -> Decision 6.
     pub fn apply(&mut self, action: Action) {
-        if self.overlay.panel.is_some() {
+        match self.overlay.panel {
             // `help-overlay`: this branch takes precedence over the route
             // dispatch and the filter dispatch alike, and over every other
             // capability that owns an action's semantics. See
             // `apply_help_action` and design.md -> Decision 2 and Decision 5.
-            self.apply_help_action(action);
-        } else {
-            self.apply_route_action(action);
+            Some(Panel::Help) => self.apply_help_action(action),
+            // `settings-window`: added on exactly the help panel's terms — see
+            // `apply_settings_action` and design.md -> Decision 2.
+            Some(Panel::Settings) => self.apply_settings_action(action),
+            None => self.apply_route_action(action),
         }
         // `list-sections`' one blanket rule, run after every action rather than a named
         // subset: see design.md -> Decision 6. It never clears the flag. `help-overlay`
@@ -1003,6 +1027,16 @@ impl Dashboard {
                 self.overlay.panel = Some(Panel::Help);
                 self.overlay.scroll = 0;
             }
+            // `settings-window`: reached only while no panel is open — `apply` dispatches to
+            // `apply_settings_action` instead while the settings panel is open, and that
+            // branch closes it rather than reopening it, on exactly `ToggleHelp`'s terms. Open
+            // it and reset `overlay.scroll`, changing nothing else. Sending
+            // `launch::Request::Resolve` on this transition is `agent-client-choice`'s later
+            // group; this group leaves `agent_kind` at `Provenance::Pending` until it lands.
+            Action::ToggleSettings => {
+                self.overlay.panel = Some(Panel::Settings);
+                self.overlay.scroll = 0;
+            }
             // `text-selection`: a press or a drag over a non-header detail
             // content row. See `apply_select` for the press-count and
             // clamping rules (design.md -> Decision 2 and Decision 3).
@@ -1083,6 +1117,15 @@ impl Dashboard {
                 self.overlay.panel = None;
                 self.overlay.scroll = 0;
             }
+            // `settings-window`: the eighth answered action — swap rather than close or
+            // stack, on exactly the requirement's terms ("`?` and `,` swap panels rather
+            // than stacking them"). `overlay.scroll` resets because the two panels have
+            // unrelated row counts and a carried position would land the reader at an
+            // arbitrary row.
+            Action::ToggleSettings => {
+                self.overlay.panel = Some(Panel::Settings);
+                self.overlay.scroll = 0;
+            }
             Action::Next | Action::ScrollDown => {
                 self.overlay.scroll = self.overlay.scroll.saturating_add(1);
             }
@@ -1113,6 +1156,77 @@ impl Dashboard {
             | Action::Select(_)
             | Action::Ignore => {}
         }
+    }
+
+    /// `settings-window`'s addition: the settings panel's own dispatch layer, reached only
+    /// while `overlay.panel` is `Some(Panel::Settings)` — `apply` dispatches here instead of
+    /// `apply_help_action` on exactly that branch's terms (design.md -> Decision 2). Nine
+    /// actions act; the other seventeen — the closed remainder
+    /// `specs/settings-window/spec.md` names — change nothing at all.
+    ///
+    /// `OpenDetail` and `Back`'s edit semantics — "begin/commit the edit in progress" and
+    /// "cancel the edit in progress; else close the panel" — are `settings-window`'s later
+    /// task group 5 (`Overlay::edit` is never set to `Some` by any code this group adds, so
+    /// `Back` reduces to "close the panel" here, forward-compatible with the conditional
+    /// group 5 adds). `OpenDetail` is therefore still part of the closed remainder in this
+    /// group's own scope, and moves to the answered nine when group 5 lands.
+    ///
+    /// `Next`/`ScrollDown` and `Prev`/`ScrollUp` move `settings.cursor` through
+    /// `ui::layout::viewport` rather than scrolling `overlay.scroll`, which stays unread while
+    /// this panel is open — see `move_settings_cursor`.
+    fn apply_settings_action(&mut self, action: Action) {
+        match action {
+            Action::Quit => self.quit = true,
+            Action::ToggleSettings | Action::Back => {
+                self.overlay.panel = None;
+                self.overlay.scroll = 0;
+                self.overlay.edit = None;
+            }
+            // `settings-window`: swap rather than close or stack, symmetric with
+            // `apply_help_action`'s own `ToggleSettings` arm.
+            Action::ToggleHelp => {
+                self.overlay.panel = Some(Panel::Help);
+                self.overlay.scroll = 0;
+                self.overlay.edit = None;
+            }
+            Action::Next | Action::ScrollDown => self.move_settings_cursor(1),
+            Action::Prev | Action::ScrollUp => self.move_settings_cursor(-1),
+            Action::OpenDetail
+            | Action::SelectTab(_)
+            | Action::NextTab
+            | Action::PrevTab
+            | Action::FilterStart
+            | Action::FilterPush(_)
+            | Action::FilterPop
+            | Action::Refresh
+            | Action::LaunchApply
+            | Action::LaunchContinue
+            | Action::LaunchArchive
+            | Action::FocusAgent
+            | Action::ToggleSection
+            | Action::SelectNext
+            | Action::SelectPrev
+            | Action::Click(_)
+            | Action::Select(_)
+            | Action::Ignore => {}
+        }
+    }
+
+    /// Move `settings.cursor` by `step` (`1` or `-1`) over `settings.rows`, saturating at
+    /// both ends rather than wrapping or underflowing — `select_by`'s own saturating rule,
+    /// on `list-selection`'s terms. A row count of zero leaves the cursor at `0`.
+    fn move_settings_cursor(&mut self, step: isize) {
+        let len = self.settings.rows.len();
+        if len == 0 {
+            self.settings.cursor = 0;
+            return;
+        }
+        let last = len - 1;
+        self.settings.cursor = if step.is_negative() {
+            self.settings.cursor.saturating_sub(step.unsigned_abs())
+        } else {
+            self.settings.cursor.saturating_add(step as usize).min(last)
+        };
     }
 
     /// Move `selected` by `step` (`1` or `-1`), clamp it, and reset
@@ -1992,6 +2106,10 @@ pub fn action_for(event: &Event, filtering: bool) -> Action {
         (KeyCode::Char('?'), KeyModifiers::NONE) | (KeyCode::Char('?'), KeyModifiers::SHIFT) => {
             Action::ToggleHelp
         }
+        // `settings-window`: `,` carries no shifted-character ambiguity (unlike `?`), so this
+        // row matches only `NONE`. While filtering, `','` already falls through to the generic
+        // `Char(c)` arm above, which types it — no row is added there.
+        (KeyCode::Char(','), KeyModifiers::NONE) => Action::ToggleSettings,
         (KeyCode::Enter, KeyModifiers::NONE) => Action::OpenDetail,
         (KeyCode::Esc, KeyModifiers::NONE) => Action::Back,
         _ => Action::Ignore,
@@ -2036,6 +2154,10 @@ mod tests {
         agent_names: BTreeMap<String, String>,
     ) -> Dashboard {
         Dashboard {
+            settings: crate::settings::PanelState {
+                rows: Vec::new(),
+                cursor: 0,
+            },
             selection: None,
             repo: Some(std::path::PathBuf::from("/repo")),
             searched_from: std::path::PathBuf::from("/repo"),
@@ -2114,6 +2236,7 @@ mod tests {
             file_mode: _,
             overlay: _,
             selection: _,
+            settings: _,
         } = &d;
         assert_eq!(*repo, Some(std::path::PathBuf::from("/repo")));
         assert_eq!(searched_from, &std::path::PathBuf::from("/repo"));
@@ -2470,6 +2593,7 @@ mod tests {
             file_mode: _,
             overlay: _,
             selection: _,
+            settings: _,
         } = &d;
         assert_eq!(launch.pending, None);
         assert!(launch.problems.is_empty());
@@ -4794,7 +4918,7 @@ mod tests {
         use crate::changes::fixture;
         use crate::testutil::RecordingReader;
         use crate::ui::app::{
-            Action, ArtifactSection, Dashboard, Detail, Filter, Granularity, Panel, Route,
+            Action, ArtifactSection, Dashboard, Detail, Filter, Granularity, Overlay, Panel, Route,
             SectionKey, Sections, SelectPhase, Selection, Target, action_for,
         };
 
@@ -4819,6 +4943,10 @@ mod tests {
 
         fn dashboard_at(route: Route) -> Dashboard {
             Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
@@ -4862,6 +4990,10 @@ mod tests {
         /// `view.rs`'s tests reuse verbatim.
         fn five_change_dashboard() -> Dashboard {
             Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
@@ -4924,6 +5056,10 @@ mod tests {
             let pairs: Vec<(&str, &[&str])> = (0..count).map(|_| ("a", &[][..])).collect();
             let change = fixture::with_artifacts(fixture::active("detail-view", 4, 9), &pairs);
             Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
@@ -5331,6 +5467,7 @@ mod tests {
                     | Action::ScrollUp
                     | Action::Click(_)
                     | Action::Select(_)
+                    | Action::ToggleSettings
                     | Action::Ignore => {}
                 }
             }
@@ -5375,12 +5512,17 @@ mod tests {
                 // twenty-five. `apply_select` only ever writes `self.selection`, never
                 // `self.changes`, so this leaves `changes` untouched here too.
                 Action::Select(SelectPhase::Begin { line: 0, column: 0 }),
+                // `settings-window`'s addition, bumping the count from twenty-five to
+                // twenty-six. `apply_settings_action`/`apply_help_action` only ever write
+                // `self.overlay`/`self.settings`, never `self.changes`, so this leaves
+                // `changes` untouched here too.
+                Action::ToggleSettings,
                 Action::Ignore,
             ];
             assert_eq!(
                 variants.len(),
-                25,
-                "the twenty-five variants this crate specifies"
+                26,
+                "the twenty-six variants this crate specifies"
             );
             for v in &variants {
                 assert_known_variant(v);
@@ -5394,6 +5536,10 @@ mod tests {
                 0,
             );
             let dashboard = Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 detail: Detail {
                     sections: vec![ArtifactSection {
@@ -5758,9 +5904,9 @@ mod tests {
         }
 
         /// `dashboard-loop` -> "The overlay layer suppresses every action but
-        /// seven".
+        /// eight".
         #[test]
-        fn the_overlay_layer_suppresses_every_action_but_seven() {
+        fn the_overlay_layer_suppresses_every_action_but_eight() {
             let mut open = super::dashboard_for_attribution(
                 six_active_changes(),
                 Vec::new(),
@@ -5814,10 +5960,10 @@ mod tests {
             assert_ne!(closed, before_closed);
         }
 
-        /// `dashboard-loop` -> "The overlay's seven live actions act and
+        /// `dashboard-loop` -> "The overlay's eight live actions act and
         /// nothing else moves".
         #[test]
-        fn the_overlays_seven_live_actions_act_and_nothing_else_moves() {
+        fn the_overlays_eight_live_actions_act_and_nothing_else_moves() {
             let mut d = dashboard_at(Route::Detail);
             d.detail.scroll = 4;
             d.selected = 1;
@@ -5836,6 +5982,14 @@ mod tests {
 
             assert_eq!(d.detail.scroll, 4);
             assert_eq!(d.selected, 1);
+
+            // An eighth, `ToggleSettings`, applied to the same dashboard (before `Back`
+            // closes it) — `settings-window`'s addition to this layer, and the reason
+            // the count is eight rather than seven.
+            let mut swapped = d.clone();
+            swapped.apply(Action::ToggleSettings);
+            assert_eq!(swapped.overlay.panel, Some(Panel::Settings));
+            assert_eq!(swapped.overlay.scroll, 0);
 
             d.apply(Action::Back);
             assert!(d.overlay.panel.is_none());
@@ -5905,10 +6059,12 @@ mod tests {
             assert_eq!(d.overlay, before.overlay);
         }
 
-        /// `help-overlay` -> "The overlay swallows the seventeen inert
-        /// actions".
+        /// `help-overlay` -> "The overlay swallows every inert action" — the
+        /// scenario's own title dropped its number when `settings-window` moved
+        /// `ToggleSettings` from the (would-be) inert set to the answered one,
+        /// leaving the inert eighteen unchanged member for member.
         #[test]
-        fn the_overlay_swallows_the_seventeen_inert_actions() {
+        fn the_overlay_swallows_every_inert_action() {
             let mut d = super::dashboard_for_attribution(
                 six_active_changes(),
                 Vec::new(),
@@ -5988,6 +6144,360 @@ mod tests {
             assert_eq!(d3.overlay.scroll, 0, "saturates rather than underflowing");
         }
 
+        // `settings-window`: three fixture rows — `openspec_bin`, `agent_kind`,
+        // `prompts` — for tests that need `Dashboard::settings.rows` populated
+        // without depending on `settings::settings`'s own precedence rules.
+        fn three_settings() -> Vec<crate::settings::Setting> {
+            ["openspec_bin", "agent_kind", "prompts"]
+                .iter()
+                .map(|key| crate::settings::Setting {
+                    key,
+                    value: format!("{key}-value"),
+                    provenance: crate::settings::Provenance::Default,
+                    editable: crate::settings::Editable::No {
+                        reason: crate::settings::Reason::SetOnce,
+                    },
+                })
+                .collect()
+        }
+
+        /// `settings-window` -> "`,` toggles the panel and its near misses do
+        /// not", `dashboard-loop` -> "`,` maps to `ToggleSettings` and moves no
+        /// existing key".
+        #[test]
+        fn comma_toggles_the_panel_and_its_near_misses_do_not() {
+            assert_eq!(
+                action_for(&press(KeyCode::Char(','), KeyModifiers::NONE), false),
+                Action::ToggleSettings
+            );
+            for modifiers in [KeyModifiers::SHIFT, KeyModifiers::CONTROL] {
+                assert_eq!(
+                    action_for(&press(KeyCode::Char(','), modifiers), false),
+                    Action::Ignore,
+                    "{modifiers:?} is a near miss"
+                );
+            }
+            assert_eq!(
+                action_for(&press(KeyCode::Char('<'), KeyModifiers::SHIFT), false),
+                Action::Ignore,
+                "`<` is not `,`"
+            );
+            let released = Event::Key(KeyEvent::new_with_kind(
+                KeyCode::Char(','),
+                KeyModifiers::NONE,
+                KeyEventKind::Release,
+            ));
+            let repeated = Event::Key(KeyEvent::new_with_kind(
+                KeyCode::Char(','),
+                KeyModifiers::NONE,
+                KeyEventKind::Repeat,
+            ));
+            assert_eq!(action_for(&released, false), Action::Ignore);
+            assert_eq!(action_for(&repeated, false), Action::Ignore);
+
+            assert_eq!(
+                action_for(&press(KeyCode::Char(','), KeyModifiers::NONE), true),
+                Action::FilterPush(','),
+                "filtering types the key rather than opening the panel"
+            );
+        }
+
+        /// `help-overlay` -> "`?` and `,` swap panels rather than stacking
+        /// them".
+        #[test]
+        fn question_mark_and_comma_swap_panels_rather_than_stacking_them() {
+            let mut d = dashboard_at(Route::Detail);
+            d.overlay.panel = Some(Panel::Help);
+            d.overlay.scroll = 6;
+
+            d.apply(Action::ToggleSettings);
+            assert_eq!(d.overlay.panel, Some(Panel::Settings));
+            assert_eq!(d.overlay.scroll, 0);
+
+            d.apply(Action::ToggleHelp);
+            assert_eq!(d.overlay.panel, Some(Panel::Help));
+            assert_eq!(d.overlay.scroll, 0);
+
+            d.apply(Action::ToggleHelp);
+            assert_eq!(d.overlay.panel, None);
+        }
+
+        /// `help-overlay` -> "`,` swaps to the settings panel from inside the
+        /// help".
+        #[test]
+        fn comma_swaps_to_the_settings_panel_from_inside_the_help() {
+            let mut d = dashboard_at(Route::Detail);
+            d.overlay.panel = Some(Panel::Help);
+            d.overlay.scroll = 9;
+            let before = d.clone();
+
+            d.apply(Action::ToggleSettings);
+            assert_eq!(d.overlay.panel, Some(Panel::Settings));
+            assert_eq!(d.overlay.scroll, 0);
+            assert_eq!(d.route, before.route);
+            assert_eq!(d.selected, before.selected);
+            assert_eq!(d.detail, before.detail);
+            assert_eq!(d.filter, before.filter);
+            assert_eq!(d.sections, before.sections);
+        }
+
+        /// `settings-window` -> "The panels swap rather than stacking".
+        #[test]
+        fn the_panels_swap_rather_than_stacking() {
+            let mut d = dashboard_at(Route::Detail);
+            d.overlay.panel = Some(Panel::Help);
+            d.overlay.scroll = 5;
+            let before = d.clone();
+
+            d.apply(Action::ToggleSettings);
+            assert_eq!(d.overlay.panel, Some(Panel::Settings));
+            assert_eq!(d.overlay.scroll, 0);
+
+            d.apply(Action::ToggleHelp);
+            assert_eq!(d.overlay.panel, Some(Panel::Help));
+            assert_eq!(d.overlay.scroll, 0);
+
+            d.apply(Action::ToggleSettings);
+            d.apply(Action::ToggleSettings);
+            assert_eq!(d.overlay.panel, None);
+
+            assert_eq!(d.route, Route::Detail);
+            assert_eq!(d.changes, before.changes);
+            assert_eq!(d.filter, before.filter);
+            assert_eq!(d.quit, before.quit);
+            assert_eq!(d.refresh, before.refresh);
+            assert_eq!(d.agents, before.agents);
+            assert_eq!(d.agent_names, before.agent_names);
+            assert_eq!(d.launch, before.launch);
+            assert_eq!(d.selected, before.selected);
+            assert_eq!(d.detail, before.detail);
+            assert_eq!(d.sections, before.sections);
+        }
+
+        /// `settings-window` -> "`Esc` closes the settings panel before any
+        /// other layer".
+        #[test]
+        fn esc_closes_the_settings_panel_before_any_other_layer() {
+            let mut d = dashboard_at(Route::Detail);
+            d.filter.active = true;
+            d.filter.query = "add".to_string();
+            d.overlay.panel = Some(Panel::Settings);
+
+            d.apply(Action::Back);
+            assert!(d.overlay.panel.is_none());
+            assert!(d.filter.active, "dismissing the panel is not a filter move");
+            assert_eq!(d.filter.query, "add");
+            assert!(!d.quit);
+
+            d.apply(Action::Back);
+            assert!(!d.filter.active);
+            assert_eq!(d.filter.query, "");
+            assert!(!d.quit);
+
+            d.apply(Action::Back);
+            assert_eq!(d.route, Route::List);
+            assert!(!d.quit);
+
+            let before = d.clone();
+            d.apply(Action::Back);
+            assert_eq!(d, before, "the fourth Back changes nothing");
+            assert!(!d.quit);
+        }
+
+        /// `settings-window` -> "The agent keys launch nothing from inside the
+        /// settings panel".
+        #[test]
+        fn the_agent_keys_launch_nothing_from_inside_the_settings_panel() {
+            let mut d = super::dashboard_for_attribution(
+                vec![fixture::active("add-auth", 1, 2)],
+                Vec::new(),
+                // `list-sections`: 1, not 0 — target 0 is the active header.
+                1,
+                Vec::new(),
+                std::collections::BTreeMap::new(),
+            );
+            d.overlay.panel = Some(Panel::Settings);
+            let before = d.clone();
+
+            for action in [
+                Action::LaunchApply,
+                Action::LaunchContinue,
+                Action::LaunchArchive,
+                Action::FocusAgent,
+                Action::Refresh,
+            ] {
+                d.apply(action);
+            }
+
+            assert_eq!(d.launch.pending, None);
+            assert_eq!(d.launch.problems, before.launch.problems);
+            if before.needs_archived_refresh() {
+                assert!(d.refresh.requested);
+            } else {
+                assert!(!d.refresh.requested);
+            }
+            assert_eq!(d.changes, before.changes);
+            assert_eq!(d.route, before.route);
+            assert_eq!(d.selected, before.selected);
+            assert_eq!(d.detail, before.detail);
+            assert_eq!(d.filter, before.filter);
+            assert_eq!(d.quit, before.quit);
+            assert_eq!(d.agents, before.agents);
+            assert_eq!(d.agent_names, before.agent_names);
+            assert_eq!(d.sections, before.sections);
+            assert_eq!(d.overlay, before.overlay);
+        }
+
+        /// `settings-window` -> "The settings panel swallows every inert
+        /// action".
+        #[test]
+        fn the_settings_panel_swallows_every_inert_action() {
+            let mut d = super::dashboard_for_attribution(
+                six_active_changes(),
+                Vec::new(),
+                2,
+                Vec::new(),
+                std::collections::BTreeMap::new(),
+            );
+            d.detail.tab = 1;
+            d.overlay.panel = Some(Panel::Settings);
+            d.settings.rows = three_settings();
+            let sections_before = d.sections.clone();
+
+            for action in [
+                Action::SelectTab(3),
+                Action::NextTab,
+                Action::PrevTab,
+                Action::FilterStart,
+                Action::FilterPush('a'),
+                Action::FilterPop,
+                Action::ToggleSection,
+                Action::SelectNext,
+                Action::SelectPrev,
+                Action::Select(SelectPhase::Begin { line: 0, column: 0 }),
+                Action::Click(Target::Change(0)),
+            ] {
+                d.apply(action);
+            }
+
+            assert_eq!(d.route, Route::List);
+            assert_eq!(d.selected, 2);
+            assert_eq!(d.detail.tab, 1);
+            assert_eq!(d.filter.query, "");
+            assert!(!d.filter.active);
+            assert_eq!(d.sections, sections_before);
+            assert_eq!(d.overlay.panel, Some(Panel::Settings));
+            assert_eq!(d.settings.cursor, 0, "the row cursor has not moved");
+        }
+
+        /// `settings-window` -> "Both quit keys still quit from inside the
+        /// settings panel".
+        #[test]
+        fn both_quit_keys_still_quit_from_inside_the_settings_panel() {
+            let mut d = dashboard_at(Route::List);
+            d.overlay.panel = Some(Panel::Settings);
+            d.apply(Action::Quit);
+            assert!(d.quit);
+
+            let mut d2 = dashboard_at(Route::List);
+            d2.overlay.panel = Some(Panel::Settings);
+            d2.filter.active = true;
+            d2.apply(Action::Quit);
+            assert!(d2.quit, "no combination of layers traps the reader");
+        }
+
+        /// `settings-window` -> "The cursor walks settings, not rendered rows,
+        /// and saturates".
+        #[test]
+        fn the_cursor_walks_settings_not_rendered_rows_and_saturates() {
+            let mut d = dashboard_at(Route::Detail);
+            d.detail.scroll = 4;
+            d.selected = 1;
+            d.overlay.panel = Some(Panel::Settings);
+            d.settings.rows = three_settings();
+            d.settings.cursor = 0;
+
+            d.apply(Action::Next);
+            assert_eq!(d.settings.cursor, 1);
+            d.apply(Action::Next);
+            assert_eq!(d.settings.cursor, 2);
+            d.apply(Action::Next);
+            assert_eq!(d.settings.cursor, 2, "saturates at the last setting");
+            d.apply(Action::Prev);
+            assert_eq!(d.settings.cursor, 1);
+
+            assert_eq!(d.detail.scroll, 4);
+            assert_eq!(d.selected, 1);
+
+            let mut zero = dashboard_at(Route::Detail);
+            zero.overlay.panel = Some(Panel::Settings);
+            zero.settings.rows = three_settings();
+            zero.apply(Action::Prev);
+            assert_eq!(
+                zero.settings.cursor, 0,
+                "saturates rather than underflowing"
+            );
+        }
+
+        /// `dashboard-loop` -> "Both panels open is unrepresentable".
+        #[test]
+        fn both_panels_open_is_unrepresentable() {
+            let mut d = dashboard_at(Route::List);
+            assert_eq!(d.overlay.panel, None);
+            d.overlay.panel = Some(Panel::Help);
+            assert_eq!(d.overlay.panel, Some(Panel::Help));
+            d.overlay.panel = Some(Panel::Settings);
+            assert_eq!(d.overlay.panel, Some(Panel::Settings));
+            // `Option<Panel>` has exactly these three values: there is no
+            // fourth to construct in which both panels are open.
+        }
+
+        /// `dashboard-loop` -> "`Dashboard` carries seventeen fields after the
+        /// overlay is generalised".
+        #[test]
+        fn dashboard_carries_seventeen_fields_after_the_overlay_is_generalised() {
+            let d = dashboard_at(Route::List);
+            let Dashboard {
+                repo: _,
+                searched_from: _,
+                changes: _,
+                route: _,
+                quit: _,
+                selected: _,
+                filter: _,
+                detail: _,
+                refresh: _,
+                agents: _,
+                agent_names: _,
+                launch: _,
+                sections: _,
+                file_mode: _,
+                overlay,
+                selection: _,
+                settings: _,
+            } = &d;
+
+            let Overlay {
+                panel,
+                scroll: _,
+                edit: _,
+            } = overlay;
+
+            // An exhaustive match with no wildcard arm: a third `Panel` variant
+            // added later fails to compile here rather than falling into a
+            // wrong branch.
+            fn assert_known_panel(p: &Panel) {
+                match p {
+                    Panel::Help | Panel::Settings => {}
+                }
+            }
+            if let Some(p) = panel {
+                assert_known_panel(p);
+            }
+            assert_known_panel(&Panel::Help);
+            assert_known_panel(&Panel::Settings);
+        }
+
         #[test]
         fn next_and_prev_clamp() {
             let mut d = five_change_dashboard();
@@ -6019,6 +6529,10 @@ mod tests {
             selected: usize,
         ) -> Dashboard {
             Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
@@ -6978,6 +7492,10 @@ mod tests {
         #[test]
         fn next_and_prev_scroll_at_the_detail_route() {
             let mut d = Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 detail: twenty_line_detail(),
                 repo: None,
@@ -7043,6 +7561,10 @@ mod tests {
         #[test]
         fn scroll_stops_at_the_top() {
             let mut d = Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 detail: twenty_line_detail(),
                 repo: None,
@@ -7120,6 +7642,10 @@ mod tests {
             );
 
             let mut d = Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 detail: twenty_line_detail(),
                 repo: None,
@@ -7171,6 +7697,10 @@ mod tests {
         #[test]
         fn every_route_move_resets_the_scroll() {
             let mut d = Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 detail: Detail {
                     sections: twenty_line_detail().sections,
@@ -7222,6 +7752,10 @@ mod tests {
             assert_eq!(d.detail.scroll, 0);
 
             let mut d2 = Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 detail: Detail {
                     sections: twenty_line_detail().sections,
@@ -7272,6 +7806,10 @@ mod tests {
             assert_eq!(d2.detail.scroll, 0);
 
             let mut d3 = Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 detail: Detail {
                     sections: twenty_line_detail().sections,
@@ -7356,6 +7894,10 @@ mod tests {
         /// `detail.sections` or `detail.scroll`.
         fn dashboard_for_enter(route: Route, filter: Filter, scroll: usize) -> Dashboard {
             Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 detail: Detail {
                     sections: twenty_line_detail().sections,
@@ -7633,6 +8175,10 @@ mod tests {
             // 14 rows at 120x20 and at 60x20, 34 rows at 120x40, where the
             // twenty-line source fits entirely and the clamp is 0.
             let mut d = Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 detail: Detail {
                     sections: twenty_line_detail().sections,
@@ -7682,6 +8228,10 @@ mod tests {
             assert_eq!(d.detail.scroll, 6);
 
             let mut d2 = Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 detail: Detail {
                     sections: twenty_line_detail().sections,
@@ -7731,6 +8281,10 @@ mod tests {
             assert_eq!(d2.detail.scroll, 6);
 
             let mut d3 = Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 detail: Detail {
                     sections: twenty_line_detail().sections,
@@ -7798,6 +8352,10 @@ mod tests {
 
             fn dashboard_for(change: crate::changes::Change, source: String) -> Dashboard {
                 Dashboard {
+                    settings: crate::settings::PanelState {
+                        rows: Vec::new(),
+                        cursor: 0,
+                    },
                     selection: None,
                     detail: Detail {
                         sections: vec![ArtifactSection {
@@ -7878,6 +8436,10 @@ mod tests {
         #[test]
         fn normalise_scroll_is_inert_when_the_detail_region_is_not_drawn() {
             let mut d = Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 detail: Detail {
                     sections: twenty_line_detail().sections,
@@ -7953,6 +8515,10 @@ mod tests {
         #[test]
         fn normalise_scroll_agrees_with_render_about_the_wide_layouts_content_width() {
             let mut d = Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 detail: Detail {
                     sections: vec![ArtifactSection {
@@ -8086,6 +8652,10 @@ mod tests {
             let change_a = fixture::active("alpha", 1, 4);
             let change_b = fixture::active("beta", 2, 4);
             let mut dashboard = Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
@@ -8176,6 +8746,10 @@ mod tests {
             query: &str,
         ) -> Dashboard {
             Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
@@ -8366,7 +8940,7 @@ mod tests {
         }
 
         #[test]
-        fn dashboard_destructures_into_exactly_sixteen_fields() {
+        fn dashboard_destructures_into_exactly_seventeen_fields() {
             let d = dashboard_at(Route::List);
             let Dashboard {
                 repo,
@@ -8385,6 +8959,7 @@ mod tests {
                 file_mode: _,
                 overlay,
                 selection,
+                settings,
             } = &d;
             assert_eq!(*repo, None);
             assert_eq!(
@@ -8412,6 +8987,8 @@ mod tests {
             assert!(overlay.panel.is_none());
             assert_eq!(overlay.scroll, 0);
             assert_eq!(*selection, None);
+            assert!(settings.rows.is_empty());
+            assert_eq!(settings.cursor, 0);
         }
 
         #[test]
@@ -8720,6 +9297,10 @@ mod tests {
         #[test]
         fn moving_the_selection_resets_the_tab_and_the_scroll_and_a_clamped_move_does_not() {
             let mut d = Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
@@ -8779,6 +9360,10 @@ mod tests {
             assert_eq!(d.detail.scroll, 0);
 
             let mut d2 = Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
@@ -8857,6 +9442,10 @@ mod tests {
         fn dashboard_with_artifacts_named(name: &str, artifacts: &[(&str, &[&str])]) -> Dashboard {
             let change = fixture::with_artifacts(fixture::active(name, 4, 9), artifacts);
             Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
@@ -9204,6 +9793,10 @@ mod tests {
                 &[("proposal", &["/repo/b-p.md"])],
             );
             let mut d = Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
@@ -9288,6 +9881,10 @@ mod tests {
                 )],
             );
             let mut d = Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
@@ -9486,6 +10083,10 @@ mod tests {
                 &[("b0", &["/repo/two/b0.md"]), ("b1", &["/repo/two/b1.md"])],
             );
             let mut d = Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
@@ -9578,6 +10179,10 @@ mod tests {
 
             // The same holds for a Dashboard built over `changes::empty_set()`.
             let mut d2 = Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
