@@ -90,6 +90,7 @@ binding, not its only one — `NOBLOCK` leg 2 covers it identically.
 | `tasks` | Parse markdown checkboxes into groups, items, and counts |
 | `specs` | Recognise a delta spec's operation headings and a scenario clause's keyword |
 | `integration` | Parse `herdr integration status`' plain text and resolve the agent kind by the five-step precedence |
+| `settings` | Each setting's effective value and the level that produced it — `openspec_bin`, `agent_kind`, `prompts`, in that fixed order — and whether the panel may edit it |
 | `agents` | Poll `herdr agent list`, parse its envelope into agent values, and attribute live Herdr agents to changes |
 | `launch` | Split a pane, resolve the agent kind once per session, start an agent, send the CLI-driven prompt |
 | `watch` | The recursive `notify` watch, the debounce, and classifying a touched path to a per-change `Selection` |
@@ -1228,6 +1229,14 @@ is tested against scratch `#!/bin/sh` programs rather than the real `openspec`,
   production slice's freedom from I/O is a `tests/doc_contract.rs` claim on
   exactly `specs`' terms, because outside `src/ui/` no `make gates` script
   sweeps this file either
+- `settings::settings` — `openspec_bin`, `agent_kind`, and `prompts` to their effective
+  value, the precedence level that produced it (`Provenance`, derived from
+  `integration::Source` by a total `From` with no wildcard arm, carrying
+  `resolve::BinSource` whole), and whether the panel may edit it (`Editable`, carrying a
+  `Reason` when it may not). Pure over owned values with no filesystem edge at all; the
+  production slice's freedom from I/O, from the clock, and from `ratatui` is a
+  `tests/doc_contract.rs` claim on exactly `specs`' and `integration`'s terms, because
+  outside `src/ui/` no `make gates` script sweeps this file either
 - `agents::attribute` — live agents, the repository root, the change names, and the
   plugin-local mapping to per-change badges and one unattributed count, covering all
   three tiers including the deliberate non-attribution case
