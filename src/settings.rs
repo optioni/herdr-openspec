@@ -58,9 +58,13 @@ pub enum Provenance {
 /// sixth precedence level added to `integration::Source` later fails to
 /// compile here rather than falling silently into a wrong label.
 impl From<integration::Source> for Provenance {
-    fn from(_source: integration::Source) -> Self {
-        // RED: deliberately wrong — task 2.2 fills this in.
-        Provenance::Default
+    fn from(source: integration::Source) -> Self {
+        match source {
+            integration::Source::Configured => Provenance::Configured,
+            integration::Source::Recorded => Provenance::Recorded,
+            integration::Source::SoleIntegration => Provenance::SoleIntegration,
+            integration::Source::LastResort => Provenance::LastResort,
+        }
     }
 }
 
@@ -69,8 +73,22 @@ impl Provenance {
     /// rather than the enum's. Total: never panics, and allocates no more
     /// than the returned `String`.
     pub fn label(self) -> String {
-        // RED: deliberately wrong — task 2.2 fills this in.
-        String::new()
+        match self {
+            Provenance::Configured => "config.toml".to_string(),
+            Provenance::Recorded => "settings.toml".to_string(),
+            Provenance::Probe(source) => match source {
+                resolve::BinSource::Configured => "config.toml".to_string(),
+                resolve::BinSource::Path => "PATH".to_string(),
+                resolve::BinSource::Nvm => "nvm".to_string(),
+                resolve::BinSource::NpmPrefix => "npm prefix -g".to_string(),
+            },
+            Provenance::SoleIntegration => "the sole installed integration".to_string(),
+            Provenance::LastResort => "the last resort".to_string(),
+            Provenance::Default => "the default".to_string(),
+            Provenance::Unresolved => "not found".to_string(),
+            Provenance::Pending => "resolving".to_string(),
+            Provenance::Ambiguous => "two or more installed, none chosen".to_string(),
+        }
     }
 }
 
@@ -128,12 +146,15 @@ pub struct Setting {
 ///
 /// Performs no I/O of any kind and never panics.
 pub fn settings(
-    _config: &config::Config,
-    _binary: &resolve::BinResolution,
-    _kind: Option<&KindResolution>,
+    config: &config::Config,
+    binary: &resolve::BinResolution,
+    kind: Option<&KindResolution>,
 ) -> Vec<Setting> {
-    // RED: deliberately wrong — task 2.2 fills this in.
-    Vec::new()
+    vec![
+        openspec_bin_setting(binary),
+        agent_kind_setting(kind),
+        prompts_setting(config),
+    ]
 }
 
 /// `openspec_bin`: always read-only. When `binary.found` names the step that
@@ -285,10 +306,12 @@ mod tests {
         assert_eq!(empty_keys, vec!["openspec_bin", "agent_kind", "prompts"]);
         assert!(empty.iter().all(|s| s.key != "archived_count"));
 
-        let mut populated_config = config::Config::default();
-        populated_config.openspec_bin = Some(PathBuf::from("/usr/bin/openspec"));
-        populated_config.agent_kind = Some("codex".to_string());
-        populated_config.archived_count = 42;
+        let mut populated_config = config::Config {
+            openspec_bin: Some(PathBuf::from("/usr/bin/openspec")),
+            agent_kind: Some("codex".to_string()),
+            archived_count: 42,
+            ..config::Config::default()
+        };
         let mut per_kind = BTreeMap::new();
         per_kind.insert("apply".to_string(), "do it".to_string());
         populated_config
@@ -392,7 +415,10 @@ mod tests {
             .map(|source| Provenance::Probe(*source).label())
             .collect();
         for label in &labels {
-            assert!(!label.is_empty(), "every probe-step label must be non-empty");
+            assert!(
+                !label.is_empty(),
+                "every probe-step label must be non-empty"
+            );
         }
         let unique: std::collections::BTreeSet<_> = labels.iter().cloned().collect();
         assert_eq!(
@@ -479,7 +505,10 @@ mod tests {
             .insert("claude".to_string(), per_kind);
 
         let cases = [
-            (found_binary(resolve::BinSource::Configured), Reason::Configured),
+            (
+                found_binary(resolve::BinSource::Configured),
+                Reason::Configured,
+            ),
             (found_binary(resolve::BinSource::Path), Reason::SetOnce),
             (empty_binary(), Reason::SetOnce),
         ];
@@ -539,8 +568,10 @@ mod tests {
     /// nothing".
     #[test]
     fn a_pending_kind_renders_as_resolving_and_edits_nothing() {
-        let mut config = config::Config::default();
-        config.openspec_bin = Some(PathBuf::from("/usr/bin/openspec"));
+        let config = config::Config {
+            openspec_bin: Some(PathBuf::from("/usr/bin/openspec")),
+            ..config::Config::default()
+        };
         let binary = found_binary(resolve::BinSource::Path);
 
         let rows = settings(&config, &binary, None);
@@ -604,7 +635,9 @@ mod tests {
                 assert_eq!(shortlist, &vec!["claude".to_string(), "codex".to_string()])
             }
             Editable::No { .. } => {
-                panic!("this is the one state where nothing decides the value and it must still be editable")
+                panic!(
+                    "this is the one state where nothing decides the value and it must still be editable"
+                )
             }
         }
     }
