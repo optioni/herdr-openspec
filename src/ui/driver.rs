@@ -9,9 +9,7 @@ use ratatui::backend::Backend;
 use ratatui::crossterm::event::{Event, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 
-use crate::ui::app::{
-    Action, ArtifactReader, ClipboardWriter, Dashboard, SelectPhase, Target, action_for,
-};
+use crate::ui::app::{Action, Dashboard, KindRecorder, SelectPhase, Target, action_for};
 use crate::ui::event::{EventError, EventSource};
 use crate::ui::layout::Zone;
 use crate::ui::list::RowKind;
@@ -105,15 +103,28 @@ pub enum LoopError {
 /// (design.md -> Decision 11) — `run_loop` is the one place that both applies a mouse event
 /// and holds a `ClipboardWriter`, so it is also the one place that can tell a completing
 /// press or drag apart from an ordinary one. See `maybe_copy_selection`.
+///
+/// `settings-window`'s addition: `record_kind` is threaded in on the same terms, one field
+/// further on `seams` — `run_loop` is also the one place that both applies a keystroke and
+/// holds a `KindRecorder`, so it is the one place that can tell a settings commit apart from
+/// every other kind of action. See `maybe_record_kind_commit`, called every iteration rather
+/// than only once the loop returns: a write held until `run_loop` exits could never be seen
+/// by a launch keystroke driven inside the very same run, and design.md -> Persistence names
+/// this loop's own commit, not `run_wired`'s return, as the point the cache-invalidating
+/// launcher hook (a later change) hangs off. `read`, `write`, and `record_kind` arrive
+/// bundled as `Seams` rather than three further trailing parameters — see that type's own
+/// doc comment for why.
 pub fn run_loop<B: Backend, E: EventSource>(
     terminal: &mut Terminal<B>,
     dashboard: &mut Dashboard,
     events: &mut E,
     live: &mut Live<'_>,
-    read: ArtifactReader<'_>,
-    write: ClipboardWriter<'_>,
+    seams: crate::ui::app::Seams<'_>,
     tick: Duration,
 ) -> Result<LoopSummary, LoopError> {
+    let read = seams.read;
+    let write = seams.write;
+    let record_kind = seams.record_kind;
     let mut frames = 0usize;
     let mut polls = 0usize;
     // The area of the frame most recently drawn — the geometry a mouse event is
@@ -156,6 +167,10 @@ pub fn run_loop<B: Backend, E: EventSource>(
             // is read here, before the match below, on every event rather than only mouse
             // ones (cheap: `Option<Granularity>` is `Copy`).
             let before_granularity = dashboard.selection.as_ref().map(|s| s.granularity);
+            // `settings-window`: read before `apply` runs, on `before_granularity`'s own
+            // terms — cheap (`Option<String>` clones a short row value), and the one input
+            // `maybe_record_kind_commit` needs that `apply` may have just overwritten.
+            let before_kind = dashboard.agent_kind_value();
             // One action per event, and the quit check is unchanged: a mouse
             // event can neither apply two actions nor bypass it.
             let mouse_kind = match &event {
@@ -209,6 +224,7 @@ pub fn run_loop<B: Backend, E: EventSource>(
                 _ => action_for(&event, dashboard.filter.active),
             };
             dashboard.apply(action);
+            maybe_record_kind_commit(dashboard, before_kind, record_kind);
             if let Some(kind) = mouse_kind {
                 maybe_copy_selection(dashboard, kind, before_granularity, write);
             }
@@ -218,6 +234,37 @@ pub fn run_loop<B: Backend, E: EventSource>(
         }
     }
     Ok(LoopSummary { frames, polls })
+}
+
+/// `settings-window`'s addition: call `record_kind` exactly when the event `apply` just
+/// processed committed an edit of the `agent_kind` setting — compared against `before`, the
+/// row's own value taken immediately before this event was applied, so a commit is detected
+/// per event rather than once per session. This is the repair for the defect the change
+/// originally shipped with: comparing the row's value only across the whole of `run_loop`
+/// (before the loop starts against after it returns) cannot write until the loop has already
+/// exited, which nothing running inside the loop — including a launch keystroke read later in
+/// the very same drive — can ever observe, and a killed pane never reaches it at all.
+/// `Dashboard::apply` is the only place that ever changes the `agent_kind` row's value
+/// (`apply_settings_open_detail`'s commit branch), so `before != after` here means exactly a
+/// commit, never a coincidental external change.
+///
+/// A failed write replaces `dashboard.launch.problems` wholesale — the same `!`-row channel a
+/// failed clipboard write already uses — rather than panicking or growing without bound.
+fn maybe_record_kind_commit(
+    dashboard: &mut Dashboard,
+    before: Option<String>,
+    record_kind: KindRecorder<'_>,
+) {
+    let after = dashboard.agent_kind_value();
+    if after == before {
+        return;
+    }
+    let Some(kind) = after else {
+        return;
+    };
+    if let Err(e) = record_kind(&kind) {
+        dashboard.launch.problems = vec![e];
+    }
 }
 
 /// `text-selection`: copy the selection's text through `write` when, and only when, `kind`
@@ -874,8 +921,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         );
         assert!(matches!(result, Err(LoopError::Events(_))));
@@ -913,8 +963,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             tick,
         )
         .expect("loop ends");
@@ -956,8 +1009,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -1004,8 +1060,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -1050,8 +1109,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -1090,8 +1152,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -1219,8 +1284,11 @@ mod tests {
                 &mut dashboard,
                 &mut events,
                 &mut live,
-                &read,
-                &|_: &str| Ok(()),
+                crate::ui::app::Seams {
+                    read: &read,
+                    write: &|_: &str| Ok(()),
+                    record_kind: &|_: &str| Ok(()),
+                },
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -1401,8 +1469,11 @@ mod tests {
                 &mut dashboard,
                 &mut events,
                 &mut live,
-                &read,
-                &|_: &str| Ok(()),
+                crate::ui::app::Seams {
+                    read: &read,
+                    write: &|_: &str| Ok(()),
+                    record_kind: &|_: &str| Ok(()),
+                },
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -1481,8 +1552,11 @@ mod tests {
                 &mut dashboard,
                 &mut events,
                 &mut live,
-                &read,
-                &|_: &str| Ok(()),
+                crate::ui::app::Seams {
+                    read: &read,
+                    write: &|_: &str| Ok(()),
+                    record_kind: &|_: &str| Ok(()),
+                },
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -1662,8 +1736,11 @@ mod tests {
             dashboard,
             &mut events,
             &mut live,
-            read,
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read,
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("stage ends");
@@ -1701,8 +1778,11 @@ mod tests {
                 &mut dashboard,
                 &mut events,
                 &mut live,
-                &read,
-                &|_: &str| Ok(()),
+                crate::ui::app::Seams {
+                    read: &read,
+                    write: &|_: &str| Ok(()),
+                    record_kind: &|_: &str| Ok(()),
+                },
                 Duration::from_millis(1),
             )
             .expect("first stage ends");
@@ -1735,8 +1815,11 @@ mod tests {
                 &mut dashboard,
                 &mut events_select,
                 &mut live,
-                &read,
-                &|_: &str| Ok(()),
+                crate::ui::app::Seams {
+                    read: &read,
+                    write: &|_: &str| Ok(()),
+                    record_kind: &|_: &str| Ok(()),
+                },
                 Duration::from_millis(1),
             )
             .expect("tab-move stage ends");
@@ -1768,8 +1851,11 @@ mod tests {
                 &mut dashboard,
                 &mut events2,
                 &mut live,
-                &read,
-                &|_: &str| Ok(()),
+                crate::ui::app::Seams {
+                    read: &read,
+                    write: &|_: &str| Ok(()),
+                    record_kind: &|_: &str| Ok(()),
+                },
                 Duration::from_millis(1),
             )
             .expect("second stage ends");
@@ -2051,8 +2137,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -2127,8 +2216,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         );
         match result {
@@ -2232,8 +2324,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &read,
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &read,
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -2277,8 +2372,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &read,
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &read,
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         );
         assert!(matches!(result, Err(LoopError::Draw(_))));
@@ -2315,8 +2413,11 @@ mod tests {
                 &mut dashboard,
                 &mut events,
                 &mut live,
-                &|_: &std::path::Path| Ok(String::new()),
-                &|_: &str| Ok(()),
+                crate::ui::app::Seams {
+                    read: &|_: &std::path::Path| Ok(String::new()),
+                    write: &|_: &str| Ok(()),
+                    record_kind: &|_: &str| Ok(()),
+                },
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -2372,8 +2473,11 @@ mod tests {
                 &mut dashboard,
                 &mut events,
                 &mut live,
-                &|_: &std::path::Path| Ok(String::new()),
-                &|_: &str| Ok(()),
+                crate::ui::app::Seams {
+                    read: &|_: &std::path::Path| Ok(String::new()),
+                    write: &|_: &str| Ok(()),
+                    record_kind: &|_: &str| Ok(()),
+                },
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -2437,8 +2541,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -2506,8 +2613,11 @@ mod tests {
                 &mut dashboard,
                 &mut events,
                 &mut live,
-                &|_: &std::path::Path| Ok(String::new()),
-                &|_: &str| Ok(()),
+                crate::ui::app::Seams {
+                    read: &|_: &std::path::Path| Ok(String::new()),
+                    write: &|_: &str| Ok(()),
+                    record_kind: &|_: &str| Ok(()),
+                },
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -2557,8 +2667,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -2607,8 +2720,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(250),
         )
         .expect("loop ends");
@@ -2642,8 +2758,11 @@ mod tests {
             &mut dashboard2,
             &mut events2,
             &mut live2,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(250),
         )
         .expect("loop ends");
@@ -2674,8 +2793,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(250),
         )
         .expect("loop ends");
@@ -2719,8 +2841,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -2765,8 +2890,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -2832,8 +2960,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -2877,8 +3008,11 @@ mod tests {
             &mut closed,
             &mut events2,
             &mut live2,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -2926,8 +3060,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(250),
         )
         .expect("loop ends");
@@ -2996,8 +3133,11 @@ mod tests {
                 &mut dashboard,
                 &mut events,
                 &mut live,
-                &|_: &std::path::Path| Ok(String::new()),
-                &|_: &str| Ok(()),
+                crate::ui::app::Seams {
+                    read: &|_: &std::path::Path| Ok(String::new()),
+                    write: &|_: &str| Ok(()),
+                    record_kind: &|_: &str| Ok(()),
+                },
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -3041,8 +3181,11 @@ mod tests {
                     &mut dashboard2,
                     &mut events2,
                     &mut live2,
-                    &|_: &std::path::Path| Ok(String::new()),
-                    &|_: &str| Ok(()),
+                    crate::ui::app::Seams {
+                        read: &|_: &std::path::Path| Ok(String::new()),
+                        write: &|_: &str| Ok(()),
+                        record_kind: &|_: &str| Ok(()),
+                    },
                     Duration::from_millis(1),
                 )
                 .expect("loop ends");
@@ -3096,8 +3239,11 @@ mod tests {
                 &mut dashboard,
                 &mut events,
                 &mut live,
-                &|_: &std::path::Path| Ok(String::new()),
-                &|_: &str| Ok(()),
+                crate::ui::app::Seams {
+                    read: &|_: &std::path::Path| Ok(String::new()),
+                    write: &|_: &str| Ok(()),
+                    record_kind: &|_: &str| Ok(()),
+                },
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -3172,8 +3318,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -3240,8 +3389,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -3307,8 +3459,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -3359,8 +3514,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -3413,8 +3571,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -3491,8 +3652,11 @@ mod tests {
                 &mut dashboard,
                 &mut events,
                 &mut live,
-                &|_: &std::path::Path| Ok(String::new()),
-                &|_: &str| Ok(()),
+                crate::ui::app::Seams {
+                    read: &|_: &std::path::Path| Ok(String::new()),
+                    write: &|_: &str| Ok(()),
+                    record_kind: &|_: &str| Ok(()),
+                },
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -3546,8 +3710,11 @@ mod tests {
             &mut first_dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -3582,8 +3749,11 @@ mod tests {
             &mut dashboard2,
             &mut events2,
             &mut live2,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -3623,8 +3793,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -3681,8 +3854,11 @@ mod tests {
             &mut dashboard,
             &mut events1,
             &mut live1,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("stage 1 ends");
@@ -3710,8 +3886,11 @@ mod tests {
             &mut dashboard,
             &mut events2,
             &mut live2,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("stage 2 ends");
@@ -3749,8 +3928,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -3792,8 +3974,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -3868,8 +4053,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -3915,8 +4103,11 @@ mod tests {
                 &mut dashboard,
                 &mut events,
                 &mut live,
-                &|_: &std::path::Path| Ok(String::new()),
-                &|_: &str| Ok(()),
+                crate::ui::app::Seams {
+                    read: &|_: &std::path::Path| Ok(String::new()),
+                    write: &|_: &str| Ok(()),
+                    record_kind: &|_: &str| Ok(()),
+                },
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -3988,8 +4179,11 @@ mod tests {
                 &mut dashboard,
                 &mut events,
                 &mut live,
-                &|_: &std::path::Path| Ok(String::new()),
-                &|_: &str| Ok(()),
+                crate::ui::app::Seams {
+                    read: &|_: &std::path::Path| Ok(String::new()),
+                    write: &|_: &str| Ok(()),
+                    record_kind: &|_: &str| Ok(()),
+                },
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -4063,8 +4257,11 @@ mod tests {
                 &mut dashboard,
                 &mut events,
                 &mut live,
-                &|_: &std::path::Path| Ok(String::new()),
-                &|_: &str| Ok(()),
+                crate::ui::app::Seams {
+                    read: &|_: &std::path::Path| Ok(String::new()),
+                    write: &|_: &str| Ok(()),
+                    record_kind: &|_: &str| Ok(()),
+                },
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -4120,8 +4317,11 @@ mod tests {
                 &mut dashboard,
                 &mut events,
                 &mut live,
-                &|_: &std::path::Path| Ok(String::new()),
-                &|_: &str| Ok(()),
+                crate::ui::app::Seams {
+                    read: &|_: &std::path::Path| Ok(String::new()),
+                    write: &|_: &str| Ok(()),
+                    record_kind: &|_: &str| Ok(()),
+                },
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -4187,8 +4387,11 @@ mod tests {
             &mut dashboard,
             &mut events1,
             &mut live1,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("stage 1 ends");
@@ -4218,8 +4421,11 @@ mod tests {
             &mut dashboard,
             &mut events2,
             &mut live2,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("stage 2 ends");
@@ -4266,8 +4472,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -4309,8 +4518,11 @@ mod tests {
                 &mut dashboard,
                 &mut events,
                 &mut live,
-                &read,
-                &|_: &str| Ok(()),
+                crate::ui::app::Seams {
+                    read: &read,
+                    write: &|_: &str| Ok(()),
+                    record_kind: &|_: &str| Ok(()),
+                },
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -4419,8 +4631,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &read,
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &read,
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -6046,8 +6261,11 @@ mod tests {
             dashboard,
             &mut events,
             &mut live,
-            read,
-            write,
+            crate::ui::app::Seams {
+                read,
+                write,
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -6782,8 +7000,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends")
@@ -6822,8 +7043,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -6979,8 +7203,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("the loop completes without panicking");
@@ -7045,8 +7272,11 @@ mod tests {
                 &mut dashboard,
                 &mut events,
                 &mut live,
-                &|_: &std::path::Path| Ok(source.clone()),
-                &|_: &str| Ok(()),
+                crate::ui::app::Seams {
+                    read: &|_: &std::path::Path| Ok(source.clone()),
+                    write: &|_: &str| Ok(()),
+                    record_kind: &|_: &str| Ok(()),
+                },
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -7114,8 +7344,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &|_: &std::path::Path| Ok(String::new()),
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -7313,8 +7546,11 @@ mod tests {
             &mut dashboard,
             &mut events,
             &mut live,
-            &read,
-            &|_: &str| Ok(()),
+            crate::ui::app::Seams {
+                read: &read,
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
             Duration::from_millis(1),
         )
         .expect("loop ends");

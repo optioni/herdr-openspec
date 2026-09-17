@@ -26,6 +26,31 @@ pub type ArtifactReader<'a> = &'a dyn Fn(&std::path::Path) -> Result<String, Str
 /// on the completing phase (`text-selection`'s design.md -> Decision 12).
 pub type ClipboardWriter<'a> = &'a dyn Fn(&str) -> Result<(), String>;
 
+/// `settings-window`'s addition, on exactly `ClipboardWriter`'s terms: the settings panel's
+/// commit write, injected into `run_loop` rather than named directly — this file and
+/// `src/ui/driver.rs` are both swept for a filesystem API and neither may name one. The
+/// crate's one production binding, built in `src/ui/mod.rs`'s composition root, closes over
+/// the resolved state directory and maps the underlying `io::Error` down to its `Display`
+/// text, on exactly `ClipboardWriter`'s own mapping. `Ok` records nothing further; `Err`
+/// carries the operating system's own reason, which `run_loop` turns into a problem row on
+/// the same `!`-row channel a failed clipboard write already uses.
+pub type KindRecorder<'a> = &'a dyn Fn(&str) -> Result<(), String>;
+
+/// `settings-window`'s addition: `run_loop`'s three synchronous, injected seams to the
+/// outside world — bundled for the same reason [`crate::ui::driver::Live`] bundles the loop's
+/// three background collaborators (its own doc comment states the rule this follows):
+/// `record_kind` joining `read` and `write` as a fourth trailing parameter took `run_loop` to
+/// eight arguments, which is measured, on this crate and toolchain, to be exactly where
+/// clippy's `too_many_arguments` fires — cohesion is the real reason for the struct on both
+/// sides of that threshold, on exactly `Startup`'s own precedent (`src/ui/mod.rs`). Every
+/// field keeps its own type's name and its own doc comment; this struct adds no behaviour of
+/// its own.
+pub struct Seams<'a> {
+    pub read: ArtifactReader<'a>,
+    pub write: ClipboardWriter<'a>,
+    pub record_kind: KindRecorder<'a>,
+}
+
 // `Route` is pulled forward from this group (3) into group 2's commit: `ui::layout`'s
 // `split_body` needs it for the narrow-mode single-region case, and layout.rs is built
 // before this file's `Dashboard`/`Action`/`action_for` content. Recorded as a deliberate,
@@ -1156,6 +1181,21 @@ impl Dashboard {
             | Action::Select(_)
             | Action::Ignore => {}
         }
+    }
+
+    /// `settings-window`'s addition: the `agent_kind` row's current committed value, read out
+    /// of `dashboard.settings.rows` rather than re-derived. `run_loop` (`src/ui/driver.rs`)
+    /// calls this immediately before and after every `apply`, so a change between the two
+    /// calls means exactly a commit — `apply_settings_open_detail`'s commit branch is the only
+    /// place in the crate that ever changes a row's `value` after `load` constructs it — never
+    /// once per session. `None` only when the row itself is absent, which `settings::settings`
+    /// never produces (`agent_kind` is always one of its three rows).
+    pub(crate) fn agent_kind_value(&self) -> Option<String> {
+        self.settings
+            .rows
+            .iter()
+            .find(|row| row.key == "agent_kind")
+            .map(|row| row.value.clone())
     }
 
     /// `settings-window`'s addition: the settings panel's own dispatch layer, reached only

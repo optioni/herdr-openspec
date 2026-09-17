@@ -280,20 +280,6 @@ pub fn start_collaborators(
     }
 }
 
-/// `settings-window`'s addition: the `agent_kind` row's current value, read out of
-/// `dashboard.settings.rows` rather than re-derived — `run_wired`'s one use, comparing this
-/// value from before and after the interactive loop runs to detect whether a commit
-/// happened. `None` only when the row itself is absent, which `settings::settings` never
-/// produces (`agent_kind` is always one of its three rows).
-fn agent_kind_value(dashboard: &Dashboard) -> Option<String> {
-    dashboard
-        .settings
-        .rows
-        .iter()
-        .find(|row| row.key == "agent_kind")
-        .map(|row| row.value.clone())
-}
-
 /// Everything `run` does once a terminal exists: load startup state, start
 /// the live tier's collaborators, fold any starting problem into
 /// `dashboard.refresh.problems`, build the loop's `Live`, and run it to
@@ -356,20 +342,18 @@ pub fn run_wired<B: Backend, E: EventSource>(
         dashboard.refresh.startup.push(reason.clone());
     }
     dashboard.file_mode = collaborators.file_mode;
-    // `settings-window`: `state::record_kind`'s one call site. `src/ui/driver.rs` and
-    // `src/ui/app.rs` are both swept by `NOIO-VIEW`/`READONLY-UI` and neither may name a
-    // filesystem-write API; `src/ui/mod.rs` is the one file under `src/ui/` permitted to
-    // touch the filesystem at all (`READONLY-UI`'s own comment: `ui::read_artifact`,
-    // `ui::load`, `ui::run`). `Dashboard::apply` (`src/ui/app.rs`) decides a commit
-    // happened — `apply_settings_open_detail` is the only place in the crate that ever
-    // changes a `Setting::value` after `load` constructs it — and this function performs
-    // the write, by comparing the `agent_kind` row's value from before the loop below runs
-    // against its value once it returns. At most the session's *last* committed kind is
-    // ever written, which is what "a commit rewrites rather than merges" already means one
-    // level up. Nothing re-reads `settings.toml` mid-session (`recorded_kind` runs once, in
-    // `start_collaborators`, before the loop below starts), so holding the write until the
-    // loop returns costs nothing a reader would notice.
-    let initial_kind = agent_kind_value(&dashboard);
+    // `settings-window`: the kind-recording write's one call site — `src/ui/driver.rs` and
+    // `src/ui/app.rs` are both swept for a filesystem-write API and neither may name one;
+    // `src/ui/mod.rs` is the one file under `src/ui/` permitted to touch the filesystem at
+    // all (`READONLY-UI`'s own comment: `ui::read_artifact`, `ui::load`, `ui::run`). The
+    // closure closes over `startup.state_dir` and is handed to `driver::run_loop` as a
+    // `KindRecorder`, on exactly `write`'s own terms below — `run_loop` calls it from
+    // *inside* the loop, at the commit `Dashboard::apply` (`src/ui/app.rs`) just performed,
+    // never once at the end of this function: a write held until the loop returned could
+    // never be seen by a launch keystroke driven inside the same run, and could not survive
+    // a killed pane at all. See `driver::maybe_record_kind_commit`.
+    let record_kind =
+        |kind: &str| crate::state::record_kind(startup.state_dir, kind).map_err(|e| e.to_string());
     let result = {
         let mut live = crate::ui::driver::Live {
             fs: &mut *collaborators.fs,
@@ -382,8 +366,11 @@ pub fn run_wired<B: Backend, E: EventSource>(
             &mut dashboard,
             events,
             &mut live,
-            read,
-            write,
+            crate::ui::app::Seams {
+                read,
+                write,
+                record_kind: &record_kind,
+            },
             tick,
         )
     };
@@ -402,19 +389,6 @@ pub fn run_wired<B: Backend, E: EventSource>(
             dashboard.agent_names.names.insert(agent, change);
         }
         dashboard.launch.problems = outcome.problems;
-    }
-    // `settings-window` :: `specs/plugin-state/spec.md` -> "The settings panel's commit
-    // writes `settings.toml` atomically". A failed write is reported as a problem row
-    // (`launch.problems`, the existing `!`-row channel this composition root already
-    // overwrites wholesale above on a settled launch) rather than panicking or silently
-    // dropping the reader's choice — the in-memory value stays exactly what was committed
-    // either way, since this block only ever reads it, never rewrites it.
-    let committed_kind = agent_kind_value(&dashboard);
-    if let Some(kind) = &committed_kind
-        && committed_kind != initial_kind
-        && let Err(e) = crate::state::record_kind(startup.state_dir, kind)
-    {
-        dashboard.launch.problems = vec![e.to_string()];
     }
     result?;
     Ok(dashboard)
@@ -942,8 +916,11 @@ mod tests {
                     &mut dashboard,
                     &mut events,
                     &mut live,
-                    &read,
-                    &|_: &str| Ok(()),
+                    crate::ui::app::Seams {
+                        read: &read,
+                        write: &|_: &str| Ok(()),
+                        record_kind: &|_: &str| Ok(()),
+                    },
                     std::time::Duration::from_millis(1),
                 )
                 .expect("loop ends");
@@ -1079,8 +1056,11 @@ mod tests {
                     &mut dashboard,
                     &mut events,
                     &mut live,
-                    &read,
-                    &|_: &str| Ok(()),
+                    crate::ui::app::Seams {
+                        read: &read,
+                        write: &|_: &str| Ok(()),
+                        record_kind: &|_: &str| Ok(()),
+                    },
                     std::time::Duration::from_millis(1),
                 )
                 .expect("loop ends");
@@ -1244,8 +1224,11 @@ mod tests {
                     &mut dashboard,
                     &mut events,
                     &mut live,
-                    &read,
-                    &|_: &str| Ok(()),
+                    crate::ui::app::Seams {
+                        read: &read,
+                        write: &|_: &str| Ok(()),
+                        record_kind: &|_: &str| Ok(()),
+                    },
                     std::time::Duration::from_millis(1),
                 )
                 .expect("loop ends");
@@ -1433,8 +1416,11 @@ apply:
                     &mut dashboard,
                     &mut stage1,
                     &mut live,
-                    &crate::ui::read_artifact,
-                    &|_: &str| Ok(()),
+                    crate::ui::app::Seams {
+                        read: &crate::ui::read_artifact,
+                        write: &|_: &str| Ok(()),
+                        record_kind: &|_: &str| Ok(()),
+                    },
                     std::time::Duration::from_millis(1),
                 )
                 .expect("stage 1 ends");
@@ -1529,8 +1515,11 @@ apply:
                     &mut dashboard,
                     &mut stage2,
                     &mut live,
-                    &crate::ui::read_artifact,
-                    &|_: &str| Ok(()),
+                    crate::ui::app::Seams {
+                        read: &crate::ui::read_artifact,
+                        write: &|_: &str| Ok(()),
+                        record_kind: &|_: &str| Ok(()),
+                    },
                     std::time::Duration::from_millis(1),
                 )
                 .expect("stage 2 ends");
@@ -1605,8 +1594,11 @@ apply:
                     &mut launch_dashboard,
                     &mut launch_events,
                     &mut live2,
-                    &crate::ui::read_artifact,
-                    &|_: &str| Ok(()),
+                    crate::ui::app::Seams {
+                        read: &crate::ui::read_artifact,
+                        write: &|_: &str| Ok(()),
+                        record_kind: &|_: &str| Ok(()),
+                    },
                     std::time::Duration::from_millis(1),
                 )
                 .expect("the launch-keys run ends");
@@ -1646,6 +1638,211 @@ apply:
                 );
                 crate::testutil::write_with_mode(&tasks_path, tasks_source.as_bytes(), 0o644);
             }
+        }
+    }
+
+    /// `settings-window`'s pin for the defect group 6's repair fixes: the kind-recording
+    /// write must be observable **while `driver::run_loop` is still running**, not only once
+    /// it has returned. The change originally shipped comparing the `agent_kind` row's value
+    /// from before the loop started against its value once it had already ended, in
+    /// `run_wired`'s own epilogue — a write nothing running *inside* the loop, including a
+    /// launch keystroke read on the very same drive, could ever observe, and one a killed
+    /// pane never reached at all. This module drives `driver::run_loop` directly, on exactly
+    /// `mod detail`'s terms above — real filesystem, `crate::testutil::Stages` rather than a
+    /// fixed `Script`, since telling "written during the loop" apart from "written after it
+    /// returns" needs a predicate polled from *inside* the loop's own event wait, not a
+    /// canned sequence. The settings panel is parked already open on an editable `agent_kind`
+    /// row rather than reached through `,`: resolving a *pending* kind onto the shortlist is
+    /// `agent-launch`'s own worker seam (group 7), a different collaborator than the one this
+    /// pin exists to check, and going through it would make this test RED for the wrong
+    /// reason on the unmodified tree between groups 6 and 7 landing.
+    mod settings_commit {
+        use crate::testutil::{ScratchDir, Stages, press};
+        use crate::ui::app::{Dashboard, Filter, Overlay, Panel, Route};
+        use crate::ui::driver::{Live, run_loop};
+
+        fn dashboard() -> Dashboard {
+            Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: vec![crate::settings::Setting {
+                        key: "agent_kind",
+                        value: "claude".to_string(),
+                        provenance: crate::settings::Provenance::Recorded,
+                        editable: crate::settings::Editable::Kind {
+                            shortlist: vec!["claude".to_string(), "codex".to_string()],
+                        },
+                    }],
+                    cursor: 0,
+                },
+                selection: None,
+                overlay: Overlay {
+                    panel: Some(Panel::Settings),
+                    scroll: 0,
+                    edit: None,
+                },
+                repo: None,
+                searched_from: std::path::PathBuf::from("/tmp/settings-commit"),
+                changes: crate::changes::empty_set(),
+                route: Route::List,
+                quit: false,
+                selected: 0,
+                filter: Filter {
+                    query: String::new(),
+                    active: false,
+                },
+                detail: crate::ui::app::Detail {
+                    sections: Vec::new(),
+                    scroll: 0,
+                    tab: 0,
+                    problems: Vec::new(),
+                    loaded: None,
+                    expanded: std::collections::BTreeSet::new(),
+                    drawn_width: None,
+                },
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    startup: Vec::new(),
+                    problems: Vec::new(),
+                },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    stalled: false,
+                    problem: None,
+                },
+                agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    in_flight: false,
+                    problems: Vec::new(),
+                },
+                sections: crate::ui::app::Sections {
+                    collapsed: std::collections::BTreeSet::new(),
+                },
+                file_mode: false,
+            }
+        }
+
+        /// `plugin-state` :: "A commit creates the file with the chosen kind", pinned at the
+        /// point the original epilogue could not reach: two ordinary presses — `Enter` steps
+        /// the candidate from the committed `claude` to `codex`, the second `Enter` commits
+        /// it — followed by a further stage whose own predicate is the scratch state
+        /// directory now holding a `settings.toml` naming `codex`, polled by `Stages` from
+        /// *inside* `run_loop`'s own event wait on every iteration it is not yet true, well
+        /// before the final stage's `q` is ever sent. A write deferred until `run_loop`
+        /// returns can never satisfy that predicate from inside the very call still running
+        /// it, so a regression here runs `Stages` out to its own `DEADLINE`, which forces an
+        /// early `q` without ever advancing past the mid-run stage — `completed_every_stage`
+        /// below is exact on that distinction, and deliberately not a wall-clock measurement:
+        /// `NOBLOCK` leg 2 forbids reading a clock anywhere under `src/ui/`, tests included,
+        /// for exactly the reason a timing-based assertion here would be the flake it exists
+        /// to rule out.
+        #[test]
+        fn the_commit_writes_settings_toml_while_the_loop_is_still_running() {
+            let mut d = dashboard();
+            let state = ScratchDir::new();
+            let settings_path = state.path().join("settings.toml");
+            let record_kind = |kind: &str| {
+                crate::state::record_kind(Some(state.path()), kind).map_err(|e| e.to_string())
+            };
+
+            let committed_mid_run = {
+                let settings_path = settings_path.clone();
+                move || {
+                    std::fs::read_to_string(&settings_path)
+                        .map(|text| text.contains("agent_kind = \"codex\""))
+                        .unwrap_or(false)
+                }
+            };
+            let always = || true;
+
+            let stages: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> = vec![
+                (
+                    &always,
+                    press(
+                        ratatui::crossterm::event::KeyCode::Enter,
+                        ratatui::crossterm::event::KeyModifiers::NONE,
+                    ),
+                ),
+                (
+                    &always,
+                    press(
+                        ratatui::crossterm::event::KeyCode::Char('j'),
+                        ratatui::crossterm::event::KeyModifiers::NONE,
+                    ),
+                ),
+                (
+                    &always,
+                    press(
+                        ratatui::crossterm::event::KeyCode::Enter,
+                        ratatui::crossterm::event::KeyModifiers::NONE,
+                    ),
+                ),
+                (
+                    &committed_mid_run,
+                    press(
+                        ratatui::crossterm::event::KeyCode::Char(' '),
+                        ratatui::crossterm::event::KeyModifiers::NONE,
+                    ),
+                ),
+                (
+                    &always,
+                    press(
+                        ratatui::crossterm::event::KeyCode::Char('q'),
+                        ratatui::crossterm::event::KeyModifiers::NONE,
+                    ),
+                ),
+            ];
+            let mut events = Stages::new(stages);
+
+            let backend = ratatui::backend::TestBackend::new(120, 20);
+            let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+            let mut fs = crate::watch::none();
+            let mut refresher = crate::refresh::none();
+            let mut agents = crate::agents::none();
+            let mut launcher = crate::launch::none();
+            let mut live = Live {
+                fs: &mut *fs,
+                refresher: &mut *refresher,
+                agents: &mut *agents,
+                launcher: &mut *launcher,
+            };
+
+            let result = run_loop(
+                &mut terminal,
+                &mut d,
+                &mut events,
+                &mut live,
+                crate::ui::app::Seams {
+                    read: &|_: &std::path::Path| Ok(String::new()),
+                    write: &|_: &str| Ok(()),
+                    record_kind: &record_kind,
+                },
+                std::time::Duration::from_millis(1),
+            );
+            result.expect("run_loop must return Ok for an ordinary quit");
+
+            assert!(
+                events.completed_every_stage(),
+                "every stage's key must have been pressed because its own predicate went \
+                 true, not because `Stages::DEADLINE` forced an early `q`; the mid-run stage \
+                 not completing means the write never became visible until after the loop \
+                 returned, or did not happen at all"
+            );
+            assert_eq!(
+                d.launch.problems,
+                Vec::<String>::new(),
+                "the write must not fail: {:?}",
+                d.launch.problems
+            );
+
+            let settings_text = std::fs::read_to_string(&settings_path)
+                .expect("the commit must have created settings.toml");
+            assert!(
+                settings_text.contains("agent_kind = \"codex\""),
+                "the file must hold the committed kind: {settings_text:?}"
+            );
         }
     }
 
@@ -2711,8 +2908,11 @@ apply:
                     &mut dashboard,
                     &mut events,
                     &mut live,
-                    &super::super::read_artifact,
-                    &|_: &str| Ok(()),
+                    crate::ui::app::Seams {
+                        read: &super::super::read_artifact,
+                        write: &|_: &str| Ok(()),
+                        record_kind: &|_: &str| Ok(()),
+                    },
                     Duration::from_millis(1),
                 )
                 .expect("stage 1 ends");
@@ -2782,8 +2982,11 @@ apply:
                     &mut dashboard,
                     &mut events2,
                     &mut live2,
-                    &super::super::read_artifact,
-                    &|_: &str| Ok(()),
+                    crate::ui::app::Seams {
+                        read: &super::super::read_artifact,
+                        write: &|_: &str| Ok(()),
+                        record_kind: &|_: &str| Ok(()),
+                    },
                     Duration::from_millis(1),
                 )
                 .expect("stage 2 ends");
@@ -2919,8 +3122,11 @@ apply:
                     &mut dashboard,
                     &mut events,
                     &mut live,
-                    &super::super::read_artifact,
-                    &|_: &str| Ok(()),
+                    crate::ui::app::Seams {
+                        read: &super::super::read_artifact,
+                        write: &|_: &str| Ok(()),
+                        record_kind: &|_: &str| Ok(()),
+                    },
                     Duration::from_millis(1),
                 )
                 .expect("loop ends");
@@ -2976,8 +3182,11 @@ apply:
                     &mut dashboard,
                     &mut events,
                     &mut live,
-                    &super::super::read_artifact,
-                    &|_: &str| Ok(()),
+                    crate::ui::app::Seams {
+                        read: &super::super::read_artifact,
+                        write: &|_: &str| Ok(()),
+                        record_kind: &|_: &str| Ok(()),
+                    },
                     Duration::from_millis(1),
                 )
                 .expect("loop ends");
@@ -6059,8 +6268,11 @@ esac
                     &mut dashboard,
                     &mut events,
                     &mut live,
-                    &crate::ui::read_artifact,
-                    &|_: &str| Ok(()),
+                    crate::ui::app::Seams {
+                        read: &crate::ui::read_artifact,
+                        write: &|_: &str| Ok(()),
+                        record_kind: &|_: &str| Ok(()),
+                    },
                     std::time::Duration::from_millis(1),
                 )
                 .expect("the loop keeps drawing despite the watcher failure");

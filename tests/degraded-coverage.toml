@@ -153,7 +153,7 @@ tier = "view"
 proof = ["an_unreachable_socket_renders_the_agentless_pane"]
 verdict = "spec-corrected"
 why = "the pane renders identically whether AgentSnapshot::problem is Some or None, via render_at"
-covers = ["src/ui/app.rs:806-819"]
+covers = ["src/ui/app.rs:830-843"]
 
 [[row]]
 condition = "A launch's `pane split` call fails"
@@ -400,7 +400,7 @@ tier = "unit"
 proof = ["prefers_the_workspace_cwd_and_falls_back_when_there_is_none", "a_herdr_context_with_no_workspace_cwd_is_the_fallback_case_not_a_failure"]
 verdict = "confirmed"
 why = "startup_dir's own unit tests drive both arms of the fallback decision directly"
-covers = ["src/ui/mod.rs:443-448"]
+covers = ["src/ui/mod.rs:417-422"]
 
 [[row]]
 condition = "The terminal refuses mouse capture (`enable_mouse` fails)"
@@ -408,7 +408,7 @@ tier = "outer"
 proof = ["a_refused_capture_is_named_last", "a_successful_capture_adds_no_row"]
 verdict = "confirmed"
 why = "mouse-input: run_wired is driven with Startup::mouse_problem set and with it None; the first proves the reason lands as refresh.startup's LAST entry, below the binary probe's own, and renders as a `!`-marked row above the change rows while the loop runs normally; the second proves a successful capture adds no entry and leaves the frame unchanged"
-covers = ["src/ui/mod.rs:355-357", "src/ui/terminal.rs:83-83", "src/ui/terminal.rs:91-93"]
+covers = ["src/ui/mod.rs:341-343", "src/ui/terminal.rs:83-83", "src/ui/terminal.rs:91-93"]
 
 [[row]]
 condition = "The clipboard write fails locally (`TerminalOps::write_clipboard` returns an error)"
@@ -416,7 +416,7 @@ tier = "unit"
 proof = ["a_failed_write_is_recorded_as_a_problem_and_rendered", "a_successful_write_leaves_no_problem_and_renders_no_row"]
 verdict = "confirmed"
 why = "text-selection: maybe_copy_selection is driven with a ClipboardWriter double scripted to fail and to succeed; the first proves the reason lands on Selection::problem and reaches the detail region as a `!`-marked row past the drawn content while the selection and its highlight stand, the second proves a successful write clears the problem and renders no row at all - the pane claims nothing about a write it cannot have acknowledged"
-covers = ["src/ui/driver.rs:266-269"]
+covers = ["src/ui/driver.rs:329-332"]
 
 [[row]]
 condition = "A change is archived between the worker's `list --json` call and its file walk"

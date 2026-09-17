@@ -704,6 +704,17 @@ pub(crate) mod testutil {
                 finished: false,
             }
         }
+
+        /// Whether every stage's own key was pressed because its predicate went true, rather
+        /// than the run being cut short by `Self::DEADLINE` forcing an early `q` — `src/ui/`
+        /// tests use this rather than measuring wall-clock time themselves: `NOBLOCK` leg 2
+        /// forbids any clock read under `src/ui/`, tests included, precisely because a
+        /// timing-based assertion there is the flake it exists to rule out. `index` reaches
+        /// `stages.len()` only by the predicate path — the deadline branch presses `q`
+        /// without advancing it — so this is exact rather than a proxy.
+        pub(crate) fn completed_every_stage(&self) -> bool {
+            self.index == self.stages.len()
+        }
     }
 
     impl crate::ui::event::EventSource for Stages<'_> {
