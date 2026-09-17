@@ -891,8 +891,9 @@ mod tests {
         );
     }
 
-    /// The file `settings-window` will grow is read by this binary and written
-    /// by nothing in it: a full read leaves the directory byte-identical.
+    /// `recorded_kind` itself is still read-only: a full read leaves the
+    /// directory byte-identical. `record_kind`, below, is `settings-window`'s
+    /// writer, and it is a wholly separate function from this one.
     #[test]
     fn reading_the_recorded_kind_writes_nothing() {
         let scratch = crate::testutil::ScratchDir::new();
@@ -901,5 +902,139 @@ mod tests {
         super::recorded_kind(Some(scratch.path()));
         super::recorded_kind(Some(scratch.path()));
         assert_eq!(before, crate::testutil::snapshot(scratch.path()));
+    }
+
+    // --- settings-window: record_kind ------------------------------------
+
+    /// `plugin-state` :: "A commit creates the file with the chosen kind".
+    #[test]
+    fn a_commit_creates_the_file_with_the_chosen_kind() {
+        let scratch = crate::testutil::ScratchDir::new();
+        super::record_kind(Some(scratch.path()), "codex").expect("record_kind");
+
+        let contents = std::fs::read_to_string(scratch.path().join("settings.toml"))
+            .expect("read settings.toml");
+        let table: toml::Table = contents.parse().expect("parse settings.toml");
+        assert_eq!(table.len(), 1, "{table:?}");
+        assert_eq!(
+            table.get("agent_kind").and_then(|v| v.as_str()),
+            Some("codex")
+        );
+
+        assert_eq!(
+            super::recorded_kind(Some(scratch.path())),
+            (Some("codex".to_string()), Vec::new())
+        );
+        assert!(
+            !scratch.path().join("agent-names.toml").exists(),
+            "agent-names.toml must not be created by a settings commit"
+        );
+    }
+
+    /// `plugin-state` :: "A commit rewrites rather than merges".
+    #[test]
+    fn a_commit_rewrites_rather_than_merges() {
+        let scratch = crate::testutil::ScratchDir::new();
+        write_settings(scratch.path(), "agent_kind = \"claude\"\ntheme = \"dark\"\n");
+
+        super::record_kind(Some(scratch.path()), "codex").expect("record_kind");
+
+        let contents = std::fs::read_to_string(scratch.path().join("settings.toml"))
+            .expect("read settings.toml");
+        let table: toml::Table = contents.parse().expect("parse settings.toml");
+        assert_eq!(table.len(), 1, "unrecognised keys must not survive: {table:?}");
+        assert_eq!(
+            table.get("agent_kind").and_then(|v| v.as_str()),
+            Some("codex")
+        );
+        assert!(table.get("theme").is_none());
+
+        assert_eq!(
+            super::recorded_kind(Some(scratch.path())),
+            (Some("codex".to_string()), Vec::new())
+        );
+    }
+
+    /// `plugin-state` :: "A write failure is reported and does not lose the
+    /// session's value" — this module's own slice of that scenario:
+    /// `record_kind` itself returns `Err` rather than panicking, and leaves
+    /// no partial write behind. (The in-memory value surviving the failure,
+    /// and `Launcher::set_kind` still being called, are `src/ui/`'s and
+    /// `src/launch.rs`'s halves of the same scenario — group 7.)
+    #[test]
+    fn a_write_failure_is_reported_rather_than_panicking() {
+        let scratch = crate::testutil::ScratchDir::new();
+        let blocked = scratch.path().join("blocked");
+        std::fs::write(&blocked, b"not a directory").expect("write blocking file");
+        let before = std::fs::read(&blocked).expect("read before");
+
+        let result = super::record_kind(Some(&blocked), "codex");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains(&blocked.display().to_string()), "{err:?}");
+
+        let after = std::fs::read(&blocked).expect("read after");
+        assert_eq!(before, after);
+        assert!(
+            std::fs::read_dir(scratch.path())
+                .expect("read scratch dir")
+                .filter_map(|e| e.ok())
+                .all(|e| !e.file_name().to_string_lossy().contains(".tmp-"))
+        );
+    }
+
+    /// `record_kind(None, kind)` — no state directory could be resolved —
+    /// returns `Err` with `record`'s own wording and creates nothing, on
+    /// exactly that function's terms.
+    #[test]
+    fn record_kind_with_no_state_directory_fails_without_creating_anything() {
+        let result = super::record_kind(None, "codex");
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("no state directory could be resolved")
+        );
+    }
+
+    /// `plugin-state` :: "Nothing is written outside the state directory" —
+    /// this module's own slice, on `a_repository_tree_is_untouched_by_a_recording`'s
+    /// exact terms: a commit reaches nothing under an `openspec/` repository tree.
+    #[test]
+    fn a_repository_tree_is_untouched_by_a_settings_commit() {
+        let repo = crate::testutil::ScratchDir::new();
+        let changes_dir = repo.path().join("openspec").join("changes").join("x");
+        fs::create_dir_all(&changes_dir).expect("create fixture tree");
+        fs::write(changes_dir.join("tasks.md"), b"- [ ] 1 do it\n").expect("write fixture file");
+
+        let before = snapshot(repo.path());
+
+        let state = ScratchDir::new();
+        super::record_kind(Some(state.path()), "codex").expect("record_kind");
+
+        let after = snapshot(repo.path());
+        assert_eq!(before, after);
+    }
+
+    /// `plugin-state` :: "Nothing is written outside the state directory" —
+    /// this module's own slice, on `the_configuration_directory_is_not_written_to`'s
+    /// exact terms: a commit reaches nothing under the configuration directory.
+    #[test]
+    fn the_configuration_directory_is_not_written_to_by_a_settings_commit() {
+        let config = ScratchDir::new();
+        fs::write(
+            config.path().join("config.toml"),
+            b"agent_kind = \"codex\"\n",
+        )
+        .expect("write config.toml fixture");
+
+        let before = snapshot(config.path());
+
+        let state = ScratchDir::new();
+        super::record_kind(Some(state.path()), "codex").expect("record_kind");
+
+        let after = snapshot(config.path());
+        assert_eq!(before, after);
     }
 }
