@@ -226,11 +226,12 @@ pub fn read(dir: Option<&Path>) -> Mapping {
 /// agent_kind = "codex"
 /// ```
 ///
-/// Step 2 of `integration-status`' precedence — what `settings-window` will
-/// write once it lands, consulted after a hand-edited `config.toml` and before
-/// any evidence the plugin gathered itself. **This module reads it and never
-/// writes it**: nothing here creates `settings.toml`, and the plugin's own
-/// writes stay exactly `agent-names.toml` under `HERDR_PLUGIN_STATE_DIR`.
+/// Step 2 of `integration-status`' precedence — what the settings panel's
+/// commit writes, via [`record_kind`] below, consulted after a hand-edited
+/// `config.toml` and before any evidence the plugin gathered itself. This
+/// function itself stays read-only: it never creates `settings.toml`, and the
+/// only code path in the crate that does is `record_kind`, called from
+/// exactly one place — the settings panel's commit.
 ///
 /// Never fails, panics, or returns an error to the caller, on exactly
 /// [`read`]'s terms. An absent directory, an absent file, and an empty file
@@ -320,6 +321,74 @@ pub fn record(dir: Option<&Path>, agent: &str, change: &str) -> std::io::Result<
     let write_and_rename = || -> std::io::Result<()> {
         std::fs::write(&tmp_path, &contents)?;
         std::fs::rename(&tmp_path, dir.join("agent-names.toml"))?;
+        Ok(())
+    };
+
+    match write_and_rename() {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp_path);
+            Err(std::io::Error::new(
+                e.kind(),
+                format!("{}: {e}", dir.display()),
+            ))
+        }
+    }
+}
+
+/// Write the committed `agent_kind` to `settings.toml` inside `dir`, atomically and on
+/// exactly [`record`]'s own established terms — this crate's second writer and this
+/// module's second file. Called from **exactly one** place in the crate: the settings
+/// panel's commit of an `agent_kind` edit, from `src/ui/mod.rs`'s composition root, never
+/// from `src/ui/app.rs`, which performs no I/O of its own. Nothing at startup, on a
+/// refresh, on a launch, or on a poll writes it, so a reader who never opens the panel
+/// never has the file created.
+///
+/// The write **rewrites rather than merges**: the file afterwards holds exactly
+/// `agent_kind = "<kind>"` and nothing else. An unrecognised key a previous version or a
+/// hand-edit left behind is dropped, not preserved — stated in
+/// `openspec/changes/settings-window/design.md` -> Risks rather than left silent, because
+/// the file is the plugin's own and a merge would mean parsing and re-emitting arbitrary
+/// TOML, including comments this writer cannot round-trip, for a file no human is expected
+/// to edit.
+///
+/// Creates the state directory when absent, and nothing above it. Writes the complete new
+/// contents to a temporary file inside that same directory and renames it over
+/// `settings.toml`, so a concurrent reader observes either the previous file or the new one
+/// and never a partial one — [`record`]'s own atomicity, reused rather than restated.
+/// `record_kind(None, kind)` — no state directory could be resolved — returns `Err` with
+/// exactly [`record`]'s own wording for the same case, and creates nothing.
+///
+/// A failed write returns `Err` rather than panicking; it neither abandons the edit nor
+/// loses the session's value — both are the caller's responsibility, on exactly
+/// [`record`]'s terms, since this function's only job is the write itself. See
+/// `specs/plugin-state/spec.md` -> "The settings panel's commit writes `settings.toml`
+/// atomically".
+pub fn record_kind(dir: Option<&Path>, kind: &str) -> std::io::Result<()> {
+    let Some(dir) = dir else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "no state directory could be resolved",
+        ));
+    };
+
+    std::fs::create_dir_all(dir)
+        .map_err(|e| std::io::Error::new(e.kind(), format!("{}: {e}", dir.display())))?;
+
+    let mut table = toml::Table::new();
+    table.insert(
+        "agent_kind".to_string(),
+        toml::Value::String(kind.to_string()),
+    );
+    let contents = table.to_string();
+
+    static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let counter = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp_path = dir.join(format!("settings.toml.tmp-{}-{counter}", crate::pid()));
+
+    let write_and_rename = || -> std::io::Result<()> {
+        std::fs::write(&tmp_path, &contents)?;
+        std::fs::rename(&tmp_path, dir.join("settings.toml"))?;
         Ok(())
     };
 
@@ -935,14 +1004,21 @@ mod tests {
     #[test]
     fn a_commit_rewrites_rather_than_merges() {
         let scratch = crate::testutil::ScratchDir::new();
-        write_settings(scratch.path(), "agent_kind = \"claude\"\ntheme = \"dark\"\n");
+        write_settings(
+            scratch.path(),
+            "agent_kind = \"claude\"\ntheme = \"dark\"\n",
+        );
 
         super::record_kind(Some(scratch.path()), "codex").expect("record_kind");
 
         let contents = std::fs::read_to_string(scratch.path().join("settings.toml"))
             .expect("read settings.toml");
         let table: toml::Table = contents.parse().expect("parse settings.toml");
-        assert_eq!(table.len(), 1, "unrecognised keys must not survive: {table:?}");
+        assert_eq!(
+            table.len(),
+            1,
+            "unrecognised keys must not survive: {table:?}"
+        );
         assert_eq!(
             table.get("agent_kind").and_then(|v| v.as_str()),
             Some("codex")
