@@ -131,6 +131,37 @@ Still at their HEAD values, deliberately: `CLAIM_COUNT` **15** (task 13.6 moves 
   **Group 7 hooks `Launcher::set_kind` at that same commit point.** The seam is already
   there; do not invent a second one.
 
+### Caveat on the group-11 fix — the sequence may be wrong twice, not once
+
+Verified: the blocker is real. `specs/settings-window/spec.md:164-190` has `OpenDetail`
+"begin the edit on the cursor's setting; else commit the edit in progress" — it does **not**
+close the panel — and lists `LaunchApply` among the inert actions, with the load-bearing
+argument that this is the panel an ambiguous refusal opens right after the reader pressed `a`.
+Adding `Esc` before `a` is necessary.
+
+**It may not be sufficient.** `src/settings.rs` builds the rows in the order `openspec_bin`
+(0), `agent_kind` (1), `prompts` (2), and the panel's cursor starts at 0. `openspec_bin` is
+read-only (`Editable::No { reason: Reason::SetOnce }`), and the spec has a scenario
+"`Enter` on a read-only setting begins no edit". So task 0.2's literal `,` `Enter` `Next`
+`Enter` reads as: open on `openspec_bin`; `Enter` begins nothing (and records a refusal);
+`Next` moves the **row cursor** to `agent_kind`; `Enter` **begins** an edit there — and the
+sequence ends without ever stepping a candidate or committing.
+
+If that reading holds, the corrected drive is closer to `,` `Next` `Enter` `Next` `Enter`
+`Esc` `a` `q` — move to `agent_kind` first, then begin, step, commit, close, launch.
+
+**This second half is UNVERIFIED.** I confirmed the row order and the read-only reason, but
+did not read group 0's two tests' own stage lists before the session limit stopped me — the
+region I opened turned out to be a different, pre-existing wiring test. Whoever resumes must
+read the actual stages in `src/ui/mod.rs`'s `mod wiring` for
+`committing_an_agent_kind_writes_settings_toml_and_touches_nothing_else` and
+`committed_kind_reaches_the_launch_without_a_second_status_call` before changing them, and
+correct task 0.2's wording to whatever the verified sequence turns out to be.
+
+Either way the rule the lead states stands: **do not make `a` live inside the panel and do
+not make a commit close the panel.** Both would contradict a landed requirement in order to
+make a test pass. Fix the test's key sequence and task 0.2's wording together.
+
 ## Standing constraints every remaining implementer needs
 
 - **Two pre-existing drifts this change does NOT own and must NOT fix**, recorded in
