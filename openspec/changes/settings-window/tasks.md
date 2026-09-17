@@ -165,18 +165,18 @@ establish (design.md → Test Strategy).
 ## 5. Editing `agent_kind`
 <!-- kind: behavior -->
 
-- [ ] 5.1 RED: Write failing tests for `settings-window` :: "An edit begins, changes a
+- [x] 5.1 RED: Write failing tests for `settings-window` :: "An edit begins, changes a
       candidate, and commits", "`Esc` cancels the edit and a second `Esc` closes the panel",
       "`Enter` on a read-only setting begins no edit", "The shortlist is the installed kinds,
       in Herdr's order, and wraps", "A committed kind outside the shortlist starts the edit at
       the first entry", "No installed integration makes the row non-editable with a reason", "A
       configured `agent_kind` refuses the edit and names the file", "The refusal is per
       setting, not per panel".
-- [ ] 5.2 GREEN: Implement `Edit` — begin on `OpenDetail`, commit on `OpenDetail`, cancel on
+- [x] 5.2 GREEN: Implement `Edit` — begin on `OpenDetail`, commit on `OpenDetail`, cancel on
       `Back`; `Next`/`Prev` cycle the shortlist with wrap while an edit is in progress.
-- [ ] 5.3 GREEN: Render the candidate rather than the committed value in the value row while
+- [x] 5.3 GREEN: Render the candidate rather than the committed value in the value row while
       an edit is in progress, at both mandated widths.
-- [ ] 5.4 Run the group tests — `cargo test -- ui::app ui::settings` — no regressions.
+- [x] 5.4 Run the group tests — `cargo test -- ui::app ui::settings` — no regressions.
 
 ## 6. Writing `settings.toml`
 <!-- kind: behavior -->
