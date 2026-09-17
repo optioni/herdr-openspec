@@ -117,19 +117,19 @@ establish (design.md → Test Strategy).
 ## 3. The settings panel view
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: Write failing tests in a new `src/ui/settings.rs` for `settings-window` :: "The
+- [x] 3.1 RED: Write failing tests in a new `src/ui/settings.rs` for `settings-window` :: "The
       panel renders every setting at both mandated widths", "A long path is truncated rather
       than wrapped or overflowing", "The panel degrades rather than panicking at any frame
       size". Every test asserts at both 60 and 120 columns.
-- [ ] 3.2 GREEN: Implement `ui::settings::render` — heading row, top rule, six setting rows
+- [x] 3.2 GREEN: Implement `ui::settings::render` — heading row, top rule, six setting rows
       (value row plus indented source row), bottom rule. `─` is the only chrome glyph.
-- [ ] 3.3 GREEN: Measure every width through `ui::layout::truncate_columns`; name no
+- [x] 3.3 GREEN: Measure every width through `ui::layout::truncate_columns`; name no
       `.chars()` measure, which `COLWIDTH` will sweep once the file joins its `PURE` list.
-- [ ] 3.4 RED then GREEN: `responsive-layout` :: "Both panels are centred by the one function"
+- [x] 3.4 RED then GREEN: `responsive-layout` :: "Both panels are centred by the one function"
       — a `#[test]` in `src/ui/layout.rs` calling `overlay_band` at `content_rows` 42 and 7
       against both a 120x40 and a 60x20 body. Group 1 renames the function but adds no test, so
       without this the scenario has none.
-- [ ] 3.5 Run the group tests — `cargo test -- ui::settings ui::layout` — no regressions.
+- [x] 3.5 Run the group tests — `cargo test -- ui::settings ui::layout` — no regressions.
 
 ## 4. The key, the layer, and the cursor
 <!-- kind: behavior -->
