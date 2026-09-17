@@ -1059,6 +1059,46 @@ mod tests {
         }
     }
 
+    /// `settings-window` -> "Both panels are centred by the one function" —
+    /// task 3.4's RED-then-GREEN test: `overlay_band` is the crate's one
+    /// geometry for either overlay panel, and `content_rows` is the only
+    /// argument that differs between them. `pane-chrome` renamed
+    /// `help_band` to `overlay_band` but added no test naming a second
+    /// panel's `content_rows` — without this test the scenario had none.
+    /// `overlay_band` itself is unchanged by this task: the assertions
+    /// below pass against the rename alone, which is the point — a settings
+    /// panel needs no geometry of its own.
+    #[test]
+    fn both_panels_are_centred_by_the_one_function() {
+        let (body, _) = split_frame(Rect::new(0, 0, 120, 40));
+        assert_eq!(body, Rect::new(0, 0, 120, 39));
+        // The help panel's own content_rows, 42: the band cannot fit it and
+        // fills the body.
+        assert_eq!(overlay_band(body, 42), Rect::new(0, 0, 120, 39));
+        // The settings panel's own content_rows, 7 (its heading row plus
+        // its three settings' six rows): the band is centred, with the odd
+        // remaining row below it.
+        assert_eq!(overlay_band(body, 7), Rect::new(0, 15, 120, 9));
+
+        let (body, _) = split_frame(Rect::new(0, 0, 60, 20));
+        assert_eq!(body, Rect::new(0, 0, 60, 19));
+        assert_eq!(overlay_band(body, 42), Rect::new(0, 0, 60, 19));
+        assert_eq!(overlay_band(body, 7), Rect::new(0, 5, 60, 9));
+
+        // Neither call narrows the band for itself: both share the body's
+        // own x and width, at both widths.
+        for (body, content_rows) in [
+            (Rect::new(0, 0, 120, 39), 42usize),
+            (Rect::new(0, 0, 120, 39), 7),
+            (Rect::new(0, 0, 60, 19), 42),
+            (Rect::new(0, 0, 60, 19), 7),
+        ] {
+            let band = overlay_band(body, content_rows);
+            assert_eq!(band.x, body.x);
+            assert_eq!(band.width, body.width);
+        }
+    }
+
     /// `help-overlay` -> "The overlay is a full-width band, vertically
     /// centred in the body" — task 5.1's regression leg: adding `overlay_band`
     /// changes nothing about the existing 100-column breakpoint or the
