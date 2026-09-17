@@ -181,21 +181,21 @@ establish (design.md → Test Strategy).
 ## 6. Writing `settings.toml`
 <!-- kind: behavior -->
 
-- [ ] 6.1 RED: Write failing tests for `plugin-state` :: "A commit creates the file with the
+- [x] 6.1 RED: Write failing tests for `plugin-state` :: "A commit creates the file with the
       chosen kind", "A commit rewrites rather than merges", "A write failure is reported and
       does not lose the session's value", "Nothing is written outside the state directory".
       Use `testutil::ScratchDir`; the filesystem is real here (design.md → Test Boundaries).
-- [ ] 6.2 GREEN: Implement `state::record_kind` on `state::record`'s atomicity — temp file in
+- [x] 6.2 GREEN: Implement `state::record_kind` on `state::record`'s atomicity — temp file in
       the same directory, then rename. Create the state directory when absent and nothing
       above it.
-- [ ] 6.3 GREEN: Call it from the commit in `src/ui/mod.rs`'s loop — never from `src/ui/app.rs`,
+- [x] 6.3 GREEN: Call it from the commit in `src/ui/mod.rs`'s loop — never from `src/ui/app.rs`,
       which performs no I/O — and record a failure as a problem row.
-- [ ] 6.4 CHECK: Persistence gate — confirm no migration, backfill, cache invalidation, or
+- [x] 6.4 CHECK: Persistence gate — confirm no migration, backfill, cache invalidation, or
       index rebuild applies beyond `Launcher::set_kind` (group 7), per design.md → Persistence
       and Rollout.
-- [ ] 6.5 CHECK: Contract gate — re-read `SPEC.md`'s `settings.toml` description and confirm
+- [x] 6.5 CHECK: Contract gate — re-read `SPEC.md`'s `settings.toml` description and confirm
       the one-key schema it documents still matches what `record_kind` emits.
-- [ ] 6.6 Run the group tests — `cargo test -- state:: ui::` — no regressions.
+- [x] 6.6 Run the group tests — `cargo test -- state:: ui::` — no regressions.
 
 ## 7. The launcher seam
 <!-- kind: behavior -->
