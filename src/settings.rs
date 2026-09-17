@@ -132,6 +132,29 @@ pub struct Setting {
     pub editable: Editable,
 }
 
+/// `settings-window`'s addition: `Dashboard::settings`, the seventeenth field
+/// — the rows [`settings`] last produced, and the reader's own selected row
+/// among them. Lives here, beside [`settings`] and [`Setting`] themselves,
+/// rather than on `ui::app`'s own terms, per design.md -> Boundaries: task
+/// 10.4 adds it to `NODEFAULT-UI`'s ninth scanned set with
+/// `HOMEFILE=src/settings.rs`, which is what settles the placement — that
+/// gate's positive control is a `struct $T { ... }` grep, so `PanelState`
+/// stays a plain struct rather than becoming a tuple type or a type alias.
+///
+/// `rows` is populated by [`settings`] at startup, on every adopted
+/// `resolution`, and on every commit (design.md -> "How the panel's three
+/// inputs reach a pure view"); `cursor` indexes `rows`, not any rendered row
+/// list, and is translated to the row grammar's own coordinates by
+/// `ui::settings::render` before being handed to `ui::layout::viewport`.
+/// Deliberately implements no `Default`, on the same terms as every other
+/// state type `NODEFAULT-UI` covers: every construction and destructuring
+/// names both fields, with no `..` rest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PanelState {
+    pub rows: Vec<Setting>,
+    pub cursor: usize,
+}
+
 /// The three settings the panel renders, in this fixed order: `openspec_bin`,
 /// `agent_kind`, `prompts`. The order is the module's, not the view's, so the
 /// panel renders what it is given rather than deciding an order a second
