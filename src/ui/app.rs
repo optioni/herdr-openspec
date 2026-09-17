@@ -1238,38 +1238,43 @@ impl Dashboard {
     fn apply_settings_open_detail(&mut self) {
         match self.overlay.edit {
             Some(edit) => {
-                if let Some(crate::settings::Editable::Kind { shortlist }) = self
-                    .settings
-                    .rows
-                    .get(edit.setting)
-                    .map(|setting| &setting.editable)
+                if let Some(shortlist) = self.settings_shortlist(edit.setting)
+                    && let Some(candidate) = shortlist.get(edit.candidate).cloned()
+                    && let Some(row) = self.settings.rows.get_mut(edit.setting)
                 {
-                    if let Some(candidate) = shortlist.get(edit.candidate).cloned() {
-                        if let Some(row) = self.settings.rows.get_mut(edit.setting) {
-                            row.value = candidate;
-                        }
-                    }
+                    row.value = candidate;
                 }
                 self.overlay.edit = None;
             }
             None => {
                 let cursor = self.settings.cursor;
-                if let Some(crate::settings::Editable::Kind { shortlist }) = self
-                    .settings
-                    .rows
-                    .get(cursor)
-                    .map(|setting| &setting.editable)
+                if let Some(shortlist) = self.settings_shortlist(cursor)
+                    && !shortlist.is_empty()
                 {
-                    if !shortlist.is_empty() {
-                        let committed = &self.settings.rows[cursor].value;
-                        let candidate = shortlist.iter().position(|k| k == committed).unwrap_or(0);
-                        self.overlay.edit = Some(Edit {
-                            setting: cursor,
-                            candidate,
-                        });
-                    }
+                    let committed = &self.settings.rows[cursor].value;
+                    let candidate = shortlist.iter().position(|k| k == committed).unwrap_or(0);
+                    self.overlay.edit = Some(Edit {
+                        setting: cursor,
+                        candidate,
+                    });
                 }
             }
+        }
+    }
+
+    /// The shortlist of `settings.rows[index]`, when that row is in bounds and
+    /// `Editable::Kind` — the one place `apply_settings_open_detail` and
+    /// `apply_settings_step` reach into a row's own shortlist, so the two
+    /// cannot disagree about what counts as editable.
+    fn settings_shortlist(&self, index: usize) -> Option<&[String]> {
+        match self
+            .settings
+            .rows
+            .get(index)
+            .map(|setting| &setting.editable)
+        {
+            Some(crate::settings::Editable::Kind { shortlist }) => Some(shortlist),
+            _ => None,
         }
     }
 
@@ -1283,12 +1288,7 @@ impl Dashboard {
             self.move_settings_cursor(step);
             return;
         };
-        let Some(crate::settings::Editable::Kind { shortlist }) = self
-            .settings
-            .rows
-            .get(edit.setting)
-            .map(|setting| &setting.editable)
-        else {
+        let Some(shortlist) = self.settings_shortlist(edit.setting) else {
             return;
         };
         let len = shortlist.len();
@@ -6537,7 +6537,10 @@ mod tests {
         /// made `Editable::Kind` with the given committed value and shortlist —
         /// `three_settings()`'s own shape, for the group 5 edit tests that need an
         /// editable `agent_kind` row rather than three uniformly read-only ones.
-        fn settings_with_agent_kind(value: &str, shortlist: Vec<&str>) -> Vec<crate::settings::Setting> {
+        fn settings_with_agent_kind(
+            value: &str,
+            shortlist: Vec<&str>,
+        ) -> Vec<crate::settings::Setting> {
             vec![
                 crate::settings::Setting {
                     key: "openspec_bin",
@@ -6570,7 +6573,9 @@ mod tests {
         /// `reason` rather than editable — for the group 5 tests that need a
         /// refused `agent_kind` row (`Reason::Configured` or
         /// `Reason::NoIntegration`).
-        fn settings_with_agent_kind_refused(reason: crate::settings::Reason) -> Vec<crate::settings::Setting> {
+        fn settings_with_agent_kind_refused(
+            reason: crate::settings::Reason,
+        ) -> Vec<crate::settings::Setting> {
             let provenance = if reason == crate::settings::Reason::Configured {
                 crate::settings::Provenance::Configured
             } else {
@@ -6665,7 +6670,10 @@ mod tests {
             );
 
             d.apply(Action::Back);
-            assert!(d.overlay.edit.is_none(), "the third `Back` cancels the edit");
+            assert!(
+                d.overlay.edit.is_none(),
+                "the third `Back` cancels the edit"
+            );
             assert_eq!(
                 d.settings.rows[1].value, "claude",
                 "a cancelled edit writes nothing to the committed value"
@@ -6705,8 +6713,7 @@ mod tests {
         fn the_shortlist_is_the_installed_kinds_in_herdrs_order_and_wraps() {
             let mut d = dashboard_at(Route::Detail);
             d.overlay.panel = Some(Panel::Settings);
-            d.settings.rows =
-                settings_with_agent_kind("codex", vec!["claude", "codex", "cursor"]);
+            d.settings.rows = settings_with_agent_kind("codex", vec!["claude", "codex", "cursor"]);
             d.settings.cursor = 1;
 
             d.apply(Action::OpenDetail);
@@ -6794,8 +6801,7 @@ mod tests {
         fn a_configured_agent_kind_refuses_the_edit_and_names_the_file() {
             let mut d = dashboard_at(Route::Detail);
             d.overlay.panel = Some(Panel::Settings);
-            d.settings.rows =
-                settings_with_agent_kind_refused(crate::settings::Reason::Configured);
+            d.settings.rows = settings_with_agent_kind_refused(crate::settings::Reason::Configured);
             d.settings.cursor = 1;
 
             d.apply(Action::OpenDetail);

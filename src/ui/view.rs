@@ -39,10 +39,10 @@ const FOOTER_HINTS: [&str; 4] = ["? help", "q quit", "Enter detail", "Esc back"]
 /// here. `settings-window` widens the branch to the layer's other panel: an
 /// exhaustive match over `Option<Panel>` with no wildcard arm, so a third
 /// panel added later fails to compile here rather than drawing nothing.
-/// `ui::settings::render` takes `&dashboard.settings.rows` and
-/// `dashboard.settings.cursor` rather than the whole `Dashboard`, on exactly
-/// `ui::help::render`'s own terms of taking `&dashboard.overlay` rather than
-/// `dashboard` itself.
+/// `ui::settings::render` takes `&dashboard.settings.rows`,
+/// `dashboard.settings.cursor`, and `dashboard.overlay.edit` rather than the
+/// whole `Dashboard`, on exactly `ui::help::render`'s own terms of taking
+/// `&dashboard.overlay` rather than `dashboard` itself.
 pub fn render(frame: &mut Frame, dashboard: &Dashboard) {
     let (body, footer) = split_frame(frame.area());
     render_footer(frame, footer, dashboard);
@@ -54,6 +54,7 @@ pub fn render(frame: &mut Frame, dashboard: &Dashboard) {
             body,
             &dashboard.settings.rows,
             dashboard.settings.cursor,
+            dashboard.overlay.edit,
         ),
         None => {}
     }

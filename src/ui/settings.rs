@@ -23,6 +23,7 @@
 //! either rule row draws.
 
 use crate::settings::{Editable, Reason, Setting};
+use crate::ui::app::Edit;
 use crate::ui::layout::{columns, truncate_columns};
 use crate::ui::palette::{self, Role};
 use ratatui::Frame;
@@ -63,11 +64,38 @@ fn fit(text: &str, width: usize) -> String {
 /// The value row's own text: `key: value`, or `key: <value>` when the
 /// setting is editable — the affordance `settings-window`'s row-grammar
 /// requirement names, two ASCII characters bracketing the value alone.
-fn value_text(setting: &Setting) -> String {
+///
+/// `candidate` is the in-progress edit's own candidate string, when this row
+/// is the one being edited: `Some` overrides `setting.value` in the
+/// bracketed form, so the reader sees what they are about to commit rather
+/// than what is committed already ("`Enter` begins and commits an edit" ->
+/// "While an edit is in progress ... the value row SHALL render the
+/// candidate rather than the committed value").
+fn value_text(setting: &Setting, candidate: Option<&str>) -> String {
     match &setting.editable {
-        Editable::Kind { .. } => format!("{}: <{}>", setting.key, setting.value),
+        Editable::Kind { .. } => {
+            let value = candidate.unwrap_or(setting.value.as_str());
+            format!("{}: <{value}>", setting.key)
+        }
         Editable::No { .. } => format!("{}: {}", setting.key, setting.value),
     }
+}
+
+/// The candidate string a row renders in place of its committed value, when
+/// `edit` is in progress on exactly this row (`index` into `settings`) and
+/// the row is `Editable::Kind`. `None` in every other case — no edit, an
+/// edit on a different row, or (unreachably, since `setting-provenance`
+/// never hands an edit an out-of-range candidate) a candidate index past the
+/// end of the shortlist.
+fn candidate_text(setting: &Setting, edit: Option<Edit>, index: usize) -> Option<String> {
+    let edit = edit?;
+    if edit.setting != index {
+        return None;
+    }
+    let Editable::Kind { shortlist } = &setting.editable else {
+        return None;
+    };
+    shortlist.get(edit.candidate).cloned()
 }
 
 /// The source row's own text: the provenance's own label, with `, read-only`
@@ -94,15 +122,23 @@ fn source_text(setting: &Setting) -> String {
 /// in `settings` — [`content_rows`] rows in total, regardless of `width`.
 /// This is the interior alone: no top or bottom rule row, on exactly
 /// `ui::help::rows`' own division of labour.
-pub fn rows(width: u16, settings: &[Setting]) -> Vec<Row> {
+///
+/// `edit` is the in-progress edit, when there is one; its own row's value
+/// text renders [`candidate_text`]'s answer in place of the committed value,
+/// through [`value_text`]. Every other row is unaffected.
+pub fn rows(width: u16, settings: &[Setting], edit: Option<Edit>) -> Vec<Row> {
     let w = width as usize;
     let mut out = Vec::with_capacity(content_rows(settings));
     out.push(Row {
         segments: vec![(fit("Settings", w), Role::RegionHeadingFocused)],
     });
-    for setting in settings {
+    for (i, setting) in settings.iter().enumerate() {
+        let candidate = candidate_text(setting, edit, i);
         out.push(Row {
-            segments: vec![(fit(&value_text(setting), w), Role::ListRow)],
+            segments: vec![(
+                fit(&value_text(setting, candidate.as_deref()), w),
+                Role::ListRow,
+            )],
         });
         let source = format!("  {}", source_text(setting));
         out.push(Row {
@@ -149,7 +185,18 @@ fn draw_row(buf: &mut ratatui::buffer::Buffer, x: u16, y: u16, row: &Row) {
 /// `viewport`, on exactly the translation `settings-window`'s row-cursor
 /// requirement states. An empty `settings` slice clamps the cursor to the
 /// heading row rather than indexing out of bounds.
-pub fn render(frame: &mut Frame, body: Rect, settings: &[Setting], cursor: usize) {
+///
+/// `edit` is `dashboard.overlay.edit` — group 5's addition: `None` renders
+/// every value row at its committed value, exactly as before; `Some` renders
+/// its own setting's value row at the edit's own candidate instead, through
+/// [`rows`] and [`candidate_text`].
+pub fn render(
+    frame: &mut Frame,
+    body: Rect,
+    settings: &[Setting],
+    cursor: usize,
+    edit: Option<Edit>,
+) {
     let total = content_rows(settings);
     let area = crate::ui::layout::overlay_band(body, total);
     if area.width == 0 || area.height == 0 {
@@ -168,7 +215,7 @@ pub fn render(frame: &mut Frame, body: Rect, settings: &[Setting], cursor: usize
         1 + 2 * cursor.min(settings.len() - 1)
     };
     let offset = crate::ui::layout::viewport(total, cursor_row, interior_height as u16);
-    for (i, row) in rows(area.width, settings)
+    for (i, row) in rows(area.width, settings, edit)
         .iter()
         .enumerate()
         .skip(offset)
@@ -235,7 +282,7 @@ mod tests {
         let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
         let body = body_for(total);
         terminal
-            .draw(|frame| render(frame, body, settings_rows, 0))
+            .draw(|frame| render(frame, body, settings_rows, 0, None))
             .expect("draw a frame");
         terminal.backend().buffer().clone()
     }
@@ -260,7 +307,7 @@ mod tests {
             total.height
         );
 
-        let content = rows(band.width, settings_rows);
+        let content = rows(band.width, settings_rows, None);
         assert_eq!(content.len(), content_rows(settings_rows));
         for (i, row) in content.iter().enumerate() {
             let y = band.y + 1 + i as u16;
@@ -300,7 +347,7 @@ mod tests {
         assert_eq!(agent_kind.key, "agent_kind");
         assert_eq!(prompts.key, "prompts");
 
-        assert!(value_text(openspec_bin).contains("/usr/bin/openspec"));
+        assert!(value_text(openspec_bin, None).contains("/usr/bin/openspec"));
         assert!(
             source_text(openspec_bin).contains("PATH"),
             "openspec_bin's source names the probe step: {}",
@@ -309,9 +356,9 @@ mod tests {
         assert!(source_text(openspec_bin).contains("read-only"));
 
         assert!(
-            value_text(agent_kind).contains("<codex>"),
+            value_text(agent_kind, None).contains("<codex>"),
             "an editable setting's value is bracketed: {}",
-            value_text(agent_kind)
+            value_text(agent_kind, None)
         );
         assert!(
             source_text(agent_kind).contains("the sole installed integration"),
@@ -319,7 +366,7 @@ mod tests {
             source_text(agent_kind)
         );
 
-        assert!(value_text(prompts).contains("no per-kind overrides"));
+        assert!(value_text(prompts, None).contains("no per-kind overrides"));
         assert!(
             source_text(prompts).contains("the default"),
             "prompts' source names the default: {}",
@@ -329,7 +376,7 @@ mod tests {
 
         for setting in &settings_rows {
             assert_ne!(setting.key, "archived_count");
-            assert!(!value_text(setting).contains("archived_count"));
+            assert!(!value_text(setting, None).contains("archived_count"));
             assert!(!source_text(setting).contains("archived_count"));
         }
     }
@@ -376,13 +423,13 @@ mod tests {
             );
             assert_eq!(
                 text,
-                fit(&value_text(&settings_rows[0]), band.width as usize),
+                fit(&value_text(&settings_rows[0], None), band.width as usize),
                 "the value row is the fitted (truncated or padded) value text"
             );
 
             // No row of the panel exceeds the band's own width, measured by
             // `columns` rather than by byte or `char` length.
-            for row in rows(band.width, &settings_rows) {
+            for row in rows(band.width, &settings_rows, None) {
                 let total_cols: usize = row.segments.iter().map(|(t, _)| columns(t)).sum();
                 assert!(
                     total_cols <= band.width as usize,
@@ -406,7 +453,7 @@ mod tests {
             let body = body_for(total);
             let band = overlay_band(body, content_rows(&settings_rows));
             terminal
-                .draw(|frame| render(frame, body, &settings_rows, 0))
+                .draw(|frame| render(frame, body, &settings_rows, 0, None))
                 .unwrap_or_else(|e| panic!("draw at {w}x{h} failed: {e}"));
             let buffer = terminal.backend().buffer().clone();
             let band_row = |y: u16| -> String {
@@ -454,7 +501,7 @@ mod tests {
         let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
         let body = body_for(total);
         terminal
-            .draw(|frame| render(frame, body, settings_rows, cursor))
+            .draw(|frame| render(frame, body, settings_rows, cursor, None))
             .expect("draw a frame");
         terminal.backend().buffer().clone()
     }
@@ -481,7 +528,7 @@ mod tests {
             let total_rows = content_rows(&settings_rows);
             assert_eq!(total_rows - interior_height as usize, 2);
 
-            let content = rows(band.width, &settings_rows);
+            let content = rows(band.width, &settings_rows, None);
 
             for cursor in 0..settings_rows.len() {
                 let cursor_row = 1 + 2 * cursor;
@@ -512,6 +559,80 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    /// `fixture_rows()`'s own shape, with `agent_kind`'s shortlist widened to
+    /// `claude` and `codex` (committed `claude`) so an edit's candidate can
+    /// differ from the committed value — the group 5 fixture "An edit begins,
+    /// changes a candidate, and commits" needs at the render layer.
+    fn fixture_rows_with_agent_kind(committed: &str) -> Vec<settings::Setting> {
+        let cfg = config::Config {
+            archived_count: 9,
+            ..config::Config::default()
+        };
+        let binary = resolve::BinResolution {
+            found: Some(resolve::FoundBin {
+                path: PathBuf::from("/usr/bin/openspec"),
+                source: resolve::BinSource::Path,
+            }),
+            problems: Vec::new(),
+        };
+        let kind = KindResolution {
+            choice: Choice::Use {
+                kind: committed.to_string(),
+                source: Source::SoleIntegration,
+            },
+            installed: vec!["claude".to_string(), "codex".to_string()],
+        };
+        settings::settings(&cfg, &binary, Some(&kind))
+    }
+
+    /// `settings-window` -> "`Enter` begins and commits an edit" -> "While an
+    /// edit is in progress ... the value row SHALL render the candidate
+    /// rather than the committed value".
+    #[test]
+    fn the_value_row_renders_the_candidate_rather_than_the_committed_value_while_editing() {
+        let settings_rows = fixture_rows_with_agent_kind("claude");
+        let edit = crate::ui::app::Edit {
+            setting: 1,
+            candidate: 1,
+        };
+
+        for total in [Rect::new(0, 0, 120, 40), Rect::new(0, 0, 60, 20)] {
+            let body = body_for(total);
+            let band = overlay_band(body, content_rows(&settings_rows));
+            let backend = TestBackend::new(total.width, total.height);
+            let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+            terminal
+                .draw(|frame| render(frame, body, &settings_rows, 0, Some(edit)))
+                .expect("draw a frame");
+            let buffer = terminal.backend().buffer().clone();
+
+            // The agent_kind value row is the band's fourth interior row: one
+            // row below the top rule for the heading, then openspec_bin's own
+            // value and source rows, then agent_kind's value row.
+            let value_row_y = band.y + 4;
+            let text = row_text(&buffer, value_row_y);
+            assert!(
+                text.contains("<codex>"),
+                "the candidate codex is rendered at {}x{}: {text}",
+                total.width,
+                total.height
+            );
+            assert!(
+                !text.contains("<claude>"),
+                "the committed value claude is not rendered while editing at {}x{}: {text}",
+                total.width,
+                total.height
+            );
+
+            // No edit in progress renders the committed value, unchanged.
+            let unedited = rows(band.width, &settings_rows, None);
+            assert!(
+                row_plain_text(&unedited[3]).contains("<claude>"),
+                "with no edit in progress the committed value is rendered"
+            );
         }
     }
 }
