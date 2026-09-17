@@ -442,4 +442,76 @@ mod tests {
             }
         }
     }
+
+    /// [`draw`]'s own body, parameterised by the cursor rather than fixed at
+    /// `0` — `settings-window` task 4.5's own render fixture.
+    fn draw_at_cursor(
+        total: Rect,
+        settings_rows: &[settings::Setting],
+        cursor: usize,
+    ) -> ratatui::buffer::Buffer {
+        let backend = TestBackend::new(total.width, total.height);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let body = body_for(total);
+        terminal
+            .draw(|frame| render(frame, body, settings_rows, cursor))
+            .expect("draw a frame");
+        terminal.backend().buffer().clone()
+    }
+
+    /// `settings-window` -> "The band scrolls only when the cursor would leave
+    /// it".
+    #[test]
+    fn the_band_scrolls_only_when_the_cursor_would_leave_it() {
+        use crate::ui::layout::viewport;
+
+        let settings_rows = fixture_rows();
+        assert_eq!(settings_rows.len(), 3);
+
+        for total in [Rect::new(0, 0, 120, 8), Rect::new(0, 0, 60, 8)] {
+            let body = body_for(total);
+            // A body of 7 rows: the band is `min(content_rows(&settings_rows) + 2,
+            // body.height)` = `min(9, 7)` = 7, so it cannot hold the heading, six
+            // setting rows, and two rules — exactly the squeeze this scenario
+            // names.
+            let band = overlay_band(body, content_rows(&settings_rows));
+            assert_eq!(band.height, 7, "{}x{}", total.width, total.height);
+            let interior_height = band.height - 2;
+            assert_eq!(interior_height, 5);
+            let total_rows = content_rows(&settings_rows);
+            assert_eq!(total_rows - interior_height as usize, 2);
+
+            let content = rows(band.width, &settings_rows);
+
+            for cursor in 0..settings_rows.len() {
+                let cursor_row = 1 + 2 * cursor;
+                let expected_offset = viewport(total_rows, cursor_row, interior_height);
+                let buffer = draw_at_cursor(total, &settings_rows, cursor);
+
+                if cursor == 0 {
+                    assert_eq!(
+                        expected_offset, 0,
+                        "the first visible row is 0 at the first setting"
+                    );
+                }
+                // The cursor's own value row is inside the window.
+                assert!(cursor_row >= expected_offset);
+                assert!(cursor_row < expected_offset + interior_height as usize);
+                // The window never advances past the last one the content allows.
+                assert!(expected_offset <= total_rows - interior_height as usize);
+
+                for i in 0..interior_height as usize {
+                    let y = band.y + 1 + i as u16;
+                    assert_eq!(
+                        row_text(&buffer, y),
+                        row_plain_text(&content[expected_offset + i]),
+                        "cursor {cursor}, row {i} at {}x{}: window must equal \
+                         ui::layout::viewport's own answer",
+                        total.width,
+                        total.height
+                    );
+                }
+            }
+        }
+    }
 }

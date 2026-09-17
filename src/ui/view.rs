@@ -7,7 +7,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 
-use crate::ui::app::{Dashboard, Granularity, Route, Selection};
+use crate::ui::app::{Dashboard, Granularity, Panel, Route, Selection};
 use crate::ui::detail;
 use crate::ui::layout::{
     Gutters, columns, interior, scroll_offset, split_body, split_detail, split_frame,
@@ -36,13 +36,26 @@ const FOOTER_HINTS: [&str; 4] = ["? help", "q quit", "Enter detail", "Esc back"]
 /// **body** alone — the footer keeps its row and keeps naming `? help` and
 /// `q quit`, so the pane is never a frame with no way out named on it. The
 /// band's rectangle is `ui::help`'s own derivation from `body`, not one made
-/// here.
+/// here. `settings-window` widens the branch to the layer's other panel: an
+/// exhaustive match over `Option<Panel>` with no wildcard arm, so a third
+/// panel added later fails to compile here rather than drawing nothing.
+/// `ui::settings::render` takes `&dashboard.settings.rows` and
+/// `dashboard.settings.cursor` rather than the whole `Dashboard`, on exactly
+/// `ui::help::render`'s own terms of taking `&dashboard.overlay` rather than
+/// `dashboard` itself.
 pub fn render(frame: &mut Frame, dashboard: &Dashboard) {
     let (body, footer) = split_frame(frame.area());
     render_footer(frame, footer, dashboard);
     render_body(frame, body, dashboard);
-    if dashboard.overlay.panel.is_some() {
-        crate::ui::help::render(frame, body, &dashboard.overlay);
+    match dashboard.overlay.panel {
+        Some(Panel::Help) => crate::ui::help::render(frame, body, &dashboard.overlay),
+        Some(Panel::Settings) => crate::ui::settings::render(
+            frame,
+            body,
+            &dashboard.settings.rows,
+            dashboard.settings.cursor,
+        ),
+        None => {}
     }
 }
 
@@ -1125,6 +1138,10 @@ mod tests {
         route: Route,
     ) -> Dashboard {
         Dashboard {
+            settings: crate::settings::PanelState {
+                rows: Vec::new(),
+                cursor: 0,
+            },
             selection: None,
             overlay: crate::ui::app::Overlay {
                 panel: None,
@@ -1175,6 +1192,10 @@ mod tests {
         detail: Detail,
     ) -> Dashboard {
         Dashboard {
+            settings: crate::settings::PanelState {
+                rows: Vec::new(),
+                cursor: 0,
+            },
             selection: None,
             overlay: crate::ui::app::Overlay {
                 panel: None,
@@ -1227,6 +1248,10 @@ mod tests {
     // preamble — every scenario in this capability renders an empty `ChangeSet`.
     fn dashboard(repo: Option<&str>, route: Route) -> Dashboard {
         Dashboard {
+            settings: crate::settings::PanelState {
+                rows: Vec::new(),
+                cursor: 0,
+            },
             selection: None,
             overlay: crate::ui::app::Overlay {
                 panel: None,
@@ -1274,6 +1299,10 @@ mod tests {
     /// module's own established rule that every construction names all thirteen fields.
     fn dashboard_in_file_mode(repo: Option<&str>, route: Route) -> Dashboard {
         Dashboard {
+            settings: crate::settings::PanelState {
+                rows: Vec::new(),
+                cursor: 0,
+            },
             selection: None,
             overlay: crate::ui::app::Overlay {
                 panel: None,
@@ -3036,6 +3065,10 @@ mod tests {
     #[test]
     fn no_repository_names_the_directory_searched() {
         let d = Dashboard {
+            settings: crate::settings::PanelState {
+                rows: Vec::new(),
+                cursor: 0,
+            },
             selection: None,
             overlay: crate::ui::app::Overlay {
                 panel: None,
@@ -3997,6 +4030,10 @@ mod tests {
         let change =
             fixture::with_artifacts(fixture::active("detail-view", 4, 9), &[("proposal", &[])]);
         Dashboard {
+            settings: crate::settings::PanelState {
+                rows: Vec::new(),
+                cursor: 0,
+            },
             selection: None,
             overlay: crate::ui::app::Overlay {
                 panel: None,
@@ -5989,6 +6026,10 @@ mod tests {
     fn the_detail_document_fills_the_interior_at_60_and_120() {
         let base = detail_dashboard(twenty_line_source(), 0, Route::List);
         let mut d = Dashboard {
+            settings: crate::settings::PanelState {
+                rows: Vec::new(),
+                cursor: 0,
+            },
             selection: None,
             overlay: crate::ui::app::Overlay {
                 panel: None,
@@ -6348,6 +6389,10 @@ mod tests {
         // empty source" to "no change selected" — with a change selected
         // the region is never blank, `No content yet` is drawn instead.
         let no_change = Dashboard {
+            settings: crate::settings::PanelState {
+                rows: Vec::new(),
+                cursor: 0,
+            },
             selection: None,
             overlay: crate::ui::app::Overlay {
                 panel: None,
@@ -6791,6 +6836,10 @@ mod tests {
     fn the_list_route_still_moves_the_marker_with_detail_content_present() {
         let base = detail_dashboard(twenty_line_source(), 0, Route::List);
         let mut d = Dashboard {
+            settings: crate::settings::PanelState {
+                rows: Vec::new(),
+                cursor: 0,
+            },
             selection: None,
             overlay: crate::ui::app::Overlay {
                 panel: None,
@@ -10400,6 +10449,38 @@ mod tests {
             assert_eq!(
                 first, third,
                 "{width}x{height}: closing the overlay left the frame moved"
+            );
+        }
+    }
+
+    /// `settings-window` task 4.6: `ui::settings::render` is wired into
+    /// `ui::view::render` behind `overlay.panel == Some(Panel::Settings)`, on
+    /// exactly `ui::help::render`'s own terms above.
+    #[test]
+    fn the_settings_panel_draws_behind_its_own_panel_state() {
+        let frames: [(u16, u16); 2] = [(120, 40), (60, 20)];
+        for (width, height) in frames {
+            let mut dashboard = overlay_dashboard(false);
+            dashboard.settings.rows = vec![crate::settings::Setting {
+                key: "openspec_bin",
+                value: "zzsettingvalue".to_string(),
+                provenance: crate::settings::Provenance::Default,
+                editable: crate::settings::Editable::No {
+                    reason: crate::settings::Reason::SetOnce,
+                },
+            }];
+            let closed = render_at(width, height, &dashboard);
+            dashboard.apply(Action::ToggleSettings);
+            let open = render_at(width, height, &dashboard);
+            assert_ne!(
+                closed, open,
+                "{width}x{height}: opening the settings panel changed nothing at all"
+            );
+            dashboard.apply(Action::ToggleSettings);
+            let reclosed = render_at(width, height, &dashboard);
+            assert_eq!(
+                closed, reclosed,
+                "{width}x{height}: closing the settings panel left the frame moved"
             );
         }
     }
