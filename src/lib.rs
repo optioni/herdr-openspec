@@ -830,9 +830,10 @@ pub(crate) mod testutil {
         fn empty_dashboard() -> Dashboard {
             Dashboard {
                 selection: None,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),

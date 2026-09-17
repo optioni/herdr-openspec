@@ -869,9 +869,10 @@ mod tests {
     ) -> Dashboard {
         Dashboard {
             selection: None,
-            help: crate::ui::app::Help {
-                open: false,
+            overlay: crate::ui::app::Overlay {
+                panel: None,
                 scroll: 0,
+                edit: None,
             },
             repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
             searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
@@ -971,9 +972,10 @@ mod tests {
             ),
             Dashboard {
                 selection: None,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
                 repo: None,
                 searched_from: std::path::PathBuf::from(
@@ -2015,9 +2017,10 @@ mod tests {
     fn the_no_repository_block_is_three_rows() {
         let d = Dashboard {
             selection: None,
-            help: crate::ui::app::Help {
-                open: false,
+            overlay: crate::ui::app::Overlay {
+                panel: None,
                 scroll: 0,
+                edit: None,
             },
             repo: None,
             searched_from: std::path::PathBuf::from(
@@ -2091,9 +2094,10 @@ mod tests {
         // passed the whole suite.
         let with_problems = Dashboard {
             selection: None,
-            help: crate::ui::app::Help {
-                open: false,
+            overlay: crate::ui::app::Overlay {
+                panel: None,
                 scroll: 0,
+                edit: None,
             },
             repo: None,
             searched_from: d.searched_from.clone(),
@@ -3084,9 +3088,10 @@ mod tests {
 
         let d = Dashboard {
             selection: None,
-            help: crate::ui::app::Help {
-                open: false,
+            overlay: crate::ui::app::Overlay {
+                panel: None,
                 scroll: 0,
+                edit: None,
             },
             repo: None,
             searched_from: std::path::PathBuf::from(path),

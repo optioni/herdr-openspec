@@ -12,7 +12,7 @@
 //! This module owns the inventory, the overlay's interior row grammar, and
 //! the band's own row grammar — a top rule row, a scrolled window onto
 //! [`rows`], and a bottom rule row carrying the position indicator when the
-//! content does not fit. `layout::help_band` (the band's rectangle) and its
+//! content does not fit. `layout::overlay_band` (the band's rectangle) and its
 //! wiring into `ui::view::render` (deciding *whether* and *where* to call
 //! [`render`] at all) live elsewhere — `help-overlay`'s later task group 9.
 //! [`render`] here is total over every `Rect`, degenerate ones included, and
@@ -469,22 +469,22 @@ fn draw_row(buf: &mut ratatui::buffer::Buffer, x: u16, y: u16, row: &Row) {
 /// height) and the one-row case (the top rule alone, no bottom rule) are
 /// distinct enough to need their own early return.
 ///
-/// `scroll` is the caller's stored offset — `help.scroll`, on
+/// `scroll` is the caller's stored offset — `overlay.scroll`, on
 /// `detail.scroll`'s own terms — never resolved or clamped here; deciding
 /// *whether* to call this at all, and normalising `scroll` beforehand, are
 /// `Dashboard`'s job (`normalise_help_scroll`) and `ui::view::render`'s
 /// (`help-overlay`'s later task group 9).
-pub fn render(frame: &mut Frame, body: Rect, help: &crate::ui::app::Help) {
+pub fn render(frame: &mut Frame, body: Rect, overlay: &crate::ui::app::Overlay) {
     // The band is derived here, from the body, rather than taken as an
-    // already-computed rectangle. `help_band` is total and cheap, and owning
+    // already-computed rectangle. `overlay_band` is total and cheap, and owning
     // the derivation is what makes the parameter impossible to get wrong: a
     // caller that passed the body where a band was wanted would otherwise
     // draw a full-height overlay with no error anywhere, which is precisely
     // the silent-wrong-rectangle failure `scroll_offset`'s own argument-order
     // note warns about one level down. `specs/help-overlay/spec.md` states
     // this signature.
-    let area = crate::ui::layout::help_band(body, content_rows());
-    let scroll = help.scroll;
+    let area = crate::ui::layout::overlay_band(body, content_rows());
+    let scroll = overlay.scroll;
     if area.width == 0 || area.height == 0 {
         return;
     }
@@ -521,8 +521,8 @@ mod tests {
         Binding, Group, INVENTORY, Row, Scope, content_rows, fit, key_column, render, rows,
     };
     use crate::testutil::{cell, row_text};
-    use crate::ui::app::Action;
-    use crate::ui::layout::{columns, help_band, split_frame};
+    use crate::ui::app::{Action, Panel};
+    use crate::ui::layout::{columns, overlay_band, split_frame};
     use crate::ui::palette::{self, Role};
     use ratatui::backend::TestBackend;
     use ratatui::layout::Rect;
@@ -530,24 +530,25 @@ mod tests {
 
     /// The **body** a full dashboard render at `total` would hand to
     /// [`render`] — `layout::split_frame`'s own body region, the footer row
-    /// excluded. [`render`] derives the band from it with `help_band`, so
+    /// excluded. [`render`] derives the band from it with `overlay_band`, so
     /// these tests exercise that derivation rather than bypassing it;
     /// `band_for` below is what they compare the drawn rectangle against.
     /// `ui::view::render`'s own wiring of this pair is `help-overlay`'s
-    /// later task group 9, and needs no `help_band` call of its own.
+    /// later task group 9, and needs no `overlay_band` call of its own.
     fn body_for(total: Rect) -> Rect {
         let (body, _) = split_frame(total);
         body
     }
 
-    /// A closed-at-the-top [`Help`] — `scroll` `0`. [`render`] never reads
-    /// `open`: deciding *whether* to draw the overlay belongs to
+    /// A closed-at-the-top [`Overlay`] — `scroll` `0`. [`render`] never reads
+    /// `panel`: deciding *whether* to draw the overlay belongs to
     /// `ui::view::render` (task group 9), so a scenario that is only about
     /// the grammar or the geometry passes this and says so.
-    fn closed_at_top() -> crate::ui::app::Help {
-        crate::ui::app::Help {
-            open: false,
+    fn closed_at_top() -> crate::ui::app::Overlay {
+        crate::ui::app::Overlay {
+            panel: None,
             scroll: 0,
+            edit: None,
         }
     }
 
@@ -556,19 +557,19 @@ mod tests {
     /// geometry — including the vertical centring, which `body_for` alone
     /// would not reach — without recomputing the rule twice.
     fn band_for(total: Rect) -> Rect {
-        help_band(body_for(total), content_rows())
+        overlay_band(body_for(total), content_rows())
     }
 
-    /// A `Dashboard` with `help` set and every other field at its emptiest
+    /// A `Dashboard` with `overlay` set and every other field at its emptiest
     /// — no repository, no changes, `Route::List` — since none of this
     /// module's own scenarios reach past `apply`/`normalise_help_scroll`
     /// into anything that field would otherwise matter to. No `Default`
     /// exists for `Dashboard`, so every field is still named here, on the
     /// same terms as every other test module's own fixture.
-    fn minimal_dashboard(help: crate::ui::app::Help) -> crate::ui::app::Dashboard {
+    fn minimal_dashboard(overlay: crate::ui::app::Overlay) -> crate::ui::app::Dashboard {
         crate::ui::app::Dashboard {
             selection: None,
-            help,
+            overlay,
             repo: None,
             searched_from: std::path::PathBuf::new(),
             changes: crate::changes::empty_set(),
@@ -757,7 +758,7 @@ mod tests {
         // so `scroll` `0` shows all of them and `bottom_rule_row` draws no
         // indicator (`content_rows <= interior_height`).
         let height = content.len() as u16 + 2;
-        // Passed as the **body**: `help_band` over a body of exactly
+        // Passed as the **body**: `overlay_band` over a body of exactly
         // `content_rows + 2` returns that same rectangle — `min(45, 45)` with
         // no remainder to centre — so the band fills it and the row indices
         // below are the band's own.
@@ -913,14 +914,15 @@ mod tests {
             band.height, 39,
             "120x40's band is clamped to the body's 39 rows"
         );
-        let mut dashboard = minimal_dashboard(crate::ui::app::Help {
-            open: true,
+        let mut dashboard = minimal_dashboard(crate::ui::app::Overlay {
+            panel: Some(Panel::Help),
             scroll: 0,
+            edit: None,
         });
         let backend = TestBackend::new(120, 40);
         let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
         terminal
-            .draw(|f| render(f, body, &dashboard.help))
+            .draw(|f| render(f, body, &dashboard.overlay))
             .expect("draw the unscrolled band");
         let buffer = terminal.backend().buffer().clone();
         let bottom_y = band.y + band.height - 1;
@@ -930,9 +932,9 @@ mod tests {
             dashboard.apply(Action::Next);
         }
         dashboard.normalise_help_scroll(total);
-        assert_eq!(dashboard.help.scroll, 6, "clamped to 43 - 37");
+        assert_eq!(dashboard.overlay.scroll, 6, "clamped to 43 - 37");
         terminal
-            .draw(|f| render(f, body, &dashboard.help))
+            .draw(|f| render(f, body, &dashboard.overlay))
             .expect("draw the scrolled band");
         let buffer = terminal.backend().buffer().clone();
         assert_indicator(&buffer, band, bottom_y, "7-43/43");
@@ -943,14 +945,15 @@ mod tests {
         let body = body_for(total);
         let band = band_for(total);
         assert_eq!(band.height, 19);
-        let help = crate::ui::app::Help {
-            open: true,
+        let overlay = crate::ui::app::Overlay {
+            panel: Some(Panel::Help),
             scroll: 0,
+            edit: None,
         };
         let backend = TestBackend::new(60, 20);
         let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
         terminal
-            .draw(|f| render(f, body, &help))
+            .draw(|f| render(f, body, &overlay))
             .expect("draw the 60x20 band");
         let buffer = terminal.backend().buffer().clone();
         assert_indicator(&buffer, band, band.y + band.height - 1, "1-17/43");
@@ -988,9 +991,10 @@ mod tests {
         let total = Rect::new(0, 0, 60, 20);
         let body = body_for(total);
         let band = band_for(total);
-        let mut dashboard = minimal_dashboard(crate::ui::app::Help {
-            open: true,
+        let mut dashboard = minimal_dashboard(crate::ui::app::Overlay {
+            panel: Some(Panel::Help),
             scroll: 0,
+            edit: None,
         });
         let backend = TestBackend::new(60, 20);
         let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
@@ -999,10 +1003,10 @@ mod tests {
             dashboard.apply(Action::Next);
             dashboard.normalise_help_scroll(total);
             terminal
-                .draw(|f| render(f, body, &dashboard.help))
+                .draw(|f| render(f, body, &dashboard.overlay))
                 .expect("redraw after Next");
         }
-        assert_eq!(dashboard.help.scroll, 26, "clamped to 43 - 17");
+        assert_eq!(dashboard.overlay.scroll, 26, "clamped to 43 - 17");
         let buffer = terminal.backend().buffer().clone();
         let last_content_row = &rows(band.width)[content_rows() - 1];
         let interior_last_y = band.y + band.height - 2;
@@ -1016,11 +1020,11 @@ mod tests {
             dashboard.apply(Action::Prev);
             dashboard.normalise_help_scroll(total);
             terminal
-                .draw(|f| render(f, body, &dashboard.help))
+                .draw(|f| render(f, body, &dashboard.overlay))
                 .expect("redraw after Prev");
         }
         assert_eq!(
-            dashboard.help.scroll, 0,
+            dashboard.overlay.scroll, 0,
             "a held Prev saturates rather than underflowing"
         );
         let buffer = terminal.backend().buffer().clone();
@@ -1043,14 +1047,15 @@ mod tests {
         let body = body_for(total);
         let band = band_for(total);
         assert_eq!(band.height, 45);
-        let help = crate::ui::app::Help {
-            open: true,
+        let overlay = crate::ui::app::Overlay {
+            panel: Some(Panel::Help),
             scroll: 0,
+            edit: None,
         };
         let backend = TestBackend::new(120, 60);
         let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
         terminal
-            .draw(|f| render(f, body, &help))
+            .draw(|f| render(f, body, &overlay))
             .expect("draw the tall band");
         let buffer = terminal.backend().buffer().clone();
         assert_eq!(
@@ -1143,25 +1148,28 @@ mod tests {
     /// from any module that needs it.
     #[test]
     fn the_reader_is_never_trapped_in_a_degenerate_frame() {
-        let mut quitter = minimal_dashboard(crate::ui::app::Help {
-            open: true,
+        let mut quitter = minimal_dashboard(crate::ui::app::Overlay {
+            panel: Some(Panel::Help),
             scroll: 0,
+            edit: None,
         });
         quitter.apply(Action::Quit);
         assert!(quitter.quit);
 
-        let mut backer = minimal_dashboard(crate::ui::app::Help {
-            open: true,
+        let mut backer = minimal_dashboard(crate::ui::app::Overlay {
+            panel: Some(Panel::Help),
             scroll: 0,
+            edit: None,
         });
         backer.apply(Action::Back);
-        assert!(!backer.help.open);
+        assert!(backer.overlay.panel.is_none());
 
-        let mut toggler = minimal_dashboard(crate::ui::app::Help {
-            open: true,
+        let mut toggler = minimal_dashboard(crate::ui::app::Overlay {
+            panel: Some(Panel::Help),
             scroll: 0,
+            edit: None,
         });
         toggler.apply(Action::ToggleHelp);
-        assert!(!toggler.help.open);
+        assert!(toggler.overlay.panel.is_none());
     }
 }

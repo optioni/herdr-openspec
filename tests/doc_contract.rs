@@ -2928,8 +2928,8 @@ use herdr_openspec::changes::{ArtifactRef, Change, ChangeSet, Origin};
 use herdr_openspec::state::Mapping;
 use herdr_openspec::tasks::Progress;
 use herdr_openspec::ui::app::{
-    Action, ArtifactSection, Dashboard, Detail, Filter, Granularity, Help, Launch, Refresh, Route,
-    Sections, SelectPhase, Selection, Target, action_for,
+    Action, ArtifactSection, Dashboard, Detail, Filter, Granularity, Launch, Overlay, Panel,
+    Refresh, Route, Sections, SelectPhase, Selection, Target, action_for,
 };
 use herdr_openspec::ui::driver::mouse_action;
 use herdr_openspec::ui::help::{INVENTORY, Scope};
@@ -3166,9 +3166,10 @@ fn sweep_dashboard(route: Route, help_open: bool, fixture: SweepFixture) -> Dash
             collapsed: BTreeSet::new(),
         },
         file_mode: false,
-        help: Help {
-            open: help_open,
+        overlay: Overlay {
+            panel: if help_open { Some(Panel::Help) } else { None },
             scroll: 0,
+            edit: None,
         },
     }
 }

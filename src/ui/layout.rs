@@ -171,7 +171,7 @@ pub fn interior(area: Rect, gutters: Gutters) -> Rect {
 /// happens before the narrowing to `u16`, so the cast can never overflow.
 /// Every subtraction saturates too, so a `body` shorter than the wanted band
 /// height never underflows on the way to computing `y`.
-pub fn help_band(body: Rect, content_rows: usize) -> Rect {
+pub fn overlay_band(body: Rect, content_rows: usize) -> Rect {
     let wanted = content_rows.saturating_add(2);
     let height = wanted.min(body.height as usize) as u16;
     let y = body
@@ -412,7 +412,7 @@ pub(crate) fn truncate_columns(text: &str, max: usize) -> &str {
 mod tests {
     use crate::ui::app::Route;
     use crate::ui::layout::{
-        Gutters, LayoutMode, WIDE_MIN_WIDTH, columns, detail_gutters, help_band, interior, mode,
+        Gutters, LayoutMode, WIDE_MIN_WIDTH, columns, detail_gutters, interior, mode, overlay_band,
         scroll_offset, split_body, split_detail, split_frame, truncate_columns, viewport,
     };
     use ratatui::buffer::Buffer;
@@ -990,11 +990,11 @@ mod tests {
 
         let (body, _) = split_frame(Rect::new(0, 0, 120, 40));
         assert_eq!(body, Rect::new(0, 0, 120, 39));
-        assert_eq!(help_band(body, CONTENT_ROWS), Rect::new(0, 0, 120, 39));
+        assert_eq!(overlay_band(body, CONTENT_ROWS), Rect::new(0, 0, 120, 39));
 
         let (body, _) = split_frame(Rect::new(0, 0, 60, 20));
         assert_eq!(body, Rect::new(0, 0, 60, 19));
-        assert_eq!(help_band(body, CONTENT_ROWS), Rect::new(0, 0, 60, 19));
+        assert_eq!(overlay_band(body, CONTENT_ROWS), Rect::new(0, 0, 60, 19));
 
         // The body is tall enough to hold the whole band (44 rows: the 42
         // content rows plus a top and bottom rule row), so the band no
@@ -1003,7 +1003,7 @@ mod tests {
         // landing below the band rather than above it.
         let (body, _) = split_frame(Rect::new(0, 0, 120, 60));
         assert_eq!(body, Rect::new(0, 0, 120, 59));
-        assert_eq!(help_band(body, CONTENT_ROWS), Rect::new(0, 7, 120, 44));
+        assert_eq!(overlay_band(body, CONTENT_ROWS), Rect::new(0, 7, 120, 44));
     }
 
     /// `help-overlay` -> "The overlay degrades rather than panicking at any
@@ -1021,7 +1021,7 @@ mod tests {
             Rect::new(0, 0, 120, 2),             // 120x2
             Rect::new(0, 0, u16::MAX, u16::MAX), // extreme
             // Offset origins. Without at least one of these the whole suite
-            // stays green against a `help_band` that dropped `body.x` and
+            // stays green against a `overlay_band` that dropped `body.x` and
             // `body.y` and computed the centring from the height alone: every
             // other body here sits at the origin, so `band.x == body.x` and
             // `band.y >= body.y` are both satisfied by a constant `0`. The
@@ -1035,7 +1035,7 @@ mod tests {
 
         for body in bodies {
             for &rows in &content_rows {
-                let band = help_band(body, rows);
+                let band = overlay_band(body, rows);
                 assert_eq!(band.x, body.x, "body {body:?} rows {rows}: x");
                 assert_eq!(band.width, body.width, "body {body:?} rows {rows}: width");
                 assert!(
@@ -1060,7 +1060,7 @@ mod tests {
     }
 
     /// `help-overlay` -> "The overlay is a full-width band, vertically
-    /// centred in the body" — task 5.1's regression leg: adding `help_band`
+    /// centred in the body" — task 5.1's regression leg: adding `overlay_band`
     /// changes nothing about the existing 100-column breakpoint or the
     /// `split_body` regions it decides between.
     #[test]

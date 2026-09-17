@@ -41,8 +41,8 @@ pub fn render(frame: &mut Frame, dashboard: &Dashboard) {
     let (body, footer) = split_frame(frame.area());
     render_footer(frame, footer, dashboard);
     render_body(frame, body, dashboard);
-    if dashboard.help.open {
-        crate::ui::help::render(frame, body, &dashboard.help);
+    if dashboard.overlay.panel.is_some() {
+        crate::ui::help::render(frame, body, &dashboard.overlay);
     }
 }
 
@@ -734,7 +734,7 @@ mod tests {
     use crate::changes::{Change, empty_set, fixture};
     use crate::testutil::{cell, render_at, row_text};
     use crate::ui::app::{
-        Action, ArtifactSection, Dashboard, Detail, Filter, Granularity, Route, SectionKey,
+        Action, ArtifactSection, Dashboard, Detail, Filter, Granularity, Panel, Route, SectionKey,
         Selection, Target,
     };
     use crate::ui::layout::columns;
@@ -1126,9 +1126,10 @@ mod tests {
     ) -> Dashboard {
         Dashboard {
             selection: None,
-            help: crate::ui::app::Help {
-                open: false,
+            overlay: crate::ui::app::Overlay {
+                panel: None,
                 scroll: 0,
+                edit: None,
             },
             repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
             searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
@@ -1175,9 +1176,10 @@ mod tests {
     ) -> Dashboard {
         Dashboard {
             selection: None,
-            help: crate::ui::app::Help {
-                open: false,
+            overlay: crate::ui::app::Overlay {
+                panel: None,
                 scroll: 0,
+                edit: None,
             },
             repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
             searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
@@ -1226,9 +1228,10 @@ mod tests {
     fn dashboard(repo: Option<&str>, route: Route) -> Dashboard {
         Dashboard {
             selection: None,
-            help: crate::ui::app::Help {
-                open: false,
+            overlay: crate::ui::app::Overlay {
+                panel: None,
                 scroll: 0,
+                edit: None,
             },
             repo: repo.map(std::path::PathBuf::from),
             searched_from: std::path::PathBuf::from("/tmp/searched-from"),
@@ -1272,9 +1275,10 @@ mod tests {
     fn dashboard_in_file_mode(repo: Option<&str>, route: Route) -> Dashboard {
         Dashboard {
             selection: None,
-            help: crate::ui::app::Help {
-                open: false,
+            overlay: crate::ui::app::Overlay {
+                panel: None,
                 scroll: 0,
+                edit: None,
             },
             repo: repo.map(std::path::PathBuf::from),
             searched_from: std::path::PathBuf::from("/tmp/searched-from"),
@@ -3033,9 +3037,10 @@ mod tests {
     fn no_repository_names_the_directory_searched() {
         let d = Dashboard {
             selection: None,
-            help: crate::ui::app::Help {
-                open: false,
+            overlay: crate::ui::app::Overlay {
+                panel: None,
                 scroll: 0,
+                edit: None,
             },
             repo: None,
             searched_from: std::path::PathBuf::from(
@@ -3993,9 +3998,10 @@ mod tests {
             fixture::with_artifacts(fixture::active("detail-view", 4, 9), &[("proposal", &[])]);
         Dashboard {
             selection: None,
-            help: crate::ui::app::Help {
-                open: false,
+            overlay: crate::ui::app::Overlay {
+                panel: None,
                 scroll: 0,
+                edit: None,
             },
             repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
             searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
@@ -5984,9 +5990,10 @@ mod tests {
         let base = detail_dashboard(twenty_line_source(), 0, Route::List);
         let mut d = Dashboard {
             selection: None,
-            help: crate::ui::app::Help {
-                open: false,
+            overlay: crate::ui::app::Overlay {
+                panel: None,
                 scroll: 0,
+                edit: None,
             },
             repo: base.repo,
             searched_from: base.searched_from,
@@ -6342,9 +6349,10 @@ mod tests {
         // the region is never blank, `No content yet` is drawn instead.
         let no_change = Dashboard {
             selection: None,
-            help: crate::ui::app::Help {
-                open: false,
+            overlay: crate::ui::app::Overlay {
+                panel: None,
                 scroll: 0,
+                edit: None,
             },
             repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
             searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
@@ -6784,9 +6792,10 @@ mod tests {
         let base = detail_dashboard(twenty_line_source(), 0, Route::List);
         let mut d = Dashboard {
             selection: None,
-            help: crate::ui::app::Help {
-                open: false,
+            overlay: crate::ui::app::Overlay {
+                panel: None,
                 scroll: 0,
+                edit: None,
             },
             repo: base.repo,
             searched_from: base.searched_from,
@@ -10163,7 +10172,7 @@ mod tests {
                 drawn_width: None,
             },
         );
-        dashboard.help.open = open;
+        dashboard.overlay.panel = if open { Some(Panel::Help) } else { None };
         dashboard
     }
 
@@ -10199,7 +10208,7 @@ mod tests {
             );
 
             let total = crate::ui::help::content_rows();
-            let band = crate::ui::layout::help_band(body, total);
+            let band = crate::ui::layout::overlay_band(body, total);
             assert_eq!(band.x, 0, "{width}x{height}: the band starts at column 0");
             assert_eq!(
                 band.width, width,
@@ -10251,7 +10260,7 @@ mod tests {
             let open = render_at(width, height, &overlay_dashboard(true));
             let (body, _) =
                 crate::ui::layout::split_frame(ratatui::layout::Rect::new(0, 0, width, height));
-            let band = crate::ui::layout::help_band(body, crate::ui::help::content_rows());
+            let band = crate::ui::layout::overlay_band(body, crate::ui::help::content_rows());
 
             let closed_rows: Vec<String> = (0..height).map(|y| row_text(&closed, y)).collect();
             let band_rows: Vec<String> = (band.y..band.y + band.height)
@@ -10319,7 +10328,7 @@ mod tests {
             let re = render_at(width, height, &reachable);
             let (body, _) =
                 crate::ui::layout::split_frame(ratatui::layout::Rect::new(0, 0, width, height));
-            let band = crate::ui::layout::help_band(body, crate::ui::help::content_rows());
+            let band = crate::ui::layout::overlay_band(body, crate::ui::help::content_rows());
 
             // The two bands are byte-identical, cell for cell, style included.
             for y in band.y..band.y + band.height {

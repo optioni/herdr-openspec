@@ -644,22 +644,72 @@ pub enum Target {
     },
 }
 
-/// `help-overlay`'s addition: the help overlay's own layer state — whether it
-/// is open, and the scroll position within its own row sequence. A sibling of
-/// `Filter` on `filter.active`'s own terms: the overlay is a layer over
-/// whichever route is current rather than a third `Route` variant, and
-/// closing it must return the reader to that route, which a `Route::Help`
-/// would have to remember separately. `scroll` is a user-controlled position
-/// on exactly `detail.scroll`'s terms, not derived geometry, clamped on every
-/// draw by `ui::layout::scroll_offset`. Deliberately implements no `Default`,
-/// anywhere in the crate, on the same terms as `Dashboard`, `Filter`,
-/// `Detail`, `Refresh`, and `Launch`: every construction and destructuring
-/// names both fields, with no `..` rest. See `specs/help-overlay/spec.md` and
-/// the `NODEFAULT-UI` check, whose type list now covers this type too.
+/// `help-overlay`'s addition, generalised by `settings-window`: the overlay
+/// layer's own state — which panel is open, if any, the scroll position
+/// within its own row sequence, and (`settings-window`'s addition) the
+/// in-progress edit of a setting's value, if any. A sibling of `Filter` on
+/// `filter.active`'s own terms: the overlay is a layer over whichever route
+/// is current rather than a third `Route` variant, and closing it must
+/// return the reader to that route, which a `Route::Help` (or a
+/// `Route::Settings`) would have to remember separately.
+///
+/// `panel` replaces `help-overlay`'s own `open: bool` with `Option<Panel>`
+/// rather than adding a second boolean beside it: two independent flags
+/// would make "both panels open" a representable state that every dispatch
+/// and every render would have to refuse, where `Option<Panel>` makes it
+/// unrepresentable by construction (design.md -> Decision 1). `scroll` is a
+/// user-controlled position on exactly `detail.scroll`'s terms, not derived
+/// geometry, clamped on every draw by `ui::layout::scroll_offset`, and
+/// belongs to the panel `panel` names — closing one panel and opening the
+/// other starts that scroll at the top again, on the same terms
+/// `apply_help_action`'s own `ToggleHelp` arm already reset it on open.
+///
+/// Deliberately implements no `Default`, anywhere in the crate, on the same
+/// terms as `Dashboard`, `Filter`, `Detail`, `Refresh`, and `Launch`: every
+/// construction and destructuring names all three fields, with no `..`
+/// rest. See `specs/help-overlay/spec.md`, `specs/dashboard-loop/spec.md`,
+/// and the `NODEFAULT-UI` check, whose type list now covers this type
+/// (renamed from `Help`) and `Edit` too.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Help {
-    pub open: bool,
+pub struct Overlay {
+    pub panel: Option<Panel>,
     pub scroll: usize,
+    pub edit: Option<Edit>,
+}
+
+/// `settings-window`'s addition: which of the two panels `Overlay` carries,
+/// when one is open at all. Exhaustively matched wherever a panel's identity
+/// decides behaviour — `Dashboard::apply_help_action` does not yet branch on
+/// it (task group 1 is a rename, not new behaviour), but a `match` written
+/// with no wildcard arm here is what makes a third panel added later a
+/// compile error at every such site rather than a silently-inert branch. Not
+/// named in `NODEFAULT-UI`'s scanned type sets: that gate's positive control
+/// greps for `struct $T {`, and an enum has no such declaration to find
+/// (task 10.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Panel {
+    Help,
+    Settings,
+}
+
+/// `settings-window`'s addition: an in-progress edit of one setting's value,
+/// begun on `OpenDetail` and committed on `OpenDetail`, cancelled on `Back`
+/// (task group 5). `setting` is the index into `settings::PanelState::rows`
+/// of the row being edited; `candidate` is the index into that row's own
+/// shortlist of the value currently highlighted, which `Next`/`Prev` cycle
+/// with wrap while an edit is in progress. Both are plain `usize` rather
+/// than a resolved value: the candidate is rendered instead of the
+/// committed value while editing (task 5.3), so the edit's own state is
+/// nothing more than "which row, which position in its shortlist" and needs
+/// no copy of the value itself. Deliberately implements no `Default`, on the
+/// same terms as `Overlay` and every other state type in this module: every
+/// construction and destructuring names both fields, with no `..` rest. See
+/// `specs/dashboard-loop/spec.md` and the `NODEFAULT-UI` check, whose type
+/// list now covers this type too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Edit {
+    pub setting: usize,
+    pub candidate: usize,
 }
 
 /// `text-selection`'s addition: the drag-selection state. `None` when nothing is
@@ -762,9 +812,11 @@ pub struct Dashboard {
     /// sets `false` on both branches, since it never probes for a binary. Read only by the
     /// header badge (`ui::view::render_header`). See `specs/responsive-layout/spec.md`.
     pub file_mode: bool,
-    /// `help-overlay`'s addition: the help overlay's layer state. See
-    /// `specs/help-overlay/spec.md`.
-    pub help: Help,
+    /// `help-overlay`'s addition, generalised by `settings-window`: the overlay
+    /// layer's state, carrying whichever panel is open (if any) rather than only
+    /// the help panel. See `specs/help-overlay/spec.md` and
+    /// `specs/dashboard-loop/spec.md`.
+    pub overlay: Overlay,
     /// `text-selection`'s addition: the drag-selection state, `None` when nothing is
     /// selected. Cleared by `sync_detail` exactly when the detail content reloads —
     /// never by living inside `Detail` and being silently discarded by one. See
@@ -776,13 +828,13 @@ impl Dashboard {
     /// Apply `action`, mutating only the field(s) it names. `Ignore` changes
     /// nothing. `help-overlay`'s overlay layer (`apply_help_action`) takes
     /// precedence over the ordinary route dispatch (`apply_route_action`)
-    /// whenever `help.open` is set — see design.md -> Decision 2. After
+    /// whenever `overlay.panel` is `Some` — see design.md -> Decision 2. After
     /// either, `list-sections`' one blanket rule runs for **every** action:
     /// `refresh.requested` is set to `true` when `needs_archived_refresh()`
     /// holds, so a future key that opens a section cannot forget to trigger
     /// its resolution. See design.md -> Decision 6.
     pub fn apply(&mut self, action: Action) {
-        if self.help.open {
+        if self.overlay.panel.is_some() {
             // `help-overlay`: this branch takes precedence over the route
             // dispatch and the filter dispatch alike, and over every other
             // capability that owns an action's semantics. See
@@ -801,7 +853,7 @@ impl Dashboard {
     }
 
     /// The route dispatch: every action's ordinary effect, reached only while
-    /// `help.open` is `false`. Pulled out of `apply` so the overlay's own
+    /// `overlay.panel` is `None`. Pulled out of `apply` so the overlay's own
     /// precedence branch can sit ahead of it without duplicating the blanket
     /// `needs_archived_refresh()` rule that follows both. See
     /// `specs/dashboard-loop/spec.md`.
@@ -946,10 +998,10 @@ impl Dashboard {
             // `help-overlay`: reached only while the overlay is closed —
             // `apply` dispatches to `apply_help_action` instead while it is
             // open, and that branch closes it rather than reopening it. Open
-            // it and reset `help.scroll`, changing nothing else.
+            // it and reset `overlay.scroll`, changing nothing else.
             Action::ToggleHelp => {
-                self.help.open = true;
-                self.help.scroll = 0;
+                self.overlay.panel = Some(Panel::Help);
+                self.overlay.scroll = 0;
             }
             // `text-selection`: a press or a drag over a non-header detail
             // content row. See `apply_select` for the press-count and
@@ -1012,7 +1064,7 @@ impl Dashboard {
         }
     }
 
-    /// `help-overlay`'s overlay layer: while `help.open` is set, this table
+    /// `help-overlay`'s overlay layer: while `overlay.panel` is `Some`, this table
     /// takes precedence over `apply_route_action` and over every capability
     /// that owns an action's semantics elsewhere — `detail-scroll`,
     /// `artifact-tabs`, `artifact-folds`, `list-selection`, `live-updates`,
@@ -1028,14 +1080,14 @@ impl Dashboard {
         match action {
             Action::Quit => self.quit = true,
             Action::ToggleHelp | Action::Back => {
-                self.help.open = false;
-                self.help.scroll = 0;
+                self.overlay.panel = None;
+                self.overlay.scroll = 0;
             }
             Action::Next | Action::ScrollDown => {
-                self.help.scroll = self.help.scroll.saturating_add(1);
+                self.overlay.scroll = self.overlay.scroll.saturating_add(1);
             }
             Action::Prev | Action::ScrollUp => {
-                self.help.scroll = self.help.scroll.saturating_sub(1);
+                self.overlay.scroll = self.overlay.scroll.saturating_sub(1);
             }
             Action::OpenDetail
             | Action::SelectTab(_)
@@ -1425,10 +1477,10 @@ impl Dashboard {
     /// The overlay's own per-frame clamp — a **second** normaliser beside
     /// [`Self::normalise_scroll`], called once per frame by
     /// `ui::driver::run_loop` right after it. Changes nothing while
-    /// `help.open` is false; while it is true, clamps `help.scroll` against
-    /// the band's own interior height, derived from `frame_area` through
-    /// `layout::split_frame`'s body and `layout::help_band` — never through
-    /// the detail region `normalise_scroll` reads.
+    /// `overlay.panel` is `None`; while it is `Some`, clamps `overlay.scroll`
+    /// against the band's own interior height, derived from `frame_area`
+    /// through `layout::split_frame`'s body and `layout::overlay_band` —
+    /// never through the detail region `normalise_scroll` reads.
     ///
     /// It is not folded into `normalise_scroll`, and the reason is a
     /// measured contradiction rather than tidiness: `normalise_scroll`
@@ -1436,22 +1488,22 @@ impl Dashboard {
     /// `detail-scroll` requires of it in as many words, and the detail
     /// region is not drawn at `Route::List` below the breakpoint — exactly
     /// the 60x20 `Route::List` fixture this change's own held-key scenario
-    /// uses. Sharing the function would leave `help.scroll` unclamped in
+    /// uses. Sharing the function would leave `overlay.scroll` unclamped in
     /// the one case that scenario exists to pin (design.md -> Decision 10).
     ///
     /// `ui::layout::scroll_offset`'s parameter order is `(lines, scroll,
     /// height)` — `content_rows` first, on the same terms every other call
     /// site in this change writes it.
     pub fn normalise_help_scroll(&mut self, frame_area: ratatui::layout::Rect) {
-        if !self.help.open {
+        if self.overlay.panel.is_none() {
             return;
         }
         let (body, _) = crate::ui::layout::split_frame(frame_area);
-        let band = crate::ui::layout::help_band(body, crate::ui::help::content_rows());
+        let band = crate::ui::layout::overlay_band(body, crate::ui::help::content_rows());
         let interior_height = band.height.saturating_sub(2);
-        self.help.scroll = crate::ui::layout::scroll_offset(
+        self.overlay.scroll = crate::ui::layout::scroll_offset(
             crate::ui::help::content_rows(),
-            self.help.scroll,
+            self.overlay.scroll,
             interior_height,
         );
     }
@@ -2029,9 +2081,10 @@ mod tests {
                 collapsed: std::collections::BTreeSet::new(),
             },
             file_mode: false,
-            help: crate::ui::app::Help {
-                open: false,
+            overlay: crate::ui::app::Overlay {
+                panel: None,
                 scroll: 0,
+                edit: None,
             },
         }
     }
@@ -2059,7 +2112,7 @@ mod tests {
             launch,
             sections: _,
             file_mode: _,
-            help: _,
+            overlay: _,
             selection: _,
         } = &d;
         assert_eq!(*repo, Some(std::path::PathBuf::from("/repo")));
@@ -2415,7 +2468,7 @@ mod tests {
             launch,
             sections: _,
             file_mode: _,
-            help: _,
+            overlay: _,
             selection: _,
         } = &d;
         assert_eq!(launch.pending, None);
@@ -4741,8 +4794,8 @@ mod tests {
         use crate::changes::fixture;
         use crate::testutil::RecordingReader;
         use crate::ui::app::{
-            Action, ArtifactSection, Dashboard, Detail, Filter, Granularity, Route, SectionKey,
-            Sections, SelectPhase, Selection, Target, action_for,
+            Action, ArtifactSection, Dashboard, Detail, Filter, Granularity, Panel, Route,
+            SectionKey, Sections, SelectPhase, Selection, Target, action_for,
         };
 
         fn empty_filter() -> Filter {
@@ -4797,9 +4850,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
             }
         }
@@ -4850,9 +4904,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
             }
         }
@@ -4909,9 +4964,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
             }
         }
@@ -5398,9 +5454,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
             };
 
@@ -5640,16 +5697,16 @@ mod tests {
             let before = d.clone();
 
             d.apply(Action::ToggleHelp);
-            assert!(d.help.open);
-            assert_eq!(d.help.scroll, 0);
+            assert!(d.overlay.panel.is_some());
+            assert_eq!(d.overlay.scroll, 0);
             assert_eq!(d.route, Route::Detail);
             assert_eq!(d.detail.tab, 2);
             assert_eq!(d.detail.scroll, 7);
             assert_eq!(d.selected, 3);
 
             d.apply(Action::ToggleHelp);
-            assert!(!d.help.open);
-            assert_eq!(d.help.scroll, 0);
+            assert!(d.overlay.panel.is_none());
+            assert_eq!(d.overlay.scroll, 0);
             assert_eq!(d.route, Route::Detail);
             assert_eq!(d.detail.tab, 2);
             assert_eq!(d.detail.scroll, 7);
@@ -5671,10 +5728,13 @@ mod tests {
             let mut d = dashboard_at(Route::Detail);
             d.filter.active = true;
             d.filter.query = "add".to_string();
-            d.help.open = true;
+            d.overlay.panel = Some(Panel::Help);
 
             d.apply(Action::Back);
-            assert!(!d.help.open, "the overlay is the outermost layer");
+            assert!(
+                d.overlay.panel.is_none(),
+                "the overlay is the outermost layer"
+            );
             assert!(
                 d.filter.active,
                 "dismissing the overlay is not a filter move"
@@ -5709,7 +5769,7 @@ mod tests {
                 std::collections::BTreeMap::new(),
             );
             open.detail.tab = 1;
-            open.help.open = true;
+            open.overlay.panel = Some(Panel::Help);
             let before = open.clone();
             for action in eighteen_inert_actions() {
                 open.apply(action);
@@ -5723,7 +5783,7 @@ mod tests {
             assert_eq!(open.agents, before.agents);
             assert_eq!(open.agent_names, before.agent_names);
             assert_eq!(open.sections, before.sections);
-            assert_eq!(open.help, before.help);
+            assert_eq!(open.overlay, before.overlay);
             assert_eq!(
                 open.selection, before.selection,
                 "`Select` is one of the eighteen — the overlay is closed to it too"
@@ -5761,25 +5821,25 @@ mod tests {
             let mut d = dashboard_at(Route::Detail);
             d.detail.scroll = 4;
             d.selected = 1;
-            d.help.open = true;
+            d.overlay.panel = Some(Panel::Help);
 
             d.apply(Action::Next);
-            assert_eq!(d.help.scroll, 1);
+            assert_eq!(d.overlay.scroll, 1);
             d.apply(Action::ScrollDown);
-            assert_eq!(d.help.scroll, 2);
+            assert_eq!(d.overlay.scroll, 2);
             d.apply(Action::Prev);
-            assert_eq!(d.help.scroll, 1);
+            assert_eq!(d.overlay.scroll, 1);
             d.apply(Action::ScrollUp);
-            assert_eq!(d.help.scroll, 0);
+            assert_eq!(d.overlay.scroll, 0);
             d.apply(Action::Prev);
-            assert_eq!(d.help.scroll, 0, "saturates rather than underflowing");
+            assert_eq!(d.overlay.scroll, 0, "saturates rather than underflowing");
 
             assert_eq!(d.detail.scroll, 4);
             assert_eq!(d.selected, 1);
 
             d.apply(Action::Back);
-            assert!(!d.help.open);
-            assert_eq!(d.help.scroll, 0);
+            assert!(d.overlay.panel.is_none());
+            assert_eq!(d.overlay.scroll, 0);
 
             d.apply(Action::Quit);
             assert!(d.quit);
@@ -5790,12 +5850,12 @@ mod tests {
         #[test]
         fn both_quit_keys_still_quit_from_inside_the_overlay() {
             let mut d = dashboard_at(Route::List);
-            d.help.open = true;
+            d.overlay.panel = Some(Panel::Help);
             d.apply(Action::Quit);
             assert!(d.quit);
 
             let mut d2 = dashboard_at(Route::List);
-            d2.help.open = true;
+            d2.overlay.panel = Some(Panel::Help);
             d2.filter.active = true;
             d2.apply(Action::Quit);
             assert!(d2.quit, "no combination of layers traps the reader");
@@ -5813,7 +5873,7 @@ mod tests {
                 Vec::new(),
                 std::collections::BTreeMap::new(),
             );
-            d.help.open = true;
+            d.overlay.panel = Some(Panel::Help);
             let before = d.clone();
 
             for action in [
@@ -5842,7 +5902,7 @@ mod tests {
             assert_eq!(d.agents, before.agents);
             assert_eq!(d.agent_names, before.agent_names);
             assert_eq!(d.sections, before.sections);
-            assert_eq!(d.help, before.help);
+            assert_eq!(d.overlay, before.overlay);
         }
 
         /// `help-overlay` -> "The overlay swallows the seventeen inert
@@ -5857,7 +5917,7 @@ mod tests {
                 std::collections::BTreeMap::new(),
             );
             d.detail.tab = 1;
-            d.help.open = true;
+            d.overlay.panel = Some(Panel::Help);
             let sections_before = d.sections.clone();
 
             for action in [
@@ -5882,8 +5942,8 @@ mod tests {
             assert_eq!(d.filter.query, "");
             assert!(!d.filter.active);
             assert_eq!(d.sections, sections_before);
-            assert!(d.help.open);
-            assert_eq!(d.help.scroll, 0);
+            assert!(d.overlay.panel.is_some());
+            assert_eq!(d.overlay.scroll, 0);
         }
 
         /// `help-overlay` -> "`j` and `k` scroll the overlay rather than the
@@ -5893,14 +5953,14 @@ mod tests {
             let mut d = dashboard_at(Route::Detail);
             d.detail.scroll = 4;
             d.selected = 1;
-            d.help.open = true;
+            d.overlay.panel = Some(Panel::Help);
 
             d.apply(Action::Next);
             d.apply(Action::Next);
             d.apply(Action::Next);
-            assert_eq!(d.help.scroll, 3);
+            assert_eq!(d.overlay.scroll, 3);
             d.apply(Action::Prev);
-            assert_eq!(d.help.scroll, 2);
+            assert_eq!(d.overlay.scroll, 2);
 
             assert_eq!(
                 d.detail.scroll, 4,
@@ -5911,21 +5971,21 @@ mod tests {
             let mut d2 = dashboard_at(Route::List);
             d2.detail.scroll = 4;
             d2.selected = 1;
-            d2.help.open = true;
+            d2.overlay.panel = Some(Panel::Help);
             d2.apply(Action::Next);
             d2.apply(Action::Next);
             d2.apply(Action::Next);
             d2.apply(Action::Prev);
             assert_eq!(
-                d2.help.scroll, 2,
+                d2.overlay.scroll, 2,
                 "route-agnostic where Next and Prev are not"
             );
             assert_eq!(d2.selected, 1);
 
             let mut d3 = dashboard_at(Route::Detail);
-            d3.help.open = true;
+            d3.overlay.panel = Some(Panel::Help);
             d3.apply(Action::Prev);
-            assert_eq!(d3.help.scroll, 0, "saturates rather than underflowing");
+            assert_eq!(d3.overlay.scroll, 0, "saturates rather than underflowing");
         }
 
         #[test]
@@ -5990,9 +6050,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
             }
         }
@@ -6948,9 +7009,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
             };
             d.apply(Action::Next);
@@ -7012,9 +7074,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
             };
             for _ in 0..4 {
@@ -7091,9 +7154,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
             };
             d.apply(Action::FilterPush('j'));
@@ -7146,9 +7210,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
             };
             d.apply(Action::Back);
@@ -7196,9 +7261,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
             };
             d2.apply(Action::FilterStart);
@@ -7248,9 +7314,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
             };
             d3.apply(Action::Back);
@@ -7333,9 +7400,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
             }
         }
@@ -7604,9 +7672,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
             };
             d.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 20));
@@ -7652,9 +7721,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
             };
             d2.normalise_scroll(ratatui::layout::Rect::new(0, 0, 60, 20));
@@ -7700,9 +7770,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
             };
             d3.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 40));
@@ -7773,9 +7844,10 @@ mod tests {
                         collapsed: std::collections::BTreeSet::new(),
                     },
                     file_mode: false,
-                    help: crate::ui::app::Help {
-                        open: false,
+                    overlay: crate::ui::app::Overlay {
+                        panel: None,
                         scroll: 0,
+                        edit: None,
                     },
                 }
             }
@@ -7845,9 +7917,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
             };
             d.normalise_scroll(ratatui::layout::Rect::new(0, 0, 60, 20));
@@ -7925,9 +7998,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
             };
             d.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 20));
@@ -8060,9 +8134,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
             };
             let before = dashboard.clone();
@@ -8149,9 +8224,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
             }
         }
@@ -8307,7 +8383,7 @@ mod tests {
                 launch,
                 sections,
                 file_mode: _,
-                help,
+                overlay,
                 selection,
             } = &d;
             assert_eq!(*repo, None);
@@ -8333,8 +8409,8 @@ mod tests {
             assert!(launch.problems.is_empty());
             assert!(!launch.in_flight);
             assert!(sections.collapsed.is_empty());
-            assert!(!help.open);
-            assert_eq!(help.scroll, 0);
+            assert!(overlay.panel.is_none());
+            assert_eq!(overlay.scroll, 0);
             assert_eq!(*selection, None);
         }
 
@@ -8691,9 +8767,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
             };
             d.apply(Action::Next);
@@ -8749,9 +8826,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
             };
             d2.apply(Action::Prev);
@@ -8819,9 +8897,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
             }
         }
@@ -9166,9 +9245,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
             };
             let recorder = RecordingReader::always(Ok("text".to_string()));
@@ -9249,9 +9329,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
             };
             let recorder = RecordingReader::new(
@@ -9447,9 +9528,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
             };
             let recorder = RecordingReader::always(Ok("t".to_string()));
@@ -9541,9 +9623,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
             };
             let recorder2 = RecordingReader::always(Err("must not be called".to_string()));

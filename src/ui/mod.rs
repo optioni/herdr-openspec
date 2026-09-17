@@ -497,9 +497,10 @@ pub fn load(
                 std::fs::canonicalize(start).unwrap_or_else(|_| start.to_path_buf());
             Dashboard {
                 selection: None,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
                 repo: Some(root),
                 searched_from,
@@ -551,9 +552,10 @@ pub fn load(
         }
         crate::resolve::RepoSearch::NotFound { searched_from } => Dashboard {
             selection: None,
-            help: crate::ui::app::Help {
-                open: false,
+            overlay: crate::ui::app::Overlay {
+                panel: None,
                 scroll: 0,
+                edit: None,
             },
             repo: None,
             searched_from,
@@ -752,9 +754,10 @@ mod tests {
             );
             Dashboard {
                 selection: None,
-                help: crate::ui::app::Help {
-                    open: false,
+                overlay: crate::ui::app::Overlay {
+                    panel: None,
                     scroll: 0,
+                    edit: None,
                 },
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
@@ -909,9 +912,10 @@ mod tests {
                 );
                 let mut dashboard = Dashboard {
                     selection: None,
-                    help: crate::ui::app::Help {
-                        open: false,
+                    overlay: crate::ui::app::Overlay {
+                        panel: None,
                         scroll: 0,
+                        edit: None,
                     },
                     repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                     searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
@@ -1061,9 +1065,10 @@ mod tests {
                 let other = crate::changes::fixture::active("fix-empty-basket", 7, 7);
                 Dashboard {
                     selection: None,
-                    help: crate::ui::app::Help {
-                        open: false,
+                    overlay: crate::ui::app::Overlay {
+                        panel: None,
                         scroll: 0,
+                        edit: None,
                     },
                     repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                     searched_from: std::path::PathBuf::from("/tmp/demo-repo"),

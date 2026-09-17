@@ -322,7 +322,7 @@ pub fn mouse_action(dashboard: &Dashboard, area: Rect, mouse: &MouseEvent) -> Ac
     // extracted into a sibling function would take `Action::ToggleHelp` out
     // of that slice and let the table and the resolver drift with every test
     // still green.
-    if dashboard.help.open {
+    if dashboard.overlay.panel.is_some() {
         let point = ratatui::layout::Position::new(mouse.column, mouse.row);
         // Outside the frame is `Action::Ignore` on every event kind, checked
         // before anything else: such a point is outside the band too, but it
@@ -345,7 +345,7 @@ pub fn mouse_action(dashboard: &Dashboard, area: Rect, mouse: &MouseEvent) -> Ac
                 // mouse target is the rectangle the reader is looking at
                 // rather than a second one computed here.
                 let (body, _) = crate::ui::layout::split_frame(area);
-                let band = crate::ui::layout::help_band(body, crate::ui::help::content_rows());
+                let band = crate::ui::layout::overlay_band(body, crate::ui::help::content_rows());
                 if band.contains(point) {
                     // Read-only and holding no control: no row is a button,
                     // and there is nothing inside it a click could mean.
@@ -650,7 +650,7 @@ mod tests {
 
     use crate::changes::empty_set;
     use crate::testutil::{RecordingRefresher, Script, ScriptedFs, cell, press, row_text};
-    use crate::ui::app::{ArtifactSection, Dashboard, Route};
+    use crate::ui::app::{ArtifactSection, Dashboard, Panel, Route};
     use crate::ui::driver::{Live, LoopError, LoopSummary, TICK, run_loop};
     use crate::ui::view;
 
@@ -661,9 +661,10 @@ mod tests {
     fn dashboard_with_change(repo: &str, name: &str, completed: usize, total: usize) -> Dashboard {
         Dashboard {
             selection: None,
-            help: crate::ui::app::Help {
-                open: false,
+            overlay: crate::ui::app::Overlay {
+                panel: None,
                 scroll: 0,
+                edit: None,
             },
             repo: Some(std::path::PathBuf::from(repo)),
             searched_from: std::path::PathBuf::from(repo),
@@ -717,9 +718,10 @@ mod tests {
     fn dashboard() -> Dashboard {
         Dashboard {
             selection: None,
-            help: crate::ui::app::Help {
-                open: false,
+            overlay: crate::ui::app::Overlay {
+                panel: None,
                 scroll: 0,
+                edit: None,
             },
             repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
             searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
@@ -1116,9 +1118,10 @@ mod tests {
         );
         Dashboard {
             selection: None,
-            help: crate::ui::app::Help {
-                open: false,
+            overlay: crate::ui::app::Overlay {
+                panel: None,
                 scroll: 0,
+                edit: None,
             },
             repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
             searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
@@ -1300,9 +1303,10 @@ mod tests {
         );
         Dashboard {
             selection: None,
-            help: crate::ui::app::Help {
-                open: false,
+            overlay: crate::ui::app::Overlay {
+                panel: None,
                 scroll: 0,
+                edit: None,
             },
             repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
             searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
@@ -1777,9 +1781,10 @@ mod tests {
         let base = twenty_line_detail_dashboard();
         let mut dashboard = Dashboard {
             selection: None,
-            help: crate::ui::app::Help {
-                open: false,
+            overlay: crate::ui::app::Overlay {
+                panel: None,
                 scroll: 0,
+                edit: None,
             },
             repo: base.repo,
             searched_from: base.searched_from,
@@ -1847,7 +1852,7 @@ mod tests {
         // cursor does not move when the pane resizes.
         let mut foldable = Dashboard {
             selection: None,
-            help: dashboard.help.clone(),
+            overlay: dashboard.overlay.clone(),
             repo: dashboard.repo.clone(),
             searched_from: dashboard.searched_from.clone(),
             changes: dashboard.changes.clone(),
@@ -1940,9 +1945,10 @@ mod tests {
         let dir = change.dir.clone();
         let mut dashboard = Dashboard {
             selection: None,
-            help: crate::ui::app::Help {
-                open: false,
+            overlay: crate::ui::app::Overlay {
+                panel: None,
                 scroll: 0,
+                edit: None,
             },
             repo: Some(std::path::PathBuf::from("/repo")),
             searched_from: std::path::PathBuf::from("/repo"),
@@ -2117,9 +2123,10 @@ mod tests {
         );
         Dashboard {
             selection: None,
-            help: crate::ui::app::Help {
-                open: false,
+            overlay: crate::ui::app::Overlay {
+                panel: None,
                 scroll: 0,
+                edit: None,
             },
             repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
             searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
@@ -2769,9 +2776,10 @@ mod tests {
         let backend = TestBackend::new(60, 20);
         let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
         let mut dashboard = base.clone();
-        dashboard.help = crate::ui::app::Help {
-            open: true,
+        dashboard.overlay = crate::ui::app::Overlay {
+            panel: Some(Panel::Help),
             scroll: 99,
+            edit: None,
         };
         let mut events = Script::new(vec![Ok(Some(press(
             KeyCode::Char('q'),
@@ -2799,7 +2807,7 @@ mod tests {
         .expect("loop ends");
 
         assert_eq!(
-            dashboard.help.scroll, 26,
+            dashboard.overlay.scroll, 26,
             "43 content rows less a 17-row interior"
         );
         assert_eq!(
@@ -2813,9 +2821,10 @@ mod tests {
         let backend2 = TestBackend::new(60, 20);
         let mut terminal2 = ratatui::Terminal::new(backend2).expect("construct terminal");
         let mut closed = base;
-        closed.help = crate::ui::app::Help {
-            open: false,
+        closed.overlay = crate::ui::app::Overlay {
+            panel: None,
             scroll: 99,
+            edit: None,
         };
         let mut events2 = Script::new(vec![Ok(Some(press(
             KeyCode::Char('q'),
@@ -2841,7 +2850,7 @@ mod tests {
             Duration::from_millis(1),
         )
         .expect("loop ends");
-        assert_eq!(closed.help.scroll, 99, "a closed overlay is not clamped");
+        assert_eq!(closed.overlay.scroll, 99, "a closed overlay is not clamped");
     }
 
     // `agent-polling`: `Live`'s third field and the loop's fourth live step.
@@ -4288,9 +4297,10 @@ mod tests {
         );
         let mut dashboard = Dashboard {
             selection: None,
-            help: crate::ui::app::Help {
-                open: false,
+            overlay: crate::ui::app::Overlay {
+                panel: None,
                 scroll: 0,
+                edit: None,
             },
             repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
             searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
@@ -6561,14 +6571,14 @@ mod tests {
             &read,
             &write,
         );
-        assert!(d.help.open, "`?` opened the overlay");
+        assert!(d.overlay.panel.is_some(), "`?` opened the overlay");
         drive_events(
             &mut d,
             vec![press(KeyCode::Char('?'), KeyModifiers::NONE)],
             &read,
             &write,
         );
-        assert!(!d.help.open, "`?` closed it again");
+        assert!(d.overlay.panel.is_none(), "`?` closed it again");
 
         // Every step above drove the pane with keys alone: `mouse_action` was
         // never called, and `Dashboard::selection` — the one field a mouse
@@ -7173,9 +7183,10 @@ mod tests {
         );
         Dashboard {
             selection: None,
-            help: crate::ui::app::Help {
-                open: false,
+            overlay: crate::ui::app::Overlay {
+                panel: None,
                 scroll: 0,
+                edit: None,
             },
             repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
             searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
@@ -7515,11 +7526,11 @@ mod tests {
 
     /// The band `mouse_action` resolves against at `area`, derived here the
     /// way the draw path derives it — `split_frame`'s body, then
-    /// `layout::help_band` over `ui::help::content_rows()` — so the tests
+    /// `layout::overlay_band` over `ui::help::content_rows()` — so the tests
     /// compare against the rectangle rather than restating it.
     fn band_for(area: Rect) -> Rect {
         let (body, _) = crate::ui::layout::split_frame(area);
-        crate::ui::layout::help_band(body, crate::ui::help::content_rows())
+        crate::ui::layout::overlay_band(body, crate::ui::help::content_rows())
     }
 
     /// `mouse_dashboard(6, 1)` with the overlay open and a twenty-line
@@ -7535,7 +7546,7 @@ mod tests {
             progress: None,
             operation: None,
         }];
-        dashboard.help.open = true;
+        dashboard.overlay.panel = Some(Panel::Help);
         dashboard
     }
 
@@ -7573,7 +7584,7 @@ mod tests {
                 // beneath it.
                 let mut applied = dashboard.clone();
                 applied.apply(Action::ScrollDown);
-                assert_eq!(applied.help.scroll, 1, "{area:?}: ({column}, {row})");
+                assert_eq!(applied.overlay.scroll, 1, "{area:?}: ({column}, {row})");
                 assert_eq!(applied.selected, dashboard.selected);
                 assert_eq!(applied.detail.scroll, dashboard.detail.scroll);
 
@@ -7631,8 +7642,8 @@ mod tests {
         let mut applied = dashboard.clone();
         applied.apply(Action::Ignore);
         assert_eq!(applied, dashboard);
-        assert!(applied.help.open);
-        assert_eq!(applied.help.scroll, 0);
+        assert!(applied.overlay.panel.is_some());
+        assert_eq!(applied.overlay.scroll, 0);
     }
 
     #[test]
@@ -7640,7 +7651,7 @@ mod tests {
         // `mouse-input`: "A click outside the band dismisses it and selects
         // nothing".
         let mut dashboard = overlay_open(2, Route::List);
-        dashboard.help.scroll = 3;
+        dashboard.overlay.scroll = 3;
         let band = band_for(TALL);
         // 45 rows centred in a 59-row body: rows 0 through 6 and rows 52
         // through 58 are outside it, and row 59 is the footer.
@@ -7658,8 +7669,8 @@ mod tests {
         // to the row under it.
         let mut dismissed = dashboard.clone();
         dismissed.apply(mouse_action(&dashboard, TALL, &left(5, 4)));
-        assert!(!dismissed.help.open);
-        assert_eq!(dismissed.help.scroll, 0);
+        assert!(dismissed.overlay.panel.is_none());
+        assert_eq!(dismissed.overlay.scroll, 0);
         assert_eq!(dismissed.selected, 2);
 
         // A second identical click, now that the overlay is closed, resolves
