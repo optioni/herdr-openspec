@@ -3343,6 +3343,16 @@ esac
             )
         }
 
+        /// `settings-window`'s addition: `enter` has no `char`, so it needs its own alias
+        /// beside [`key`] — the stage tables below press it twice per drive, once to begin the
+        /// `agent_kind` edit and once to commit it (design.md -> Decisions 2, 9, and 13).
+        fn enter_key() -> ratatui::crossterm::event::Event {
+            crate::testutil::press(
+                ratatui::crossterm::event::KeyCode::Enter,
+                ratatui::crossterm::event::KeyModifiers::NONE,
+            )
+        }
+
         /// A scratch repository holding one active change, `2fa-support`, whose derived agent
         /// name is `c-2fa-support` — `state::agent_name`'s own output, since a leading digit
         /// cannot begin an agent name.
@@ -4123,6 +4133,211 @@ esac
             assert_eq!(
                 names,
                 vec!["agent-names.toml".to_string(), "settings.toml".to_string()]
+            );
+        }
+
+        // --- settings-window: outer-loop acceptance RED (group 0) ------------------------
+        //
+        // Both tests below drive the same key sequence design.md -> Decisions 2, 9, and 13
+        // describe: `,` opens the settings panel on the `agent_kind` row, the first `Enter`
+        // begins the edit at the shortlist's first entry (Herdr's own print order — `claude`
+        // before `codex`, since `status_with_installed` preserves it), `j` (`Next`) steps to
+        // the second entry, the second `Enter` commits it and closes the panel, and `a`
+        // launches. Once the settings-window change is fully wired, that launch is the
+        // *second* place `agent_kind` reaches Herdr: the first is the lazy `integration
+        // status` call `,` itself triggers (`Request::Resolve`, design.md -> Contracts), which
+        // is also what makes the eventual launch need no status call of its own.
+        //
+        // RED at HEAD, for exactly one reason: `,` has no binding at all — a tree-wide search
+        // for its `action_for` match arm turns up nothing — so `action_for` returns
+        // `Action::Ignore` for it and every key that follows plays out against the plain, unmodified
+        // `Dashboard`: the first `Enter` is inert (the cursor still addresses the `active`
+        // section header, and `list-sections` refuses `OpenDetail` there), `j` moves the list
+        // selection onto `2fa-support`, the second `Enter` opens the (ordinary) detail route,
+        // and `a` reaches `agent-client-choice`'s already-landed launch path directly. That
+        // path resolves the same two-installed-integration `Choice::Ambiguous` this fixture's
+        // `herdr` reports, and stops before any pane is split — so the herdr log holds exactly
+        // one non-`agent list` entry (`integration status`) rather than the four asserted
+        // below, and no `settings.toml` is ever created. Both failures are the panel's absence,
+        // not a harness misconfiguration: `the_scratch_herdr_program_answers_integration_status`
+        // (above) proves the scratch `herdr` program itself answers `integration status`
+        // correctly, and `the_sole_installed_integration_is_what_launches`'s ambiguous case
+        // (above) already exercises this exact single-call stop as its own, unrelated, GREEN
+        // assertion.
+
+        /// `plugin-state` :: "Nothing outside the commit writes the file", and the write-
+        /// boundary half of `setting-provenance`'s claim: the panel's commit is `settings.toml`'s
+        /// only writer, it reaches no other file, and it leaves both `openspec/` and the
+        /// configuration directory exactly as it found them. RED until group 6 gives
+        /// `state::record_kind` a caller and group 4 wires `,`/`Enter`/`j` to reach it.
+        #[test]
+        fn committing_an_agent_kind_writes_settings_toml_and_touches_nothing_else() {
+            let width = 120u16;
+            let scratch = scratch_repo_with_2fa_support();
+            let root = scratch.path();
+            let canon_root = canonical(root);
+            let herdr_log = root.join("herdr.log");
+            let marker = root.join("marker");
+            let herdr = launch_herdr_script_with_status(
+                root,
+                &herdr_log,
+                &marker,
+                &canon_root,
+                &status_with_installed(&["claude", "codex"]),
+            );
+            let openspec_log = root.join("openspec.log");
+            let openspec_bin = openspec_script(root, &openspec_log, root);
+            let state = ScratchDir::new();
+            // design.md -> Test Boundaries: the configuration directory is real too, so the
+            // write boundary can be asserted rather than assumed — `run_wired` never reads it
+            // (`Config` arrives already loaded, as every wiring test's `config` does), so this
+            // is purely a witness for "untouched", on `openspec/`'s own terms below.
+            let config_dir = ScratchDir::new();
+            write_with_mode(
+                &config_dir.path().join("config.toml"),
+                b"openspec_bin = \"/opt/openspec/bin/openspec\"\n",
+                0o644,
+            );
+
+            let config = Config {
+                openspec_bin: Some(openspec_bin),
+                agent_kind: None,
+                ..Config::default()
+            };
+
+            let before_openspec = snapshot(&root.join("openspec"));
+            let before_config = snapshot(config_dir.path());
+
+            let stage0 = || true;
+            let stage1 = || true;
+            let stage2 = || true;
+            let stage3 = || true;
+            let stage4 = || true;
+            let stage5 = || non_agent_list_lines(&herdr_log).len() >= 4;
+            let stages: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> = vec![
+                (&stage0, key(',')),
+                (&stage1, enter_key()),
+                (&stage2, key('j')),
+                (&stage3, enter_key()),
+                (&stage4, key('a')),
+                (&stage5, key('q')),
+            ];
+
+            let (result, _buf) =
+                run_wired_staged(width, root, &config, &herdr, Some(state.path()), stages);
+            let _dashboard = result.expect("run_wired must return Ok for a supported state");
+
+            let settings_path = state.path().join("settings.toml");
+            let settings_text = std::fs::read_to_string(&settings_path).unwrap_or_else(|e| {
+                panic!(
+                    "the commit must have created {settings_path:?} by now: {e} \
+                     (RED: `,` is not yet bound, see grep above)"
+                )
+            });
+            assert!(
+                settings_text.contains("agent_kind = \"codex\""),
+                "the commit must write the shortlist's second entry, `codex`: {settings_text:?}"
+            );
+
+            let after_openspec = snapshot(&root.join("openspec"));
+            assert_eq!(
+                before_openspec, after_openspec,
+                "the plugin must write nothing inside openspec/"
+            );
+            let after_config = snapshot(config_dir.path());
+            assert_eq!(
+                before_config, after_config,
+                "the plugin must never write into the configuration directory"
+            );
+        }
+
+        /// `agent-launch` :: "The next launch uses the committed kind and issues no status
+        /// call": the same drive as above, asserted instead against the herdr invocation log —
+        /// exactly one `integration status` call for the whole run (the panel's own
+        /// `Request::Resolve`, issued when `,` opens it) followed by the ordinary three-call
+        /// launch, carrying `--kind codex`. RED until group 4 wires `,`/`Enter`/`j` to the
+        /// panel and group 7 gives `Launcher::set_kind` a caller.
+        #[test]
+        fn committed_kind_reaches_the_launch_without_a_second_status_call() {
+            let width = 120u16;
+            let scratch = scratch_repo_with_2fa_support();
+            let root = scratch.path();
+            let canon_root = canonical(root);
+            let herdr_log = root.join("herdr.log");
+            let marker = root.join("marker");
+            let herdr = launch_herdr_script_with_status(
+                root,
+                &herdr_log,
+                &marker,
+                &canon_root,
+                &status_with_installed(&["claude", "codex"]),
+            );
+            let openspec_log = root.join("openspec.log");
+            let openspec_bin = openspec_script(root, &openspec_log, root);
+            let state = ScratchDir::new();
+
+            let config = Config {
+                openspec_bin: Some(openspec_bin.clone()),
+                agent_kind: None,
+                ..Config::default()
+            };
+
+            let stage0 = || true;
+            let stage1 = || true;
+            let stage2 = || true;
+            let stage3 = || true;
+            let stage4 = || true;
+            let stage5 = || non_agent_list_lines(&herdr_log).len() >= 4;
+            let stages: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> = vec![
+                (&stage0, key(',')),
+                (&stage1, enter_key()),
+                (&stage2, key('j')),
+                (&stage3, enter_key()),
+                (&stage4, key('a')),
+                (&stage5, key('q')),
+            ];
+
+            let (result, _buf) =
+                run_wired_staged(width, root, &config, &herdr, Some(state.path()), stages);
+            let dashboard = result.expect("run_wired must return Ok for a supported state");
+
+            let calls = non_agent_list_lines(&herdr_log);
+            assert_eq!(
+                calls.len(),
+                4,
+                "the panel's Resolve call plus exactly three launch calls, and no second status \
+                 call for the launch itself: {calls:?}"
+            );
+            assert_eq!(
+                calls[0], "integration status",
+                "the only status call is the panel's own, issued when `,` opened it: {calls:?}"
+            );
+            assert_eq!(
+                calls[1],
+                format!(
+                    "pane split --cwd {} --direction right --no-focus",
+                    canon_root.display()
+                ),
+                "call 1 must be the split, with the canonicalized root: {calls:?}"
+            );
+            assert_eq!(
+                calls[2], "agent start c-2fa-support --kind codex --pane wD:pJ",
+                "the committed kind, not a prompt or a restart, must reach --kind: {calls:?}"
+            );
+            assert_eq!(
+                calls[3],
+                format!(
+                    "agent prompt c-2fa-support Run: {bin} instructions apply \
+                     --change 2fa-support --json. Follow the instruction it returns to \
+                     implement this OpenSpec change.",
+                    bin = openspec_bin.display()
+                ),
+                "call 3 must send the CLI-driven prompt: {calls:?}"
+            );
+            assert!(
+                dashboard.launch.problems.is_empty(),
+                "a launch that used the committed kind reports no ambiguity: {:?}",
+                dashboard.launch.problems
             );
         }
 
