@@ -51,13 +51,13 @@ Taken because the headline claim is about what the **wired program** writes and 
 committed kind reaches `settings.toml` and changes the next launch — which no unit test can
 establish (design.md → Test Strategy).
 
-- [ ] 0.1 Extend the `run_wired` harness with the replaced collaborators design.md → Test
+- [x] 0.1 Extend the `run_wired` harness with the replaced collaborators design.md → Test
       Boundaries names: scratch `openspec` and `herdr` programs with an invocation log,
       `ScratchDir` state and config directories, `TestBackend` terminal.
-- [ ] 0.2 RED: Write the failing end-to-end test for `plugin-state` :: "Nothing outside the
+- [x] 0.2 RED: Write the failing end-to-end test for `plugin-state` :: "Nothing outside the
       commit writes the file" and `agent-launch` :: "The next launch uses the committed kind
       and issues no status call" — drive `,`, `Enter`, `Next`, `Enter`, then `a`.
-- [ ] 0.3 Confirm both fail because `Action::ToggleSettings` does not exist, not because the
+- [x] 0.3 Confirm both fail because `Action::ToggleSettings` does not exist, not because the
       harness is misconfigured: `grep -rn "Char(',')" src/ | wc -l` → 0 at HEAD, so the
       keypress is inert and the panel is never reached.
 
