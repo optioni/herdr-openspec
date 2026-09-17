@@ -88,6 +88,28 @@ Still at their HEAD values, deliberately: `CLAIM_COUNT` **15** (task 13.6 moves 
    onto comment lines and fails `every_table_row_has_a_proof`. Re-align to where the code
    actually is; never widen the range or weaken the test.
 
+## Traps the implementers hit and recorded
+
+- **A comment that quotes the literal `Char(',')` breaks task 0.3's own check.** Group 0's
+  first draft embedded that string inside a quoted grep command in a doc comment, which made
+  `grep -rn "Char(',')" src/ | wc -l` return 1 instead of 0 and falsified the RED evidence.
+  Reworded before committing. Worth a look in review that nothing in the diff quotes it again.
+- **`tests/gate-controls.toml`'s planted defects patch exact literal source text**, so a rename
+  invalidates them. Group 1 had to update `helpwidths-narrowed` and rename
+  `nodefault-ui-help-state` → `nodefault-ui-overlay-state`, re-measuring that control's own
+  single-type `SCAN_MIN` from 71 to 69. Task **10.6** adds controls for `settingswidths.sh`
+  and mirrors `help-overlay`'s three new-pure-view-file controls — expect the same coupling.
+- **`doc_contract` went 113 → 118, not 113 → 114.** Task 2.4 says to add the claim "on the
+  eleventh's and fourteenth's pattern", and both of those introduce **five** tests — four
+  scaffolding tests (clean slice passes, fails naming needle and line, ignores a needle below
+  the cut, rejects an empty slice) plus the real claim over the file. Group 2 followed that
+  pattern, which `doc-conformance`'s own scenarios require. If any later group's expectation
+  assumed +1, it is the expectation that is wrong.
+- **Group 0's two acceptance tests each take ~30 s** by design: they drive
+  `,` `Enter` `j` `Enter` `a` `q` through `run_wired_staged` and rely on Stages' shared 30 s
+  deadline to terminate, because the target predicate never becomes true until group 11. Not
+  a hang.
+
 ## The two gate rejections, and why they matter to the groups ahead
 
 - **Group 4** left three tests red beyond the two intended: two `covers` ranges shifted by
