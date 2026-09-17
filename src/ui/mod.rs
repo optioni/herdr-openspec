@@ -140,6 +140,13 @@ pub struct Collaborators {
     /// `degraded-states`' addition: whether the binary probe resolved nothing, so
     /// `run_wired` can set `Dashboard::file_mode`.
     pub file_mode: bool,
+    /// `settings-window`'s addition: the binary probe's own result, retained rather than
+    /// discarded — `resolution` is otherwise moved whole into `cli::worker_cli`, which keeps
+    /// only `found.path`, and `found.source` had no production reader anywhere in the crate
+    /// before this. `run_wired` passes it on to `ui::load` as `Provenance::Probe`'s one data
+    /// source, so the settings panel never probes a second time. See design.md -> "How the
+    /// panel's three inputs reach a pure view".
+    pub binary: crate::resolve::BinResolution,
 }
 
 /// Build the one-entry `PATH` overlay for the resolved `openspec` binary: `bin_parent`
@@ -209,6 +216,9 @@ pub fn start_collaborators(
         .map(|parent| openspec_path_overlay(parent, env))
         .unwrap_or_default();
     let resolved_bin = resolution.found.as_ref().map(|found| found.path.clone());
+    // `settings-window`: retained before `resolution` is moved whole into `worker_cli` below —
+    // the settings panel's `openspec_bin` row is this value, never a second probe.
+    let binary = resolution.clone();
     // `agent-client-choice`: step 2 of the kind precedence, read once here
     // beside the agent-name mapping. Its problems join the same causal list the
     // configuration's and the probe's do.
@@ -266,6 +276,7 @@ pub fn start_collaborators(
         launcher,
         problems,
         file_mode,
+        binary,
     }
 }
 
@@ -314,6 +325,7 @@ pub fn run_wired<B: Backend, E: EventSource>(
         } else {
             crate::changes::ArchivedScope::Names
         },
+        &collaborators.binary,
     );
     // `seam-resilience`: the standing startup conditions — configuration fallbacks, the
     // binary probe's own reasons, then the watcher's failure to start, in that causal order —
@@ -461,10 +473,10 @@ pub fn read_artifact(path: &Path) -> Result<String, String> {
 }
 
 /// Startup state, read from files only: `resolve::find_repo` then, when a
-/// root was found, `changes::from_files`. Makes no CLI call, spawns no
-/// process, and consults no `openspec` binary, so the dashboard opens with
-/// a complete change list on a machine where `openspec` is not installed.
-/// Always returns a `Dashboard`, never a `Result`, and never panics.
+/// root was found, `changes::from_files`. Makes no CLI call and spawns no
+/// process itself, so the dashboard opens with a complete change list on a
+/// machine where `openspec` is not installed. Always returns a `Dashboard`,
+/// never a `Result`, and never panics.
 //
 /// `archived` is `list-sections`' fourth parameter (design.md -> Decision 13):
 /// the composition root chooses it from whether a worker will exist to
@@ -479,11 +491,19 @@ pub fn read_artifact(path: &Path) -> Result<String, String> {
 // for this group), so the parameter goes unread — `load` never consults it,
 // even with the fourth `ArchivedScope` parameter group 6 adds: the scope is
 // the composition root's decision, not a fact `config` carries.
+///
+/// `binary` is `settings-window`'s fifth parameter: the already-resolved
+/// `BinResolution` the composition root's own probe produced — `load` never
+/// probes a second time — handed straight to `settings::settings` alongside
+/// `config` and a `None` agent kind, since the launcher's worker has not
+/// answered yet on either branch below (design.md -> "How the panel's three
+/// inputs reach a pure view").
 pub fn load(
     start: &Path,
-    _config: &Config,
+    config: &Config,
     state_dir: Option<&Path>,
     archived: crate::changes::ArchivedScope,
+    binary: &crate::resolve::BinResolution,
 ) -> Dashboard {
     // The one further file `load` reads, on both branches below: Herdr agents exist
     // independently of an OpenSpec repository. `state::read` is infallible by
@@ -549,6 +569,10 @@ pub fn load(
                     ]),
                 },
                 file_mode: false,
+                settings: crate::settings::PanelState {
+                    rows: crate::settings::settings(config, binary, None),
+                    cursor: 0,
+                },
             }
         }
         crate::resolve::RepoSearch::NotFound { searched_from } => Dashboard {
@@ -601,6 +625,10 @@ pub fn load(
                 collapsed: std::collections::BTreeSet::from([crate::ui::app::SectionKey::Archived]),
             },
             file_mode: false,
+            settings: crate::settings::PanelState {
+                rows: crate::settings::settings(config, binary, None),
+                cursor: 0,
+            },
         },
     }
 }
@@ -754,6 +782,10 @@ mod tests {
                 &[("proposal", &["/repo/p.md"])],
             );
             Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 overlay: crate::ui::app::Overlay {
                     panel: None,
@@ -912,6 +944,10 @@ mod tests {
                     twenty_problems,
                 );
                 let mut dashboard = Dashboard {
+                    settings: crate::settings::PanelState {
+                        rows: Vec::new(),
+                        cursor: 0,
+                    },
                     selection: None,
                     overlay: crate::ui::app::Overlay {
                         panel: None,
@@ -1065,6 +1101,10 @@ mod tests {
                 );
                 let other = crate::changes::fixture::active("fix-empty-basket", 7, 7);
                 Dashboard {
+                    settings: crate::settings::PanelState {
+                        rows: Vec::new(),
+                        cursor: 0,
+                    },
                     selection: None,
                     overlay: crate::ui::app::Overlay {
                         panel: None,
@@ -1295,8 +1335,16 @@ apply:
 
             for width in [120u16, 60u16] {
                 let config = crate::config::Config::default();
-                let mut dashboard =
-                    super::super::load(root, &config, None, crate::changes::ArchivedScope::Names);
+                let mut dashboard = super::super::load(
+                    root,
+                    &config,
+                    None,
+                    crate::changes::ArchivedScope::Names,
+                    &crate::resolve::BinResolution {
+                        found: None,
+                        problems: Vec::new(),
+                    },
+                );
 
                 let backend = ratatui::backend::TestBackend::new(width, 20);
                 let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
@@ -1459,8 +1507,16 @@ apply:
                 // including every lower-case letter — types into the query rather than
                 // launching, on `list-filtering`'s own terms). The snapshot claim is worth
                 // nothing if the keys did nothing.
-                let mut launch_dashboard =
-                    super::super::load(root, &config, None, crate::changes::ArchivedScope::Names);
+                let mut launch_dashboard = super::super::load(
+                    root,
+                    &config,
+                    None,
+                    crate::changes::ArchivedScope::Names,
+                    &crate::resolve::BinResolution {
+                        found: None,
+                        problems: Vec::new(),
+                    },
+                );
                 launch_dashboard.agents.reachable = true;
                 let mut launch_events = Script::new(vec![
                     // `list-sections`: `load` starts `selected` on the active
@@ -1589,6 +1645,10 @@ apply:
                 &Config::default(),
                 None,
                 crate::changes::ArchivedScope::Names,
+                &crate::resolve::BinResolution {
+                    found: None,
+                    problems: Vec::new(),
+                },
             );
             assert!(
                 !found.file_mode,
@@ -1601,6 +1661,10 @@ apply:
                 &Config::default(),
                 None,
                 crate::changes::ArchivedScope::Names,
+                &crate::resolve::BinResolution {
+                    found: None,
+                    problems: Vec::new(),
+                },
             );
             assert!(
                 !not_found.file_mode,
@@ -1625,6 +1689,10 @@ apply:
                 &config_with_archived_count(5),
                 None,
                 crate::changes::ArchivedScope::Names,
+                &crate::resolve::BinResolution {
+                    found: None,
+                    problems: Vec::new(),
+                },
             );
 
             assert_eq!(dashboard.repo, Some(canonical(root)));
@@ -1674,6 +1742,10 @@ apply:
                 &Config::default(),
                 None,
                 crate::changes::ArchivedScope::Names,
+                &crate::resolve::BinResolution {
+                    found: None,
+                    problems: Vec::new(),
+                },
             );
             assert_eq!(
                 found.launch,
@@ -1690,6 +1762,10 @@ apply:
                 &Config::default(),
                 None,
                 crate::changes::ArchivedScope::Names,
+                &crate::resolve::BinResolution {
+                    found: None,
+                    problems: Vec::new(),
+                },
             );
             assert_eq!(
                 not_found.launch,
@@ -1732,6 +1808,10 @@ apply:
                 &config_with_archived_count(5),
                 None,
                 crate::changes::ArchivedScope::Names,
+                &crate::resolve::BinResolution {
+                    found: None,
+                    problems: Vec::new(),
+                },
             );
 
             assert_eq!(dashboard.repo, None);
@@ -1787,18 +1867,30 @@ apply:
                 &config_with_archived_count(0),
                 None,
                 crate::changes::ArchivedScope::Full,
+                &crate::resolve::BinResolution {
+                    found: None,
+                    problems: Vec::new(),
+                },
             );
             let three = super::super::load(
                 root,
                 &config_with_archived_count(3),
                 None,
                 crate::changes::ArchivedScope::Full,
+                &crate::resolve::BinResolution {
+                    found: None,
+                    problems: Vec::new(),
+                },
             );
             let seven = super::super::load(
                 root,
                 &config_with_archived_count(7),
                 None,
                 crate::changes::ArchivedScope::Full,
+                &crate::resolve::BinResolution {
+                    found: None,
+                    problems: Vec::new(),
+                },
             );
             assert_eq!(zero.changes.archived.len(), 7);
             assert_eq!(three.changes.archived.len(), 7);
@@ -1837,6 +1929,10 @@ apply:
                 &config_with_archived_count(3),
                 None,
                 crate::changes::ArchivedScope::Names,
+                &crate::resolve::BinResolution {
+                    found: None,
+                    problems: Vec::new(),
+                },
             );
             assert!(dashboard.changes.archived.is_empty());
             assert_eq!(dashboard.changes.archived_total, 7);
@@ -1848,12 +1944,20 @@ apply:
                 &config_with_archived_count(7),
                 None,
                 crate::changes::ArchivedScope::Names,
+                &crate::resolve::BinResolution {
+                    found: None,
+                    problems: Vec::new(),
+                },
             );
             let zero = super::super::load(
                 root,
                 &config_with_archived_count(0),
                 None,
                 crate::changes::ArchivedScope::Names,
+                &crate::resolve::BinResolution {
+                    found: None,
+                    problems: Vec::new(),
+                },
             );
             assert_eq!(dashboard, seven);
             assert_eq!(dashboard, zero);
@@ -1937,6 +2041,10 @@ apply:
                 &config_with_archived_count(5),
                 None,
                 crate::changes::ArchivedScope::Full,
+                &crate::resolve::BinResolution {
+                    found: None,
+                    problems: Vec::new(),
+                },
             );
 
             fn cols(text: &str, from: usize, to_inclusive: usize) -> String {
@@ -2023,6 +2131,10 @@ apply:
                 &config_with_archived_count(5),
                 Some(state.path()),
                 crate::changes::ArchivedScope::Names,
+                &crate::resolve::BinResolution {
+                    found: None,
+                    problems: Vec::new(),
+                },
             );
             let after = snapshot(root);
             let state_after = snapshot(state.path());
@@ -2053,6 +2165,10 @@ apply:
                 &config_with_archived_count(5),
                 None,
                 crate::changes::ArchivedScope::Names,
+                &crate::resolve::BinResolution {
+                    found: None,
+                    problems: Vec::new(),
+                },
             );
             dashboard.sync_detail(&super::super::read_artifact);
             let after = snapshot(root);
@@ -2113,6 +2229,10 @@ apply:
                 &config_with_archived_count(5),
                 None,
                 crate::changes::ArchivedScope::Names,
+                &crate::resolve::BinResolution {
+                    found: None,
+                    problems: Vec::new(),
+                },
             );
             assert!(found.detail.sections.is_empty());
             assert_eq!(found.detail.scroll, 0);
@@ -2151,6 +2271,10 @@ apply:
                 &config_with_archived_count(5),
                 None,
                 crate::changes::ArchivedScope::Names,
+                &crate::resolve::BinResolution {
+                    found: None,
+                    problems: Vec::new(),
+                },
             );
             assert_eq!(not_found.repo, None);
             assert!(not_found.detail.sections.is_empty());
@@ -2189,6 +2313,10 @@ apply:
                 &config_with_archived_count(5),
                 Some(state.path()),
                 crate::changes::ArchivedScope::Names,
+                &crate::resolve::BinResolution {
+                    found: None,
+                    problems: Vec::new(),
+                },
             );
             assert_eq!(
                 with_state.agent_names.names,
@@ -2204,6 +2332,10 @@ apply:
                 &config_with_archived_count(5),
                 None,
                 crate::changes::ArchivedScope::Names,
+                &crate::resolve::BinResolution {
+                    found: None,
+                    problems: Vec::new(),
+                },
             );
             assert!(
                 without_state.agent_names.names.is_empty(),
@@ -2252,6 +2384,10 @@ apply:
                 &config_with_archived_count(5),
                 None,
                 crate::changes::ArchivedScope::Names,
+                &crate::resolve::BinResolution {
+                    found: None,
+                    problems: Vec::new(),
+                },
             );
             assert!(none_result.agent_names.names.is_empty());
             assert!(none_result.agent_names.problems.is_empty());
@@ -2263,6 +2399,10 @@ apply:
                 &config_with_archived_count(5),
                 Some(malformed.path()),
                 crate::changes::ArchivedScope::Names,
+                &crate::resolve::BinResolution {
+                    found: None,
+                    problems: Vec::new(),
+                },
             );
             assert!(malformed_result.agent_names.names.is_empty());
             assert_eq!(malformed_result.agent_names.problems.len(), 1);
@@ -2494,8 +2634,16 @@ apply:
                 let scratch = scratch_repo_with_alpha();
                 let root = scratch.path();
                 let config = Config::default();
-                let mut dashboard =
-                    super::super::load(root, &config, None, crate::changes::ArchivedScope::Names);
+                let mut dashboard = super::super::load(
+                    root,
+                    &config,
+                    None,
+                    crate::changes::ArchivedScope::Names,
+                    &crate::resolve::BinResolution {
+                        found: None,
+                        problems: Vec::new(),
+                    },
+                );
 
                 let before = snapshot(root);
 
@@ -2696,8 +2844,16 @@ apply:
                 let scratch = scratch_repo_with_alpha();
                 let root = scratch.path();
                 let config = Config::default();
-                let mut dashboard =
-                    super::super::load(root, &config, None, crate::changes::ArchivedScope::Names);
+                let mut dashboard = super::super::load(
+                    root,
+                    &config,
+                    None,
+                    crate::changes::ArchivedScope::Names,
+                    &crate::resolve::BinResolution {
+                        found: None,
+                        problems: Vec::new(),
+                    },
+                );
 
                 let backend = ratatui::backend::TestBackend::new(width, 20);
                 let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
@@ -2742,8 +2898,16 @@ apply:
                 let scratch = scratch_repo_with_alpha();
                 let root = scratch.path();
                 let config = Config::default();
-                let mut dashboard =
-                    super::super::load(root, &config, None, crate::changes::ArchivedScope::Names);
+                let mut dashboard = super::super::load(
+                    root,
+                    &config,
+                    None,
+                    crate::changes::ArchivedScope::Names,
+                    &crate::resolve::BinResolution {
+                        found: None,
+                        problems: Vec::new(),
+                    },
+                );
 
                 let backend = ratatui::backend::TestBackend::new(width, 20);
                 let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
@@ -5576,8 +5740,16 @@ esac
                     ..Config::default()
                 };
 
-                let mut dashboard =
-                    super::super::load(&root, &config, None, crate::changes::ArchivedScope::Names);
+                let mut dashboard = super::super::load(
+                    &root,
+                    &config,
+                    None,
+                    crate::changes::ArchivedScope::Names,
+                    &crate::resolve::BinResolution {
+                        found: None,
+                        problems: Vec::new(),
+                    },
+                );
                 assert_eq!(
                     dashboard.repo.as_deref(),
                     Some(canonical(&root).as_path()),
@@ -5800,8 +5972,16 @@ esac
                 let scratch = scratch_repo_with_alpha();
                 let root = scratch.path();
                 let config = Config::default();
-                let mut dashboard =
-                    super::super::load(root, &config, None, crate::changes::ArchivedScope::Names);
+                let mut dashboard = super::super::load(
+                    root,
+                    &config,
+                    None,
+                    crate::changes::ArchivedScope::Names,
+                    &crate::resolve::BinResolution {
+                        found: None,
+                        problems: Vec::new(),
+                    },
+                );
 
                 let unwatchable = root.join("does-not-exist-at-all");
                 let (mut fs, watch_problems) = crate::watch::start(&unwatchable);
