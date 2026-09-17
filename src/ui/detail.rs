@@ -2135,6 +2135,10 @@ mod tests {
     /// anywhere else.
     fn dashboard_at_detail(change: crate::changes::Change, detail: Detail) -> Dashboard {
         Dashboard {
+            settings: crate::settings::PanelState {
+                rows: Vec::new(),
+                cursor: 0,
+            },
             selection: None,
             overlay: crate::ui::app::Overlay {
                 panel: None,

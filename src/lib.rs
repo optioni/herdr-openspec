@@ -830,6 +830,10 @@ pub(crate) mod testutil {
 
         fn empty_dashboard() -> Dashboard {
             Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 overlay: crate::ui::app::Overlay {
                     panel: None,

@@ -568,6 +568,10 @@ mod tests {
     /// same terms as every other test module's own fixture.
     fn minimal_dashboard(overlay: crate::ui::app::Overlay) -> crate::ui::app::Dashboard {
         crate::ui::app::Dashboard {
+            settings: crate::settings::PanelState {
+                rows: Vec::new(),
+                cursor: 0,
+            },
             selection: None,
             overlay,
             repo: None,

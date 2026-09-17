@@ -868,6 +868,10 @@ mod tests {
         selected: usize,
     ) -> Dashboard {
         Dashboard {
+            settings: crate::settings::PanelState {
+                rows: Vec::new(),
+                cursor: 0,
+            },
             selection: None,
             overlay: crate::ui::app::Overlay {
                 panel: None,
@@ -971,6 +975,10 @@ mod tests {
                 0,
             ),
             Dashboard {
+                settings: crate::settings::PanelState {
+                    rows: Vec::new(),
+                    cursor: 0,
+                },
                 selection: None,
                 overlay: crate::ui::app::Overlay {
                     panel: None,
@@ -2016,6 +2024,10 @@ mod tests {
     #[test]
     fn the_no_repository_block_is_three_rows() {
         let d = Dashboard {
+            settings: crate::settings::PanelState {
+                rows: Vec::new(),
+                cursor: 0,
+            },
             selection: None,
             overlay: crate::ui::app::Overlay {
                 panel: None,
@@ -2093,6 +2105,10 @@ mod tests {
         // narrowed to `repo.is_none() && problems.is_empty()` would have
         // passed the whole suite.
         let with_problems = Dashboard {
+            settings: crate::settings::PanelState {
+                rows: Vec::new(),
+                cursor: 0,
+            },
             selection: None,
             overlay: crate::ui::app::Overlay {
                 panel: None,
@@ -3087,6 +3103,10 @@ mod tests {
         assert_eq!(columns(path), 65);
 
         let d = Dashboard {
+            settings: crate::settings::PanelState {
+                rows: Vec::new(),
+                cursor: 0,
+            },
             selection: None,
             overlay: crate::ui::app::Overlay {
                 panel: None,

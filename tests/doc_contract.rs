@@ -2964,6 +2964,7 @@ fn action_name(action: Action) -> &'static str {
         Action::ScrollUp => "ScrollUp",
         Action::Click(_) => "Click",
         Action::Select(_) => "Select",
+        Action::ToggleSettings => "ToggleSettings",
         Action::Ignore => "Ignore",
     }
 }
@@ -3078,6 +3079,10 @@ fn sweep_change(name: &str, origin: Origin, tabs: usize) -> Change {
 /// already states for the tab-switching case applies here identically.
 fn sweep_dashboard(route: Route, help_open: bool, fixture: SweepFixture) -> Dashboard {
     Dashboard {
+        settings: herdr_openspec::settings::PanelState {
+            rows: Vec::new(),
+            cursor: 0,
+        },
         selection: match fixture {
             SweepFixture::SelectionAbsent => None,
             // A drag already in progress, anchored at the content's first cell.

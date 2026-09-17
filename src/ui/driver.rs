@@ -660,6 +660,10 @@ mod tests {
     /// `dashboard()`'s empty set.
     fn dashboard_with_change(repo: &str, name: &str, completed: usize, total: usize) -> Dashboard {
         Dashboard {
+            settings: crate::settings::PanelState {
+                rows: Vec::new(),
+                cursor: 0,
+            },
             selection: None,
             overlay: crate::ui::app::Overlay {
                 panel: None,
@@ -717,6 +721,10 @@ mod tests {
 
     fn dashboard() -> Dashboard {
         Dashboard {
+            settings: crate::settings::PanelState {
+                rows: Vec::new(),
+                cursor: 0,
+            },
             selection: None,
             overlay: crate::ui::app::Overlay {
                 panel: None,
@@ -1117,6 +1125,10 @@ mod tests {
             &[("proposal", &["/repo/p.md"])],
         );
         Dashboard {
+            settings: crate::settings::PanelState {
+                rows: Vec::new(),
+                cursor: 0,
+            },
             selection: None,
             overlay: crate::ui::app::Overlay {
                 panel: None,
@@ -1302,6 +1314,10 @@ mod tests {
             1,
         );
         Dashboard {
+            settings: crate::settings::PanelState {
+                rows: Vec::new(),
+                cursor: 0,
+            },
             selection: None,
             overlay: crate::ui::app::Overlay {
                 panel: None,
@@ -1780,6 +1796,10 @@ mod tests {
         // resize the backend from inside it.
         let base = twenty_line_detail_dashboard();
         let mut dashboard = Dashboard {
+            settings: crate::settings::PanelState {
+                rows: Vec::new(),
+                cursor: 0,
+            },
             selection: None,
             overlay: crate::ui::app::Overlay {
                 panel: None,
@@ -1851,6 +1871,10 @@ mod tests {
         // collapsed sections is `2` after all three areas below, because a
         // cursor does not move when the pane resizes.
         let mut foldable = Dashboard {
+            settings: crate::settings::PanelState {
+                rows: Vec::new(),
+                cursor: 0,
+            },
             selection: None,
             overlay: dashboard.overlay.clone(),
             repo: dashboard.repo.clone(),
@@ -1944,6 +1968,10 @@ mod tests {
         );
         let dir = change.dir.clone();
         let mut dashboard = Dashboard {
+            settings: crate::settings::PanelState {
+                rows: Vec::new(),
+                cursor: 0,
+            },
             selection: None,
             overlay: crate::ui::app::Overlay {
                 panel: None,
@@ -2122,6 +2150,10 @@ mod tests {
             &[("proposal", &["/repo/p.md"])],
         );
         Dashboard {
+            settings: crate::settings::PanelState {
+                rows: Vec::new(),
+                cursor: 0,
+            },
             selection: None,
             overlay: crate::ui::app::Overlay {
                 panel: None,
@@ -4296,6 +4328,10 @@ mod tests {
             &[("proposal", &["/repo/p.md"]), ("design", &["/repo/d.md"])],
         );
         let mut dashboard = Dashboard {
+            settings: crate::settings::PanelState {
+                rows: Vec::new(),
+                cursor: 0,
+            },
             selection: None,
             overlay: crate::ui::app::Overlay {
                 panel: None,
@@ -7182,6 +7218,10 @@ mod tests {
             &[("specs", &SPEC_PATHS)],
         );
         Dashboard {
+            settings: crate::settings::PanelState {
+                rows: Vec::new(),
+                cursor: 0,
+            },
             selection: None,
             overlay: crate::ui::app::Overlay {
                 panel: None,
