@@ -178,7 +178,7 @@ plant_file = "src/ui/help.rs"
 # raises the total without lowering that count and is not the defect the floor exists to
 # catch"). This drops the both-width count from 3 to 2, below HELP_MIN's floor of 3.
 plant_find = '''
-        // 60x20: body 19 rows, band 19, interior 17 against 43 content
+        // 60x20: body 19 rows, band 19, interior 17 against 44 content
         // rows.
         let total = Rect::new(0, 0, 60, 20);
         let body = body_for(total);
@@ -195,7 +195,7 @@ plant_find = '''
             .draw(|f| render(f, body, &overlay))
             .expect("draw the 60x20 band");
         let buffer = terminal.backend().buffer().clone();
-        assert_indicator(&buffer, band, band.y + band.height - 1, "1-17/43");
+        assert_indicator(&buffer, band, band.y + band.height - 1, "1-17/44");
     }'''
 plant_replace = "\n    }"
 expect = "HELPWIDTHS FAIL: only 2 src/ui/help.rs tests name both 60 and 120 columns"

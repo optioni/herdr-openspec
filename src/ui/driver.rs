@@ -2839,8 +2839,8 @@ mod tests {
         .expect("loop ends");
 
         assert_eq!(
-            dashboard.overlay.scroll, 26,
-            "43 content rows less a 17-row interior"
+            dashboard.overlay.scroll, 27,
+            "44 content rows less a 17-row interior"
         );
         assert_eq!(
             dashboard.detail.scroll, 0,
@@ -7693,9 +7693,9 @@ mod tests {
         let mut dashboard = overlay_open(2, Route::List);
         dashboard.overlay.scroll = 3;
         let band = band_for(TALL);
-        // 45 rows centred in a 59-row body: rows 0 through 6 and rows 52
+        // 46 rows centred in a 59-row body: rows 0 through 5 and rows 52
         // through 58 are outside it, and row 59 is the footer.
-        assert_eq!((band.y, band.height), (7, 45));
+        assert_eq!((band.y, band.height), (6, 46));
 
         for (column, row) in [(5u16, 4u16), (5, 55), (5, 59)] {
             assert_eq!(
@@ -7737,7 +7737,7 @@ mod tests {
         // belong to the band, pinned from both sides.
         let dashboard = overlay_open(2, Route::List);
         let band = band_for(TALL);
-        assert_eq!((band.y, band.height), (7, 45));
+        assert_eq!((band.y, band.height), (6, 46));
         let first = band.y;
         let last = band.y + band.height - 1;
         for (row, want) in [

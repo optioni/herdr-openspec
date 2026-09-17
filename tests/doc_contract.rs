@@ -3782,10 +3782,10 @@ fn sweep_finds_the_bound_actions_and_exactly_two_exemptions() {
     }
     assert_eq!(
         union.len(),
-        25,
+        26,
         "the swept union is `Action`'s full membership after `Select`: {union:?}"
     );
-    assert_eq!(bound.len(), 23, "{bound:?}");
+    assert_eq!(bound.len(), 24, "{bound:?}");
 }
 
 /// The names `mouse_action` produces under a label no key ever produces, but
@@ -4162,8 +4162,8 @@ fn the_documented_key_set_and_the_inventory_agree_at_head() {
     let inventory = inventory_key_atoms();
     assert_eq!(
         inventory.len(),
-        20,
-        "the non-mouse groups hold twenty distinct key atoms: {inventory:?}"
+        21,
+        "the non-mouse groups hold twenty-one distinct key atoms: {inventory:?}"
     );
 
     let (spec_atoms, spec_rows) =
@@ -4317,7 +4317,7 @@ fn every_non_mouse_row_parses_and_agrees_at_head() {
             checked += 1;
         }
     }
-    assert_eq!(checked, 25, "five non-mouse groups, 5 + 7 + 4 + 4 + 5 rows");
+    assert_eq!(checked, 26, "five non-mouse groups, 5 + 7 + 4 + 5 + 5 rows");
 }
 
 #[test]

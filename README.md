@@ -53,6 +53,7 @@ actions to appear — Herdr re-reads the manifest only then.
 | `Space` | Fold or unfold a section — the list section at the list route, the artifact section at the detail route |
 | `r` | Force a full refresh — re-read every change from disk and re-ask the CLI about each one |
 | `?` | Open or close the help overlay, from either route — it lists every key and gesture the pane binds |
+| `,` | Open or close the settings panel, from either route |
 | `a` | Launch an agent to **apply** the change: it is told to run `openspec instructions apply --change <change> --json` and follow what it returns. Inert — no call, no problem — with no change selected; refused with a reason (shown as a problem row) when the derived name is already running for this change, or when no `openspec` binary was found (file mode) |
 | `c` | Launch an agent to **continue** the change — create the next artifact `openspec status` reports as ready — on the same terms as `a` |
 | `s` | Launch an agent to **archive** the change, on the same terms as `a` |
