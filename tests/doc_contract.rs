@@ -4595,6 +4595,157 @@ fn no_production_file_still_produces_an_opsx_prompt() {
 }
 
 // ---------------------------------------------------------------------------
+// `settings-window` :: "The production slice of `src/settings.rs` carries no I/O,
+// clock, or `ratatui` name" — the sixteenth `tests/doc_contract.rs` claim, on exactly
+// `src/specs.rs`' and `src/integration.rs`' terms: design.md -> Boundaries puts
+// `src/settings.rs` outside `src/ui/`, where **no** `scripts/gates/` script sweeps it at
+// all. The `ratatui` needle is `src/integration.rs`'s own addition, carried here for the
+// same reason: `src/settings.rs` produces the values a view renders, so a `Span`, a
+// `Style`, or a `Line` reaching it would put rendering decisions on the wrong side of the
+// seam `PALETTE` and `MDSEAM` already police from the other direction. The clock names are
+// this claim's own further addition: `src/settings.rs` runs on the render path's terms
+// even though it lives outside `src/ui/`, and `NOBLOCK` does not sweep it.
+//
+// `CLAIM_COUNT` below stays at 15 here on purpose: raising it, and its three sibling
+// sites (`CLAIM_COUNT_WORDS`, `AGENTS.md`'s "further claims" marker, and `SPEC.md`'s
+// "### Doc-conformance checks" bullet list), is `settings-window`'s task 13.6, done
+// together in one commit so `cargo test --test doc_contract` is never red in between.
+// This claim's own test passes on its own regardless of that count.
+// ---------------------------------------------------------------------------
+
+/// The names forbidden anywhere in `src/settings.rs`'s production slice: filesystem,
+/// process, environment, network, and standard-I/O names, the two clock APIs this
+/// crate's render path is forbidden from naming, and every `ratatui` type this pure
+/// classifier must not reach for.
+const SETTINGS_RS_FORBIDDEN_NEEDLES: [&str; 15] = [
+    "std::fs",
+    "std::io",
+    "std::env",
+    "std::process",
+    "std::net",
+    "File::",
+    "read_to_string",
+    "Command",
+    "Instant",
+    "SystemTime",
+    "ratatui",
+    "Modifier",
+    "Style",
+    "Span",
+    "Buffer",
+];
+
+/// Whether `src`'s production slice names any of [`SETTINGS_RS_FORBIDDEN_NEEDLES`]. `Err`
+/// names the first needle found and its 1-based line number. The slice is asserted
+/// non-empty before it is searched, so the check cannot pass vacuously against a file it
+/// failed to read or cut at the wrong place.
+fn settings_rs_production_slice_is_io_free(src: &str) -> Result<(), String> {
+    let prod = production_slice(src);
+    if prod.is_empty() {
+        return Err(
+            "src/settings.rs's production slice is empty — cut at the wrong place, or \
+             the file itself has none"
+                .to_string(),
+        );
+    }
+    for (idx, line) in prod.lines().enumerate() {
+        for needle in SETTINGS_RS_FORBIDDEN_NEEDLES {
+            if line.contains(needle) {
+                return Err(format!(
+                    "src/settings.rs's production slice names {needle:?} at line {}: {line}",
+                    idx + 1
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn settings_rs_production_slice_check_passes_on_a_clean_slice() {
+    let src = "//! docs
+pub fn a() -> u8 { 1 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+}
+";
+    settings_rs_production_slice_is_io_free(src).expect("no needle above the cut");
+}
+
+#[test]
+fn settings_rs_production_slice_check_fails_naming_needle_and_line() {
+    let src = "pub fn a() {}
+use std::fs;
+
+#[cfg(test)]
+mod tests {}
+";
+    let err =
+        settings_rs_production_slice_is_io_free(src).expect_err("std::fs above the cut fails");
+    assert!(err.contains("std::fs"), "{err}");
+    assert!(err.contains("line 2"), "{err}");
+
+    // The `ratatui` needle is load-bearing here and nowhere else: no gate script sweeps
+    // this file, so a view type reaching it would otherwise go unnoticed.
+    let src = "use ratatui::style::Style;
+
+#[cfg(test)]
+mod tests {}
+";
+    let err = settings_rs_production_slice_is_io_free(src)
+        .expect_err("a ratatui name above the cut fails");
+    assert!(err.contains("ratatui"), "{err}");
+
+    // The clock needle is this claim's own further addition beyond
+    // `src/integration.rs`'s set.
+    let src = "fn a() { let _ = std::time::Instant::now(); }
+
+#[cfg(test)]
+mod tests {}
+";
+    let err = settings_rs_production_slice_is_io_free(src)
+        .expect_err("an Instant::now() above the cut fails");
+    assert!(err.contains("Instant"), "{err}");
+}
+
+#[test]
+fn settings_rs_production_slice_check_ignores_a_needle_below_the_cut() {
+    // The complement: an I/O name in the test module alone, with none above the cut,
+    // must not fail the claim — the slice boundary is load-bearing, not an exemption.
+    let src = "pub fn a() {}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    fn t() {
+        let _ = std::fs::read_to_string(\"x\");
+    }
+}
+";
+    settings_rs_production_slice_is_io_free(src)
+        .expect("a needle only below the cut must not fail");
+}
+
+#[test]
+fn settings_rs_production_slice_check_rejects_an_empty_slice() {
+    let err = settings_rs_production_slice_is_io_free("#[cfg(test)]\nmod tests {}\n")
+        .expect_err("an empty production slice must fail rather than pass vacuously");
+    assert!(err.contains("empty"), "{err}");
+}
+
+/// `setting-provenance` :: "The module names no I/O API"; `doc-conformance` :: "A planted
+/// I/O name fails the claim" and "An I/O name in the test module alone does not fail the
+/// claim" — the claim itself, over the real file.
+#[test]
+fn the_production_slice_of_src_settings_rs_carries_no_io_clock_or_view_name() {
+    let src = read_doc(&manifest_dir().join("src/settings.rs")).expect("read src/settings.rs");
+    settings_rs_production_slice_is_io_free(&src)
+        .expect("src/settings.rs's production slice names no I/O, clock, or ratatui API");
+}
+
+// ---------------------------------------------------------------------------
 // `mouse-text-selection` :: "The clipboard write's confinement is bound inside
 // `cargo test`" (`specs/doc-conformance/spec.md`) — the twelfth `tests/doc_contract.rs`
 // claim. `TerminalOps::write_clipboard` (`src/ui/terminal.rs`) is the crate's only
