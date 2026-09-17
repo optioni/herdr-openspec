@@ -4918,8 +4918,8 @@ mod tests {
         use crate::changes::fixture;
         use crate::testutil::RecordingReader;
         use crate::ui::app::{
-            Action, ArtifactSection, Dashboard, Detail, Filter, Granularity, Overlay, Panel, Route,
-            SectionKey, Sections, SelectPhase, Selection, Target, action_for,
+            Action, ArtifactSection, Dashboard, Detail, Edit, Filter, Granularity, Overlay, Panel,
+            Route, SectionKey, Sections, SelectPhase, Selection, Target, action_for,
         };
 
         fn empty_filter() -> Filter {
@@ -6436,6 +6436,329 @@ mod tests {
             assert_eq!(
                 zero.settings.cursor, 0,
                 "saturates rather than underflowing"
+            );
+        }
+
+        /// `settings-window`'s own three fixture rows, with `agent_kind` (row `1`)
+        /// made `Editable::Kind` with the given committed value and shortlist —
+        /// `three_settings()`'s own shape, for the group 5 edit tests that need an
+        /// editable `agent_kind` row rather than three uniformly read-only ones.
+        fn settings_with_agent_kind(value: &str, shortlist: Vec<&str>) -> Vec<crate::settings::Setting> {
+            vec![
+                crate::settings::Setting {
+                    key: "openspec_bin",
+                    value: "openspec_bin-value".to_string(),
+                    provenance: crate::settings::Provenance::Default,
+                    editable: crate::settings::Editable::No {
+                        reason: crate::settings::Reason::SetOnce,
+                    },
+                },
+                crate::settings::Setting {
+                    key: "agent_kind",
+                    value: value.to_string(),
+                    provenance: crate::settings::Provenance::SoleIntegration,
+                    editable: crate::settings::Editable::Kind {
+                        shortlist: shortlist.iter().map(|s| s.to_string()).collect(),
+                    },
+                },
+                crate::settings::Setting {
+                    key: "prompts",
+                    value: "prompts-value".to_string(),
+                    provenance: crate::settings::Provenance::Default,
+                    editable: crate::settings::Editable::No {
+                        reason: crate::settings::Reason::SetOnce,
+                    },
+                },
+            ]
+        }
+
+        /// `three_settings()`'s own shape, with `agent_kind` (row `1`) refused for
+        /// `reason` rather than editable — for the group 5 tests that need a
+        /// refused `agent_kind` row (`Reason::Configured` or
+        /// `Reason::NoIntegration`).
+        fn settings_with_agent_kind_refused(reason: crate::settings::Reason) -> Vec<crate::settings::Setting> {
+            let provenance = if reason == crate::settings::Reason::Configured {
+                crate::settings::Provenance::Configured
+            } else {
+                crate::settings::Provenance::LastResort
+            };
+            vec![
+                crate::settings::Setting {
+                    key: "openspec_bin",
+                    value: "openspec_bin-value".to_string(),
+                    provenance: crate::settings::Provenance::Default,
+                    editable: crate::settings::Editable::No {
+                        reason: crate::settings::Reason::SetOnce,
+                    },
+                },
+                crate::settings::Setting {
+                    key: "agent_kind",
+                    value: "the-last-resort".to_string(),
+                    provenance,
+                    editable: crate::settings::Editable::No { reason },
+                },
+                crate::settings::Setting {
+                    key: "prompts",
+                    value: "prompts-value".to_string(),
+                    provenance: crate::settings::Provenance::Default,
+                    editable: crate::settings::Editable::No {
+                        reason: crate::settings::Reason::SetOnce,
+                    },
+                },
+            ]
+        }
+
+        /// `settings-window` -> "An edit begins, changes a candidate, and
+        /// commits" (the in-memory half — `state::record_kind` and
+        /// `Launcher::set_kind` are later groups' work; see design.md -> Test
+        /// Strategy).
+        #[test]
+        fn an_edit_begins_changes_a_candidate_and_commits() {
+            let mut d = dashboard_at(Route::Detail);
+            d.overlay.panel = Some(Panel::Settings);
+            d.settings.rows = settings_with_agent_kind("claude", vec!["claude", "codex"]);
+            d.settings.cursor = 1;
+
+            d.apply(Action::OpenDetail);
+            assert_eq!(
+                d.overlay.edit,
+                Some(Edit {
+                    setting: 1,
+                    candidate: 0
+                }),
+                "the edit begins on the committed kind's own position in the shortlist"
+            );
+
+            d.apply(Action::Next);
+            assert_eq!(
+                d.overlay.edit,
+                Some(Edit {
+                    setting: 1,
+                    candidate: 1
+                })
+            );
+            assert_eq!(
+                d.settings.rows[1].value, "claude",
+                "the committed value is untouched while the edit is in progress"
+            );
+
+            d.apply(Action::OpenDetail);
+            assert!(d.overlay.edit.is_none(), "the third `OpenDetail` commits");
+            assert_eq!(
+                d.settings.rows[1].value, "codex",
+                "the candidate becomes the committed value"
+            );
+            assert_eq!(d.settings.cursor, 1, "the cursor stays on agent_kind");
+        }
+
+        /// `settings-window` -> "`Esc` cancels the edit and a second `Esc`
+        /// closes the panel".
+        #[test]
+        fn esc_cancels_the_edit_and_a_second_esc_closes_the_panel() {
+            let mut d = dashboard_at(Route::Detail);
+            d.overlay.panel = Some(Panel::Settings);
+            d.settings.rows = settings_with_agent_kind("claude", vec!["claude", "codex"]);
+            d.settings.cursor = 1;
+
+            d.apply(Action::OpenDetail);
+            d.apply(Action::Next);
+            assert_eq!(
+                d.overlay.edit,
+                Some(Edit {
+                    setting: 1,
+                    candidate: 1
+                })
+            );
+
+            d.apply(Action::Back);
+            assert!(d.overlay.edit.is_none(), "the third `Back` cancels the edit");
+            assert_eq!(
+                d.settings.rows[1].value, "claude",
+                "a cancelled edit writes nothing to the committed value"
+            );
+            assert_eq!(
+                d.overlay.panel,
+                Some(Panel::Settings),
+                "the panel is still open"
+            );
+
+            d.apply(Action::Back);
+            assert_eq!(d.overlay.panel, None, "the fourth `Back` closes the panel");
+        }
+
+        /// `settings-window` -> "`Enter` on a read-only setting begins no
+        /// edit".
+        #[test]
+        fn enter_on_a_read_only_setting_begins_no_edit() {
+            let mut d = dashboard_at(Route::Detail);
+            d.overlay.panel = Some(Panel::Settings);
+            d.settings.rows = settings_with_agent_kind("claude", vec!["claude", "codex"]);
+
+            for cursor in [0usize, 2usize] {
+                d.settings.cursor = cursor;
+                let before = d.clone();
+                d.apply(Action::OpenDetail);
+                assert_eq!(
+                    d, before,
+                    "row {cursor} is read-only, so OpenDetail changes nothing"
+                );
+            }
+        }
+
+        /// `settings-window` -> "The shortlist is the installed kinds, in
+        /// Herdr's order, and wraps".
+        #[test]
+        fn the_shortlist_is_the_installed_kinds_in_herdrs_order_and_wraps() {
+            let mut d = dashboard_at(Route::Detail);
+            d.overlay.panel = Some(Panel::Settings);
+            d.settings.rows =
+                settings_with_agent_kind("codex", vec!["claude", "codex", "cursor"]);
+            d.settings.cursor = 1;
+
+            d.apply(Action::OpenDetail);
+            assert_eq!(
+                d.overlay.edit,
+                Some(Edit {
+                    setting: 1,
+                    candidate: 1
+                }),
+                "the candidate begins at codex"
+            );
+
+            d.apply(Action::Next);
+            d.apply(Action::Next);
+            assert_eq!(
+                d.overlay.edit,
+                Some(Edit {
+                    setting: 1,
+                    candidate: 0
+                }),
+                "Next, Next moves to cursor then wraps to claude"
+            );
+
+            d.apply(Action::Prev);
+            assert_eq!(
+                d.overlay.edit,
+                Some(Edit {
+                    setting: 1,
+                    candidate: 2
+                }),
+                "Prev from claude wraps to cursor"
+            );
+        }
+
+        /// `settings-window` -> "A committed kind outside the shortlist starts
+        /// the edit at the first entry".
+        #[test]
+        fn a_committed_kind_outside_the_shortlist_starts_the_edit_at_the_first_entry() {
+            let mut d = dashboard_at(Route::Detail);
+            d.overlay.panel = Some(Panel::Settings);
+            d.settings.rows = settings_with_agent_kind("aider", vec!["claude", "codex"]);
+            d.settings.cursor = 1;
+
+            d.apply(Action::OpenDetail);
+            assert_eq!(
+                d.overlay.edit,
+                Some(Edit {
+                    setting: 1,
+                    candidate: 0
+                }),
+                "the candidate begins at the first entry, Herdr's own order"
+            );
+            assert_eq!(
+                d.settings.rows[1].value, "aider",
+                "the committed value is unchanged by beginning an edit"
+            );
+        }
+
+        /// `settings-window` -> "No installed integration makes the row
+        /// non-editable with a reason".
+        #[test]
+        fn no_installed_integration_makes_the_row_non_editable_with_a_reason() {
+            let mut d = dashboard_at(Route::Detail);
+            d.overlay.panel = Some(Panel::Settings);
+            d.settings.rows =
+                settings_with_agent_kind_refused(crate::settings::Reason::NoIntegration);
+            d.settings.cursor = 1;
+
+            d.apply(Action::OpenDetail);
+            assert!(
+                d.overlay.edit.is_none(),
+                "no installed integration begins no edit"
+            );
+
+            d.apply(Action::Back);
+            assert_eq!(
+                d.overlay.panel, None,
+                "the panel is still open beforehand and `Back` still closes it"
+            );
+        }
+
+        /// `settings-window` -> "A configured `agent_kind` refuses the edit
+        /// and names the file".
+        #[test]
+        fn a_configured_agent_kind_refuses_the_edit_and_names_the_file() {
+            let mut d = dashboard_at(Route::Detail);
+            d.overlay.panel = Some(Panel::Settings);
+            d.settings.rows =
+                settings_with_agent_kind_refused(crate::settings::Reason::Configured);
+            d.settings.cursor = 1;
+
+            d.apply(Action::OpenDetail);
+            assert!(
+                d.overlay.edit.is_none(),
+                "a configured agent_kind refuses the edit"
+            );
+        }
+
+        /// `settings-window` -> "The refusal is per setting, not per panel".
+        #[test]
+        fn the_refusal_is_per_setting_not_per_panel() {
+            let mut d = dashboard_at(Route::Detail);
+            d.overlay.panel = Some(Panel::Settings);
+            d.settings.rows = vec![
+                crate::settings::Setting {
+                    key: "openspec_bin",
+                    value: "/usr/bin/openspec".to_string(),
+                    provenance: crate::settings::Provenance::Configured,
+                    editable: crate::settings::Editable::No {
+                        reason: crate::settings::Reason::Configured,
+                    },
+                },
+                crate::settings::Setting {
+                    key: "agent_kind",
+                    value: "claude".to_string(),
+                    provenance: crate::settings::Provenance::SoleIntegration,
+                    editable: crate::settings::Editable::Kind {
+                        shortlist: vec!["claude".to_string(), "codex".to_string()],
+                    },
+                },
+                crate::settings::Setting {
+                    key: "prompts",
+                    value: "prompts-value".to_string(),
+                    provenance: crate::settings::Provenance::Default,
+                    editable: crate::settings::Editable::No {
+                        reason: crate::settings::Reason::SetOnce,
+                    },
+                },
+            ];
+
+            d.settings.cursor = 0;
+            d.apply(Action::OpenDetail);
+            assert!(
+                d.overlay.edit.is_none(),
+                "openspec_bin is owned by config.toml and begins no edit"
+            );
+
+            d.settings.cursor = 1;
+            d.apply(Action::OpenDetail);
+            assert_eq!(
+                d.overlay.edit,
+                Some(Edit {
+                    setting: 1,
+                    candidate: 0
+                }),
+                "agent_kind still begins one; one refused setting does not freeze the panel"
             );
         }
 
