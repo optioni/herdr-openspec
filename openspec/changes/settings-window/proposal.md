@@ -32,14 +32,24 @@ Two arguments this was not worth building before, and why they have flipped:
   question a user actually has.
 - **It subsumes the client picker.** `agent-client-choice`'s step 4 is this window opened on the
   `agent_kind` row, so there is one modal in the crate rather than two.
-- **A small set is editable in place**, written to `HERDR_PLUGIN_STATE_DIR`: `agent_kind` and
-  `archived_count` (a number). Everything else is **read-only** with its source shown.
-- **The `agent_kind` row offers installed integrations as a shortlist but does not restrict to
-  them.** Any kind can be entered, because `integration status` is not an availability check — a
-  kind launches fine without its integration, and filtering by it would be the capability-check
-  misuse `agent-client-choice` explicitly rules out. Choosing a kind with no integration is
-  allowed and carries the "status will read `unknown`" warning beside it. The shortlist also
-  avoids hardcoding the 23-kind enum, which lives only in `--help` text.
+- **Exactly one setting is editable in place**, written to `HERDR_PLUGIN_STATE_DIR`:
+  `agent_kind`. Everything else is **read-only** with its source shown.
+- **The `agent_kind` row is a shortlist of the installed integrations, and nothing else.**
+  This **reverses** what this proposal first argued. The earlier text said any kind could be
+  entered, because `integration status` is not an availability check and filtering by it would
+  be the capability-check misuse `agent-client-choice` rules out. That argument is sound and is
+  accepted as a **cost**, not refuted: the panel gains no text field, no cursor, and no
+  character-level editing — machinery the crate has only in `/` filter mode — and the reader who
+  wants an uninstalled kind hand-edits `config.toml`, which still accepts any kind and still
+  outranks this panel. The boundary case shortlist-only creates is specified rather than
+  ignored: with **no** installed integration the row is not editable and says so, naming
+  `config.toml`.
+- **`archived_count` is not shown at all.** `list-sections` made the key *accepted and inert* —
+  nothing consumes it, `change-enumeration` no longer truncates the archived tier, and the
+  archived section's fold decides what the list shows. A panel whose job is to say what is
+  deciding each setting has nothing to say about a value that decides nothing, and a stepper for
+  it would invite an edit with no visible effect. The key stays readable in `config.toml`,
+  documented there as inert, which is where a reader who has set it will look.
 - **`config.toml` still wins.** An explicit key there outranks anything set here, and the
   window says so on any row where that is happening, rather than silently accepting an edit
   that will not take effect.
@@ -68,19 +78,40 @@ Two arguments this was not worth building before, and why they have flipped:
 
 ### Modified Capabilities
 
-- `dashboard-loop`: an overlay route, and what keys mean while it is open — `/` filter mode is
-  the existing precedent for a mode that changes key meaning.
-- `plugin-state`: the settings the window records, beside `agent-names.toml`.
-- `plugin-config`: `Config` gains provenance alongside each value.
-- `responsive-layout`: how the overlay sizes at the 100-column breakpoint and below.
-- `mouse-input`: clicking a row, and clicking outside to dismiss.
-- `agent-launch`: step 4 of the kind precedence becomes this window.
+- `dashboard-loop`: `Action` gains `ToggleSettings`, and `Dashboard::help: Help` becomes
+  `overlay: Overlay` carrying `panel: Option<Panel>` — still sixteen fields.
+- `help-overlay`: the layer it introduced now carries either panel; the help panel answers
+  eight actions instead of seven.
+- `binding-inventory`: the `,` row, and a seventh group for the keys the settings panel
+  reinterprets.
+- `plugin-state`: `settings.toml` gains its first writer, beside `agent-names.toml`.
+- `responsive-layout`: `layout::help_band` becomes `layout::overlay_band`, serving both panels.
+- `mouse-input`: clicking a setting row, and clicking outside to dismiss — which becomes
+  `Action::Back` rather than `Action::ToggleHelp`, since with two panels the latter swaps
+  rather than closes.
+- `agent-launch`: step 4 of the kind precedence opens this panel, and a committed kind
+  invalidates the launcher's session cache so it takes effect without a restart.
+- `quality-gates`: the gate-script count moves from thirty-one to thirty-two with
+  `settingswidths.sh`.
+- `doc-conformance`: `src/settings.rs`' freedom from I/O becomes the sixteenth checked claim.
+
+The last two were added during planning review, which found both capabilities being changed
+with no delta — and `tasks.md` directing an edit to `openspec/specs/` in place, which
+`OPENSPEC-UNTOUCHED`'s tracked-diff leg exists to refuse.
+
+`plugin-config` is **not** modified. This proposal first put provenance "beside each value" in
+`src/config.rs`; it lands in the new `src/settings.rs` instead, because `Config` is the parse
+result of one file and cannot know about the four other levels that outrank or underwrite it.
+Absence of a key in `Config` is the only provenance signal `config.toml` can honestly give.
 
 ## Impact
 
 - `src/ui/` — a new pure view file, the overlay route, key and mouse handling. No I/O: the view
   receives settings and provenance as state, exactly as it receives changes.
-- `src/config.rs` — provenance beside each value.
+- `src/settings.rs` — **new**: the settings list and the provenance enum. Not `src/config.rs`:
+  see the note under Capabilities.
+- `src/launch.rs` — `Request::Resolve`, `Outcome`'s two new fields, and `Launcher::set_kind`.
+- `src/ui/driver.rs` — `Target::Setting`, and the click-outside action correction.
 - `src/state.rs` — recording the editable settings.
 - `README.md`, `SPEC.md` — the keybinding, the precedence table, and the write boundary restated
   where someone proposing "just save config.toml" will read it.
@@ -93,22 +124,29 @@ picker it absorbs. Until this lands, that change's step 4 degrades to a problem 
 installed integrations and telling the user to set `agent_kind` — honest and non-blocking, and
 the fallback this window upgrades.
 
-**Prefer landing `help-overlay` first.** Both need the crate's first overlay, and that change is
-read-only — no editing, no state writes, no provenance — so it proves the machinery at a
-fraction of the risk. Whichever lands first owns the overlay; if it is `help-overlay`, this
-change becomes a second panel rather than a second mechanism.
+**`help-overlay` landed first, as this proposal preferred.** It owns the overlay — a band over
+the body, a dispatch that takes precedence over the route and filter dispatches, and `Esc`
+closing it before any other layer — so this change is a **second panel**, not a second
+mechanism, exactly as the sentence above anticipated. `agent-client-choice` has landed too, so
+the precedence this panel displays and the picker it absorbs both exist.
 
-## Open Questions for Review
+## Resolved Decisions
 
-1. **Is provenance display the real product here?** If so the editable set could start empty and
-   the window would still earn its place — worth deciding before specs, because it changes what
-   this is.
-2. **Overlay or third route?** An overlay must compose with the existing two regions and the
-   100-column breakpoint; a third route is simpler and loses the context behind it.
-3. **What happens when `config.toml` overrides a row the user just edited?** Refusing the edit is
-   honest; accepting it and showing it as shadowed is kinder and more confusing.
-4. **Free-text entry or shortlist only?** Allowing any kind needs a text field, which the crate
-   has only in `/` filter mode. A shortlist alone is far simpler and silently blocks the
-   uninstalled-integration case.
-5. **Which key opens it?** Single letters are nearly exhausted — `a c s g r q j k` and `1`–`9`,
-   `[`, `]`, `/`, `Space`, `Enter`, `Esc` are taken.
+The five questions this proposal opened are answered. Two were settled by work that landed
+after it was written; three were decided by the author before specs.
+
+1. **Is provenance display the real product?** No — it is half of it. The panel shows all three
+   settings with their levels, and `agent_kind` is editable, because `settings.toml` had no
+   writer at all: step 2 of the precedence could never fire, and an ambiguous refusal was
+   fixable only by hand-editing `config.toml` and restarting the pane.
+2. **Overlay or third route?** **Overlay** — settled by `help-overlay`. `Route` stays `List` and
+   `Detail`; the layer carries `panel: Option<Panel>`, so two panels open at once is
+   unrepresentable rather than merely avoided.
+3. **`config.toml` overriding an edited row?** **Refuse the edit**, naming the file. An edit that
+   is written, persisted, and visibly has no effect is the more confusing outcome; a refusal
+   answers the same question before anything is written.
+4. **Free-text or shortlist?** **Shortlist only**, reversing this proposal's own argument — see
+   What Changes above for the cost that buys and the boundary case it creates.
+5. **Which key?** **`,`**, the near-universal settings convention. `S` was rejected for sitting
+   one slipped shift from `s`, which launches an archive agent — a mis-press that starts a
+   process is worse than one that opens nothing.
