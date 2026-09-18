@@ -641,7 +641,8 @@ mod tests {
                 "Agents",
                 "Pane",
                 "While filtering",
-                "Mouse"
+                "Mouse",
+                "While settings is open",
             ]
         );
 
@@ -655,12 +656,13 @@ mod tests {
                 Scope::Any,
                 Scope::Filter,
                 Scope::Any,
+                Scope::Settings,
             ]
         );
 
         let counts: Vec<usize> = INVENTORY.iter().map(|g| g.bindings.len()).collect();
-        assert_eq!(counts, vec![5, 7, 4, 5, 5, 7]);
-        assert_eq!(counts.iter().sum::<usize>(), 33);
+        assert_eq!(counts, vec![5, 7, 4, 5, 5, 7, 4]);
+        assert_eq!(counts.iter().sum::<usize>(), 37);
 
         assert!(
             INVENTORY.iter().all(|g| !g.bindings.is_empty()),
@@ -668,6 +670,84 @@ mod tests {
         );
         let unique: BTreeSet<&str> = titles.iter().copied().collect();
         assert_eq!(unique.len(), titles.len(), "no two groups share a title");
+    }
+
+    /// `specs/binding-inventory/spec.md` -> "The settings group is present and
+    /// names the reinterpreted keys" (`settings-window`). The seventh group is
+    /// `Enter`/`Esc`/`j`-`k` reinterpreted for the settings panel — every one of
+    /// its four actions is already named by an earlier group, so what this test
+    /// pins is that each of its own four descriptions says something an earlier
+    /// group's row for the *same* action does not, not merely that the action
+    /// appears somewhere.
+    #[test]
+    fn the_settings_group_is_present_and_names_the_reinterpreted_keys() {
+        assert_eq!(INVENTORY.len(), 7);
+        let seventh = &INVENTORY[6];
+        assert_eq!(seventh.title, "While settings is open");
+        assert_eq!(seventh.scope, Scope::Settings);
+        assert_eq!(
+            seventh.scope.label(),
+            Some("settings panel"),
+            "Scope::Settings' own suffix"
+        );
+
+        let actions: Vec<Action> = seventh.bindings.iter().map(|b| b.action).collect();
+        assert_eq!(
+            actions,
+            vec![Action::OpenDetail, Action::Back, Action::Next, Action::Prev]
+        );
+
+        for binding in seventh.bindings {
+            for earlier in INVENTORY.iter().take(6) {
+                for row in earlier.bindings {
+                    if row.action == binding.action {
+                        assert_ne!(
+                            row.description, binding.description,
+                            "group 7's {:?} row must describe what {} does in the \
+                             panel, not what it does at {}'s own route",
+                            binding.action, binding.input, earlier.title
+                        );
+                    }
+                }
+            }
+        }
+
+        let pane = INVENTORY.iter().find(|g| g.title == "Pane").unwrap();
+        assert_eq!(pane.bindings.len(), 5);
+        assert_eq!(pane.bindings[4].input, ",");
+        assert_eq!(pane.bindings[4].action, Action::ToggleSettings);
+    }
+
+    /// `specs/binding-inventory/spec.md` -> "The settings group renders at both
+    /// mandated widths".
+    #[test]
+    fn the_settings_group_renders_at_both_mandated_widths() {
+        for width in [60u16, 120u16] {
+            let content = rows(width);
+            let heading = format!(
+                "While settings is open ({})",
+                Scope::Settings.label().unwrap()
+            );
+            let want = fit(&heading, width as usize);
+            assert!(
+                content.iter().any(|row| row_plain_text(row) == want),
+                "width {width}: the settings group's heading row"
+            );
+            let seventh = &INVENTORY[6];
+            for binding in seventh.bindings {
+                assert!(
+                    content
+                        .iter()
+                        .any(|row| row_plain_text(row).contains(binding.input)),
+                    "width {width}: no row carries {:?}",
+                    binding.input
+                );
+            }
+            for row in &content {
+                let total: usize = row.segments.iter().map(|(t, _)| columns(t)).sum();
+                assert!(total <= width as usize, "a row exceeded {width} columns");
+            }
+        }
     }
 
     #[test]
@@ -686,17 +766,22 @@ mod tests {
         );
         assert!(space.iter().all(|(_, b)| b.action == Action::ToggleSection));
 
+        // `settings-window` adds a third `Esc` row, under group 7's
+        // `Scope::Settings`: cancel the edit in progress, or close the panel.
         let esc: Vec<(Scope, &Binding)> = INVENTORY
             .iter()
             .flat_map(|g| g.bindings.iter().map(move |b| (g.scope, b)))
             .filter(|(_, b)| b.input.contains("Esc"))
             .collect();
-        assert_eq!(esc.len(), 2);
+        assert_eq!(esc.len(), 3);
         assert!(esc.iter().any(|(scope, _)| *scope == Scope::Detail));
         assert!(esc.iter().any(|(scope, _)| *scope == Scope::Filter));
-        assert_ne!(
-            esc[0].1.description, esc[1].1.description,
-            "the two Esc rows must describe different effects"
+        assert!(esc.iter().any(|(scope, _)| *scope == Scope::Settings));
+        let descriptions: BTreeSet<&str> = esc.iter().map(|(_, b)| b.description).collect();
+        assert_eq!(
+            descriptions.len(),
+            3,
+            "all three Esc rows must describe different effects"
         );
         assert!(esc.iter().all(|(_, b)| b.action == Action::Back));
     }
@@ -914,8 +999,9 @@ mod tests {
     /// cannot hold it" -> "The overlay scrolls at both mandated sizes".
     #[test]
     fn the_overlay_scrolls_at_both_mandated_sizes() {
-        // 120x40: body 39 rows, band 39 (clamped against 46 wanted),
-        // interior 37 against 44 content rows.
+        // 120x40: body 39 rows, band 39 (clamped against 52 wanted),
+        // interior 37 against 50 content rows — `content_rows()` rose from 44
+        // to 50 when `settings-window` added the seventh group.
         let total = Rect::new(0, 0, 120, 40);
         let body = body_for(total);
         let band = band_for(total);
@@ -935,20 +1021,22 @@ mod tests {
             .expect("draw the unscrolled band");
         let buffer = terminal.backend().buffer().clone();
         let bottom_y = band.y + band.height - 1;
-        assert_indicator(&buffer, band, bottom_y, "1-37/44");
+        assert_indicator(&buffer, band, bottom_y, "1-37/50");
 
-        for _ in 0..10 {
+        // Twenty presses, past the new maximum of 13 (50 - 37), so the
+        // saturation this test exists to show is still exercised.
+        for _ in 0..20 {
             dashboard.apply(Action::Next);
         }
         dashboard.normalise_help_scroll(total);
-        assert_eq!(dashboard.overlay.scroll, 7, "clamped to 44 - 37");
+        assert_eq!(dashboard.overlay.scroll, 13, "clamped to 50 - 37");
         terminal
             .draw(|f| render(f, body, &dashboard.overlay))
             .expect("draw the scrolled band");
         let buffer = terminal.backend().buffer().clone();
-        assert_indicator(&buffer, band, bottom_y, "8-44/44");
+        assert_indicator(&buffer, band, bottom_y, "14-50/50");
 
-        // 60x20: body 19 rows, band 19, interior 17 against 44 content
+        // 60x20: body 19 rows, band 19, interior 17 against 50 content
         // rows.
         let total = Rect::new(0, 0, 60, 20);
         let body = body_for(total);
@@ -965,7 +1053,7 @@ mod tests {
             .draw(|f| render(f, body, &overlay))
             .expect("draw the 60x20 band");
         let buffer = terminal.backend().buffer().clone();
-        assert_indicator(&buffer, band, band.y + band.height - 1, "1-17/44");
+        assert_indicator(&buffer, band, band.y + band.height - 1, "1-17/50");
     }
 
     /// Read the trailing `text.len()` columns of row `y`, cell by cell —
@@ -1015,14 +1103,14 @@ mod tests {
                 .draw(|f| render(f, body, &dashboard.overlay))
                 .expect("redraw after Next");
         }
-        assert_eq!(dashboard.overlay.scroll, 27, "clamped to 44 - 17");
+        assert_eq!(dashboard.overlay.scroll, 33, "clamped to 50 - 17");
         let buffer = terminal.backend().buffer().clone();
         let last_content_row = &rows(band.width)[content_rows() - 1];
         let interior_last_y = band.y + band.height - 2;
         assert_eq!(
             row_text(&buffer, interior_last_y),
             row_plain_text(last_content_row),
-            "the window's last visible row is always content row 44, never blank"
+            "the window's last visible row is always content row 50, never blank"
         );
 
         for _ in 0..200 {
@@ -1049,13 +1137,13 @@ mod tests {
     /// fits".
     #[test]
     fn no_indicator_when_the_content_fits() {
-        // 120x60: body 59 rows, band 46 (44 content rows + 2 rule rows,
-        // well under the body), interior 44 — exactly `content_rows()`, so
+        // 120x60: body 59 rows, band 52 (50 content rows + 2 rule rows,
+        // well under the body), interior 50 — exactly `content_rows()`, so
         // every row is visible in one frame and no indicator is due.
         let total = Rect::new(0, 0, 120, 60);
         let body = body_for(total);
         let band = band_for(total);
-        assert_eq!(band.height, 46);
+        assert_eq!(band.height, 52);
         let overlay = crate::ui::app::Overlay {
             panel: Some(Panel::Help),
             scroll: 0,
