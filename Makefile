@@ -45,9 +45,9 @@ gates:
 	/bin/sh scripts/gates/nocli-shell.sh
 	SCAN_MIN=350 TYPES='Dashboard Filter Detail Sections Overlay Selection Edit' /bin/sh scripts/gates/nodefault-ui.sh
 	SCAN_MIN=53 TYPES='Refresh' /bin/sh scripts/gates/nodefault-ui.sh
-	SCAN_MIN=81 TYPES='Launch' /bin/sh scripts/gates/nodefault-ui.sh
+	SCAN_MIN=99 TYPES='Launch' /bin/sh scripts/gates/nodefault-ui.sh
 	SCAN_MIN=111 HOMEFILE=src/agents.rs TYPES='Agent Listed AgentSnapshot Attribution' /bin/sh scripts/gates/nodefault-ui.sh
-	SCAN_MIN=26 HOMEFILE=src/launch.rs TYPES='Outcome' /bin/sh scripts/gates/nodefault-ui.sh
+	SCAN_MIN=43 HOMEFILE=src/launch.rs TYPES='Outcome' /bin/sh scripts/gates/nodefault-ui.sh
 	SCAN_MIN=25 TYPES='ArtifactSection' /bin/sh scripts/gates/nodefault-ui.sh
 	SCAN_MIN=55 HOMEFILE=src/ui/help.rs TYPES='Binding Group' /bin/sh scripts/gates/nodefault-ui.sh
 	SCAN_MIN=4 HOMEFILE=src/launch.rs TYPES='Settings' /bin/sh scripts/gates/nodefault-ui.sh

@@ -161,7 +161,7 @@ tier = "outer"
 proof = ["every_launch_failure_renders_as_a_leading_row"]
 verdict = "unproven"
 why = "a real run_wired run against a scratch herdr failing at pane split, both widths"
-covers = ["src/launch.rs:367-373"]
+covers = ["src/launch.rs:399-405"]
 
 [[row]]
 condition = "A launch's `agent start` call fails"
@@ -169,7 +169,7 @@ tier = "outer"
 proof = ["every_launch_failure_renders_as_a_leading_row"]
 verdict = "unproven"
 why = "a real run_wired run against a scratch herdr failing at agent start, both widths"
-covers = ["src/launch.rs:388-396"]
+covers = ["src/launch.rs:424-435"]
 
 [[row]]
 condition = "A launch's `agent prompt` call fails"
@@ -177,7 +177,7 @@ tier = "outer"
 proof = ["every_launch_failure_renders_as_a_leading_row"]
 verdict = "unproven"
 why = "a real run_wired run against a scratch herdr failing at agent prompt, both widths"
-covers = ["src/launch.rs:411-413"]
+covers = ["src/launch.rs:449-451"]
 
 [[row]]
 condition = "A launch's derived agent name is already live in the session"
@@ -185,7 +185,7 @@ tier = "outer"
 proof = ["every_launch_failure_renders_as_a_leading_row"]
 verdict = "unproven"
 why = "a real run_wired run refused before any Herdr call, the sentence asserted in full at 120 columns"
-covers = ["src/launch.rs:137-141"]
+covers = ["src/launch.rs:158-162"]
 
 [[row]]
 condition = "`state::record` fails after a successful `agent start`"
@@ -193,7 +193,7 @@ tier = "outer"
 proof = ["a_success_clears_both_entries", "every_launch_failure_renders_as_a_leading_row"]
 verdict = "repaired"
 why = "openspec/changes/archive/2026-09-06-agent-launch should have shipped this: Outcome::problems now accumulates both the record and prompt failures, proved through run_wired and run_loop"
-covers = ["src/launch.rs:403-406"]
+covers = ["src/launch.rs:441-444"]
 
 [[row]]
 condition = "`g` on a change with no attributed agent"
@@ -201,7 +201,7 @@ tier = "outer"
 proof = ["g_with_no_agent_renders_the_same_buffer"]
 verdict = "unproven"
 why = "a real run_wired run pressing g on an unattributed change renders the identical buffer, with an empty argv log"
-covers = ["src/launch.rs:103-110"]
+covers = ["src/launch.rs:124-131"]
 
 [[row]]
 condition = "A `pane split` payload is not the measured envelope (a Herdr older than the manifest's `min_herdr_version` floor, `0.7.0`, might return one)"
@@ -209,7 +209,7 @@ tier = "outer"
 proof = ["every_launch_failure_renders_as_a_leading_row"]
 verdict = "unproven"
 why = "a real run_wired run against a scratch herdr returning a malformed pane-split payload"
-covers = ["src/launch.rs:180-188"]
+covers = ["src/launch.rs:201-209"]
 
 [[row]]
 condition = "Pane narrower than 100 columns"
@@ -434,7 +434,7 @@ tier = "integration"
 proof = ["a_failed_status_call_still_launches_the_configured_kind", "a_failed_status_call_with_nothing_configured_reaches_claude_with_two_problems", "unparseable_output_is_not_a_failed_call"]
 verdict = "confirmed"
 why = "the launcher's worker is driven through `handle` against a HerdrCli whose `integration status` fails, and separately against one whose output parses to nothing; the first proves a configured kind still reaches `--kind` with exactly one problem and no second one claiming its integration is absent, the second proves the last resort with the read failure first, and the third proves the per-line problems are summarised into one entry at the launch boundary - three lines and seventeen both yielding two, while `parse` itself still returns one per line"
-covers = ["src/launch.rs:724-745"]
+covers = ["src/launch.rs:893-909"]
 
 [[row]]
 condition = "Two or more agent integrations installed, with no `agent_kind` configured and none recorded"
@@ -442,7 +442,7 @@ tier = "integration"
 proof = ["two_installed_integrations_stop_the_launch_with_one_problem_and_no_pane", "a_configured_kind_suppresses_the_stop_entirely", "the_ambiguous_refusal_clears_the_in_flight_flag_and_leaves_g_working", "the_ambiguous_stop_renders_as_one_leading_problem_row"]
 verdict = "confirmed"
 why = "the worker stops at `Choice::Ambiguous` with an invocation log of exactly one entry and a state directory byte-identical to before; the configured-kind control proves the stop is caused by the absence of a choice and by nothing else in the fixture; the driver test proves the same `drain` that adopts the outcome clears `in_flight` and leaves both `g` and a retried `a` working; and the list test proves the row at both mandated interior widths"
-covers = ["src/launch.rs:677-692"]
+covers = ["src/launch.rs:796-816"]
 
 [[row]]
 condition = "No agent integration installed at all, with no `agent_kind` configured and none recorded"
@@ -466,4 +466,4 @@ tier = "unit"
 proof = ["file_mode_refuses_the_three_launch_keys_and_names_the_missing_binary", "focus_is_exempt_from_file_mode", "a_file_mode_refusal_renders_one_row_at_both_widths", "file_mode_leaves_a_refusing_and_g_working_in_the_shipped_root"]
 verdict = "confirmed"
 why = "`launch::decide` with `file_mode` true refuses all three launch intents with a reason naming the absent binary, whether or not anything is selected, while the `file_mode` false control returns `Go` - so the refusal is caused by the flag alone; `Focus` is exempt; the list test proves the row at 38 and 58 columns; and the wiring test proves it end to end in the shipped composition root against a reachable socket, with the footer carrying `g focus` and not `a/c/s launch`"
-covers = ["src/launch.rs:115-121"]
+covers = ["src/launch.rs:136-142"]
