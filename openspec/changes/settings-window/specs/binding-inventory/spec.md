@@ -84,11 +84,14 @@ object to.
 - **THEN** there are exactly two `Space` bindings, one under a `Scope::List` group
   describing a list section and one under a `Scope::Detail` group describing a content
   section, and their descriptions differ
-- **AND** there are exactly two `Esc` bindings, one under a `Scope::Detail` group
-  describing the return to the change list and one under a `Scope::Filter` group
-  describing clearing the query, and their descriptions differ
-- **AND** both pairs name `Action::ToggleSection` and `Action::Back` respectively, so the
-  set check above counts each action once while the reader sees both routes
+- **AND** there are exactly **three** `Esc` bindings — `settings-window` adds the third,
+  under group 7's `Scope::Settings` — one under a `Scope::Detail` group describing the
+  return to the change list, one under a `Scope::Filter` group describing clearing the
+  query, and one under `Scope::Settings` describing cancelling the edit in progress or
+  closing the panel, and all three descriptions differ from one another
+- **AND** the `Space` pair names `Action::ToggleSection` and all three `Esc` bindings name
+  `Action::Back`, so the set check above counts each action once while the reader sees
+  every route or panel it appears at
 
 #### Scenario: Both quit keys have a row
 

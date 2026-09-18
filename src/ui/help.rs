@@ -36,6 +36,11 @@ pub enum Scope {
     List,
     Detail,
     Filter,
+    /// `settings-window`'s addition: the keys the settings panel reinterprets —
+    /// `Enter`, `Esc`, `j`/`k` — on exactly `Filter`'s own terms: the bindings
+    /// act this way only while that panel is open, and the heading is where
+    /// the reader learns the condition.
+    Settings,
 }
 
 impl Scope {
@@ -47,6 +52,7 @@ impl Scope {
             Scope::List => Some("list route"),
             Scope::Detail => Some("detail route"),
             Scope::Filter => Some("filter mode"),
+            Scope::Settings => Some("settings panel"),
         }
     }
 }
@@ -77,10 +83,12 @@ pub struct Group {
 
 /// The pane's whole binding inventory, in the reading order
 /// `specs/binding-inventory/spec.md` mandates: the list first, the detail
-/// second, the agent and pane keys next, and the two modal groups last —
+/// second, the agent and pane keys next, and the modal groups last —
 /// not alphabetical, and not the order `action_for`'s `match` happens to be
-/// written in. Six groups, thirty-two bindings; the test module's own shape
-/// assertion is the authority `cargo test` enforces, not this comment.
+/// written in. `settings-window` adds the seventh group, `While settings is
+/// open`, the keys the settings panel reinterprets. Seven groups,
+/// thirty-seven bindings; the test module's own shape assertion is the
+/// authority `cargo test` enforces, not this comment.
 pub const INVENTORY: &[Group] = &[
     Group {
         title: "Changes",
@@ -283,6 +291,32 @@ pub const INVENTORY: &[Group] = &[
             },
         ],
     },
+    Group {
+        title: "While settings is open",
+        scope: Scope::Settings,
+        bindings: &[
+            Binding {
+                input: "Enter",
+                description: "Begin editing the setting under the cursor, or commit the edit in progress.",
+                action: Action::OpenDetail,
+            },
+            Binding {
+                input: "Esc",
+                description: "Cancel the edit in progress, or close the panel.",
+                action: Action::Back,
+            },
+            Binding {
+                input: "j / ↓",
+                description: "Step the candidate while editing, or move the row cursor down.",
+                action: Action::Next,
+            },
+            Binding {
+                input: "k / ↑",
+                description: "Step the candidate while editing, or move the row cursor up.",
+                action: Action::Prev,
+            },
+        ],
+    },
 ];
 
 /// One row of the overlay's interior grammar: one or more `(text, role)`
@@ -296,8 +330,8 @@ pub struct Row {
 
 /// The number of rows [`rows`] produces, independent of any particular
 /// width: one heading row and one binding row per binding, per group, plus
-/// one blank row after every group but the last. Thirty-three bindings, six
-/// headings, five blanks: **44**.
+/// one blank row after every group but the last. Thirty-seven bindings, seven
+/// headings, six blanks: **50**.
 pub fn content_rows() -> usize {
     let bindings: usize = INVENTORY.iter().map(|group| group.bindings.len()).sum();
     let headings = INVENTORY.len();
