@@ -176,9 +176,10 @@ plant_file = "src/ui/help.rs"
 # new single-width test - the spec's own distinction ("Narrowed rather than added: this gate
 # counts the tests that assert at both widths against a floor, so a new single-width test
 # raises the total without lowering that count and is not the defect the floor exists to
-# catch"). This drops the both-width count from 3 to 2, below HELP_MIN's floor of 3.
+# catch"). This drops the both-width count from 4 to 3, below HELP_MIN's floor of 4
+# (`settings-window` raised both content_rows, 44 -> 50, and the floor itself, 3 -> 4).
 plant_find = '''
-        // 60x20: body 19 rows, band 19, interior 17 against 44 content
+        // 60x20: body 19 rows, band 19, interior 17 against 50 content
         // rows.
         let total = Rect::new(0, 0, 60, 20);
         let body = body_for(total);
@@ -195,10 +196,10 @@ plant_find = '''
             .draw(|f| render(f, body, &overlay))
             .expect("draw the 60x20 band");
         let buffer = terminal.backend().buffer().clone();
-        assert_indicator(&buffer, band, band.y + band.height - 1, "1-17/44");
+        assert_indicator(&buffer, band, band.y + band.height - 1, "1-17/50");
     }'''
 plant_replace = "\n    }"
-expect = "HELPWIDTHS FAIL: only 2 src/ui/help.rs tests name both 60 and 120 columns"
+expect = "HELPWIDTHS FAIL: only 3 src/ui/help.rs tests name both 60 and 120 columns"
 why = "help-overlay: helpwidths.sh is a count against a floor, not an every-test rule, so its own control must be a both-width test NARROWED to one width rather than a new single-width test added - the spec's own worked example of the distinction"
 
 [[control]]
