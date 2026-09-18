@@ -1196,9 +1196,14 @@ impl Dashboard {
     /// `settings-window`'s addition: the `agent_kind` row's current committed value, read out
     /// of `dashboard.settings.rows` rather than re-derived. `run_loop` (`src/ui/driver.rs`)
     /// calls this immediately before and after every `apply`, so a change between the two
-    /// calls means exactly a commit — `apply_settings_open_detail`'s commit branch is the only
-    /// place in the crate that ever changes a row's `value` after `load` constructs it — never
-    /// once per session. `None` only when the row itself is absent, which `settings::settings`
+    /// calls means exactly a commit. `apply_settings_open_detail`'s commit branch is **not**
+    /// the only place in the crate that changes a row's `value` after `load` constructs it —
+    /// `Dashboard::adopt_launch_outcome` also replaces `agent_kind` wholesale, on every
+    /// adopted `Outcome` whose `resolution` is `Some` — but `run_loop` calls `drive_live_tier`,
+    /// `adopt_launch_outcome`'s one caller, at the top of each iteration, strictly before the
+    /// "before" call this doc comment describes, so any such replacement is already folded
+    /// into `before` by the time the "after" call could see it as a change. `None` only when
+    /// the row itself is absent, which `settings::settings`
     /// never produces (`agent_kind` is always one of its three rows).
     pub(crate) fn agent_kind_value(&self) -> Option<String> {
         self.settings

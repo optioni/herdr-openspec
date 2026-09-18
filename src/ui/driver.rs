@@ -262,9 +262,15 @@ pub fn run_loop<B: Backend, E: EventSource>(
 /// (before the loop starts against after it returns) cannot write until the loop has already
 /// exited, which nothing running inside the loop — including a launch keystroke read later in
 /// the very same drive — can ever observe, and a killed pane never reaches it at all.
-/// `Dashboard::apply` is the only place that ever changes the `agent_kind` row's value
-/// (`apply_settings_open_detail`'s commit branch), so `before != after` here means exactly a
-/// commit, never a coincidental external change.
+/// `Dashboard::apply` is **not** the only place that ever changes the `agent_kind` row's
+/// value: `Dashboard::adopt_launch_outcome` replaces it wholesale whenever an adopted
+/// `Outcome::resolution` is `Some`. The reason `before != after` here still means exactly a
+/// commit (`apply_settings_open_detail`'s commit branch) and never that adoption is that
+/// `run_loop` calls `drive_live_tier` — the one caller of `adopt_launch_outcome` — at the
+/// **top** of every iteration, strictly before it reads `before_kind` for that same
+/// iteration. Any row replacement `drive_live_tier` performs is therefore already priced
+/// into `before` by the time this function sees it, so `apply`'s own change is the only one
+/// the comparison below can ever observe. Move that ordering and this invariant breaks.
 ///
 /// A failed write replaces `dashboard.launch.problems` wholesale — the same `!`-row channel a
 /// failed clipboard write already uses — rather than panicking or growing without bound.
@@ -4322,6 +4328,89 @@ mod tests {
             "Esc cancels the edit, not the panel"
         );
         assert_eq!(dashboard.overlay.edit, None);
+    }
+
+    /// `change-review` W8: `Dashboard::adopt_launch_outcome` replaces the whole `agent_kind`
+    /// row — value included — whenever an adopted `Outcome`'s `resolution` is `Some`, which
+    /// is not a commit through `apply_settings_open_detail`. The two comments this guards
+    /// (`maybe_record_kind_commit`'s own doc comment, above, and `Dashboard::agent_kind_value`'s
+    /// in `src/ui/app.rs`) both used to claim `apply` was the *only* place that ever changed
+    /// the row's value; it is not, and the reason `record_kind` still fires only on a real
+    /// commit is ordering: `drive_live_tier` — `adopt_launch_outcome`'s one caller — runs at
+    /// the top of `run_loop`'s iteration, strictly before `before_kind` is read, so this
+    /// adoption is already folded into `before` by the time `maybe_record_kind_commit` reads
+    /// `after`. A single-iteration drive that adopts a resolution-bearing `Outcome` and then
+    /// quits must therefore call `record_kind` **zero** times, even though the row's value
+    /// visibly changes.
+    #[test]
+    fn adopting_a_resolved_kind_never_calls_record_kind() {
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut dashboard = dashboard();
+        dashboard.settings.rows = vec![crate::settings::agent_kind_setting(None)];
+        dashboard.settings.cursor = 0;
+        assert_eq!(
+            dashboard.settings.rows[0].value, "the agent kind is still resolving",
+            "the fixture starts Pending, so the assertion below proves the row really moved"
+        );
+
+        // A single event, `q`: `drive_live_tier` adopts the queued `Outcome` before this
+        // event is even read, so the whole drive is one iteration — `apply(Action::Quit)`
+        // itself never touches `agent_kind`.
+        let mut events = Script::new(vec![Ok(Some(press(
+            KeyCode::Char('q'),
+            KeyModifiers::NONE,
+        )))]);
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut agents = crate::agents::none();
+        let mut launcher =
+            crate::testutil::ScriptedLauncher::new(vec![Some(crate::launch::Outcome {
+                named: None,
+                problems: Vec::new(),
+                picker: false,
+                resolution: Some(crate::settings::KindResolution {
+                    choice: crate::integration::Choice::Use {
+                        kind: "claude".to_string(),
+                        source: crate::integration::Source::SoleIntegration,
+                    },
+                    installed: vec!["claude".to_string()],
+                }),
+            })]);
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+            agents: &mut *agents,
+            launcher: &mut launcher,
+        };
+        let record_calls = std::cell::Cell::new(0usize);
+        run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| {
+                    record_calls.set(record_calls.get() + 1);
+                    Ok(())
+                },
+            },
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+
+        assert_eq!(
+            dashboard.settings.rows[0].value, "claude",
+            "adopt_launch_outcome must have replaced the row in place"
+        );
+        assert_eq!(
+            record_calls.get(),
+            0,
+            "adoption is not a commit through apply_settings_open_detail, so settings.toml \
+             must not be written for it"
+        );
     }
 
     /// `settings-window` :: "Opening the panel resolves the kind once and launches nothing" —
