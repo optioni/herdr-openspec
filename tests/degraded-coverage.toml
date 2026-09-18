@@ -145,7 +145,7 @@ tier = "unit"
 proof = ["an_unreadable_tasks_file_is_zero_with_a_named_reason"]
 verdict = "unproven"
 why = "a real unreadable tasks.md (directory and invalid-UTF-8 fixtures), read through changes::from_files"
-covers = ["src/tasks.rs:193-196"]
+covers = ["src/tasks.rs:551-554"]
 
 [[row]]
 condition = "Herdr socket unreachable"

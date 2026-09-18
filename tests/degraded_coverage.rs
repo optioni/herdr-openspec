@@ -342,13 +342,161 @@ fn is_proof_a_test(files: &[PathBuf], name: &str, all_tested_bodies: &[String]) 
         .any(|body| body.contains(&call_needle))
 }
 
+/// The keywords condition 4c names as opening an item declaration.
+const ITEM_KEYWORDS: &[&str] = &[
+    "fn", "struct", "enum", "impl", "trait", "mod", "use", "const", "static", "type",
+];
+
+/// Strip a leading `pub`, `pub(crate)` or `pub(in …)` visibility, returning what follows it.
+/// `pub` must be followed by whitespace (after its optional parenthesised scope) to count, so
+/// an identifier merely beginning `pub` is left alone.
+fn strip_visibility(trimmed: &str) -> &str {
+    let Some(after_pub) = trimmed.strip_prefix("pub") else {
+        return trimmed;
+    };
+    let rest = match after_pub.strip_prefix('(') {
+        Some(scope) => match scope.find(')') {
+            Some(close) => &scope[close + 1..],
+            None => return trimmed,
+        },
+        None => after_pub,
+    };
+    if rest.starts_with(char::is_whitespace) {
+        rest.trim_start()
+    } else {
+        trimmed
+    }
+}
+
+/// Strip any run of `unsafe` and `async` qualifiers ahead of an item keyword.
+fn strip_fn_qualifiers(mut rest: &str) -> &str {
+    loop {
+        let mut advanced = false;
+        for keyword in ["unsafe", "async"] {
+            if let Some(after) = rest.strip_prefix(keyword)
+                && after.starts_with(char::is_whitespace)
+            {
+                rest = after.trim_start();
+                advanced = true;
+            }
+        }
+        if !advanced {
+            return rest;
+        }
+    }
+}
+
+/// `true` when `text` opens with `word` as a whole word — the `\b` the specified rule writes.
+fn starts_with_word(text: &str, word: &str) -> bool {
+    match text.strip_prefix(word) {
+        Some(rest) => !rest.starts_with(|c: char| c.is_alphanumeric() || c == '_'),
+        None => false,
+    }
+}
+
+fn opens_an_item(trimmed: &str) -> bool {
+    let rest = strip_fn_qualifiers(strip_visibility(trimmed));
+    ITEM_KEYWORDS.iter().any(|kw| starts_with_word(rest, kw))
+}
+
+fn opens_a_struct_or_enum(trimmed: &str) -> bool {
+    let rest = strip_visibility(trimmed);
+    starts_with_word(rest, "struct") || starts_with_word(rest, "enum")
+}
+
+fn is_attribute(trimmed: &str) -> bool {
+    trimmed.starts_with("#[") || trimmed.starts_with("#![")
+}
+
+fn is_lone_delimiter(trimmed: &str) -> bool {
+    !trimmed.is_empty()
+        && trimmed
+            .chars()
+            .all(|c| matches!(c, '(' | ')' | '{' | '}' | '[' | ']' | ',' | ';'))
+}
+
+/// Condition 4c's structural classifier: the 1-based line numbers in `text` that are
+/// **declarations** rather than statements — blank, a comment, an item declaration (`fn`,
+/// `struct`, `enum`, `impl`, `trait`, `mod`, `use`, `const`, `static`, `type`) together with
+/// its generics and parameter list, an attribute, a lone delimiter, or a struct field or enum
+/// variant.
+///
+/// A field or variant is recognised by its **enclosing item extent** — the closing brace at
+/// the same indentation, which is the rule this file already uses to find a function's body
+/// for the `tier = "view"` check — never by the shape of the line alone. `name: Type,` and
+/// `name: expr,` are the same shape, so a line-local test also classifies every struct-literal
+/// initialiser and every `Enum::Variant => expr,` match arm as a declaration. Measured against
+/// `target/llvm-cov.json` using `scripts/coverage-prod.py`'s own `hasCount` definition, of the
+/// 45,157 instrumented lines under `src/` the line-local form classifies 12,114 (26.8%) and
+/// the enclosing-item form 6,258 (13.9%) — and not one of the latter is a field, an attribute,
+/// or an expression.
+///
+/// A running brace **counter** is deliberately not used: a `{` inside a string literal desyncs
+/// it for the remainder of the file, fields stop being recognised, and the very range this
+/// rule exists to reject passes again — vacuous acceptance. The indentation rule needs no
+/// literal masking because it never counts.
+fn declaration_lines(text: &str) -> BTreeSet<usize> {
+    let mut out = BTreeSet::new();
+    // The indentation of the `struct`/`enum` whose extent we are inside, if any.
+    let mut extent: Option<usize> = None;
+    // Inside a multi-line item signature whose parameter list has not closed yet.
+    let mut in_signature = false;
+    for (index, line) in text.lines().enumerate() {
+        let number = index + 1;
+        let trimmed = line.trim();
+        let indent = line.len() - line.trim_start().len();
+        if let Some(open_indent) = extent
+            && trimmed.starts_with('}')
+            && indent == open_indent
+        {
+            extent = None;
+            out.insert(number);
+            continue;
+        }
+        if trimmed.is_empty()
+            || trimmed.starts_with("//")
+            || is_attribute(trimmed)
+            || is_lone_delimiter(trimmed)
+        {
+            out.insert(number);
+        } else if opens_an_item(trimmed) {
+            out.insert(number);
+            let ends_item = line.trim_end().ends_with(';') || line.trim_end().ends_with('}');
+            if opens_a_struct_or_enum(trimmed) && line.contains('{') {
+                extent = Some(indent);
+            } else if !line.contains('{') && !ends_item {
+                in_signature = true;
+            }
+        } else if in_signature {
+            out.insert(number);
+            if line.contains('{') || line.trim_end().ends_with(';') {
+                in_signature = false;
+            }
+        } else if extent.is_some() {
+            out.insert(number);
+        }
+    }
+    out
+}
+
+/// Condition 4c's range half: does `first..=last` hold at least one line that is not a
+/// declaration? A range that holds none is answering a different question from the one its row
+/// asks — a declaration is where code is *named*, and the row claims something about where it
+/// *runs*.
+fn range_holds_a_statement(text: &str, first: usize, last: usize) -> bool {
+    let declarations = declaration_lines(text);
+    (first..=last).any(|number| !declarations.contains(&number))
+}
+
 /// Condition 4c and the six-key rule's `covers` half: `covers` SHALL be non-empty, and
 /// every `path:first-last` entry SHALL resolve — `path` a file under `src/`, `first <=
-/// last`, both within the file's own line count, and the range holding at least one line
-/// of code (a line, once trimmed, that is non-empty and does not open with `//`). This is
-/// a stated limit on the same terms `coverage-prod.py`'s own comment/string masking is:
-/// it does not parse Rust, so a block comment (`/* ... */`) spanning into the range from
-/// outside it is not detected — recorded here rather than silently assumed complete.
+/// last`, both within the file's own line count, and the range holding at least one
+/// **statement** rather than only declarations. This is a stated limit on the same terms
+/// `coverage-prod.py`'s own comment/string masking is: it does not parse Rust, so a block
+/// comment (`/* ... */`) spanning into the range from outside it is not detected — recorded
+/// here rather than silently assumed complete. It is **not** an approximation of what
+/// llvm-cov instruments and must not be justified as one: `src/tasks.rs:196`, a bare `pub fn`
+/// line, is instrumented with a count of 35,050.
 fn validate_covers(condition: &str, covers: &[(String, usize, usize)]) -> Result<(), String> {
     if covers.is_empty() {
         return Err(format!(
@@ -383,14 +531,12 @@ fn validate_covers(condition: &str, covers: &[(String, usize, usize)]) -> Result
                 lines.len()
             ));
         }
-        let holds_code = lines[(first - 1)..*last].iter().any(|line| {
-            let t = line.trim();
-            !t.is_empty() && !t.starts_with("//")
-        });
-        if !holds_code {
+        if !range_holds_a_statement(&text, *first, *last) {
             return Err(format!(
-                "row {condition:?}: covers entry {path}:{first}-{last} holds no line of \
-                 code (blank or comment-only)"
+                "row {condition:?}: covers entry {path}:{first}-{last} holds no statement — \
+                 every line is blank, a comment, an item declaration, a struct field or enum \
+                 variant, an attribute, or a lone delimiter, so the range names where the \
+                 code is declared rather than where it runs"
             ));
         }
     }
@@ -892,6 +1038,31 @@ fn field_recognition_does_not_desync_on_a_brace_in_a_string_literal() {
     );
     assert!(err.contains("src/ui/mod.rs:2672-2674"), "{err:?}");
     assert!(err.contains("holds no statement"), "{err:?}");
+
+    // The same property asserted directly on the classifier, where the desync can be planted
+    // rather than looked for: an unbalanced `{` inside a string literal, then a struct whose
+    // fields a counter-based scanner would no longer recognise. A counter would leave `depth`
+    // permanently one too deep from line 2 onward; the extent rule is unaffected.
+    let planted = concat!(
+        "fn emit() -> &'static str {\n",
+        "    \"a brace in a literal: {\"\n",
+        "}\n",
+        "\n",
+        "struct Planted {\n",
+        "    first: usize,\n",
+        "    second: usize,\n",
+        "}\n",
+    );
+    assert!(
+        !range_holds_a_statement(planted, 6, 7),
+        "`Planted`'s two field declarations must still be recognised as declarations after a \
+         `{{` inside a string literal — failing open here is the vacuous acceptance this rule \
+         exists to prevent"
+    );
+    assert!(
+        range_holds_a_statement(planted, 1, 3),
+        "`emit`'s body is a statement, so the planted fixture is not rejected wholesale"
+    );
 }
 
 /// Task 1.2b: the negative control. The rule condition 4c replaced **accepts** both shapes
@@ -909,5 +1080,26 @@ fn the_replaced_rule_accepts_both_shapes_the_structural_rule_rejects() {
     assert!(
         legacy_holds_code(&app_rs, 820, 846),
         "the replaced rule accepted the field-declaration shape"
+    );
+}
+
+/// Task 1.4, condition 4c's acceptance half: the rule turns on what a range **contains**, not
+/// on which line it begins at. `src/ui/view.rs:128-130` starts at `fn render_detail(` and
+/// continues into that function's own `let ... else { return; }` guard, so it holds a
+/// statement and is accepted; the `fn` line alone is not.
+#[test]
+fn a_range_of_real_statements_is_accepted_whatever_it_starts_with() {
+    let mut mutated = parse_coverage_toml(&coverage_toml()).expect("parse the coverage map");
+    mutated[0].covers = vec![("src/ui/view.rs".to_string(), 128, 130)];
+    let files = searchable_files();
+    check_coverage(&spec_md(), &render_rows_as_toml(&mutated), &files)
+        .expect("a range whose lines include a function's guard body holds a statement");
+
+    let (condition, err) = covers_error(("src/ui/view.rs", 128, 128));
+    assert!(err.contains(&condition), "{err:?}");
+    assert!(err.contains("src/ui/view.rs:128-128"), "{err:?}");
+    assert!(
+        err.contains("holds no statement"),
+        "the `fn` line alone names where the code is declared, not where it runs: {err:?}"
     );
 }

@@ -29,7 +29,7 @@ does moves — so there is no client-visible wiring for an outer loop to drive. 
 ## 1. The structural range rule
 <!-- kind: behavior -->
 
-- [ ] 1.1 CHECK: Run the structural sweep over all 74 ranges and record which it flags, as the
+- [x] 1.1 CHECK: Run the structural sweep over all 74 ranges and record which it flags, as the
       audit's input. **One** flagged at HEAD; the number is evidence, not a target.
       ```sh
       python3 - <<'EOF'
@@ -76,7 +76,7 @@ does moves — so there is no client-visible wiring for an outer loop to drive. 
       `src/ui/list.rs:300-322` and `src/ui/view.rs:400-421`, both mis-bound for a reason no rule
       can see — see 3.2. A line-local field test instead flags 3 and misclassifies 26.8% of
       instrumented lines; that is why the spec mandates the extent rule.
-- [ ] 1.2 RED: Add three tests to `tests/degraded_coverage.rs`, each asserting the failure
+- [x] 1.2 RED: Add three tests to `tests/degraded_coverage.rs`, each asserting the failure
       **message names the row's `condition`** — an error for an unrelated reason otherwise reads
       as green. Fixtures are ranges of the real tree, not synthetic files: `validate_covers`
       rejects paths outside `src/` and resolves against `manifest_dir()`, and
@@ -91,20 +91,20 @@ does moves — so there is no client-visible wiring for an outer loop to drive. 
       print('accepted today:', any(l.strip() and not l.strip().startswith('//') for l in lines))"
       ```
       → `accepted today: True`, and the same for the `app.rs` shape (exit 0, both `True`).
-- [ ] 1.2b RED: Retain the old predicate as `legacy_holds_code` and assert it **accepts** both
+- [x] 1.2b RED: Retain the old predicate as `legacy_holds_code` and assert it **accepts** both
       (a) and (b), so the strengthening is shown to be what catches them. Task 1.3 replaces the
       rule's use, not this predicate — deleting it outright leaves the control with nothing to
       assert against. It must pass before and after 1.3.
-- [ ] 1.3 GREEN: Replace `tests/degraded_coverage.rs:386`'s `holds_code` with the rule in
+- [x] 1.3 GREEN: Replace `tests/degraded_coverage.rs:386`'s `holds_code` with the rule in
       `specs/degraded-coverage/spec.md` → failure condition 4c: a line is non-executable when it
       is blank, a comment, an item declaration, a struct field or enum variant, an attribute, or
       a lone delimiter; a range holding none other is rejected. Both 1.2 tests pass and the
       other 10 still do — `cargo test --all-features --test degraded_coverage`.
-- [ ] 1.4 GREEN: Add the acceptance half — a range starting at a `fn` line but including that
+- [x] 1.4 GREEN: Add the acceptance half — a range starting at a `fn` line but including that
       function's body is accepted, and the `fn` line alone is rejected, so the rule turns on
       content rather than on the first line. Use `src/ui/view.rs:128-130` (`render_detail`'s
       `let ... else { return; }`), which the sweep in 1.1 does **not** flag.
-- [ ] 1.5 VERIFY: `cargo test --all-features --test degraded_coverage` — green, and the count is
+- [x] 1.5 VERIFY: `cargo test --all-features --test degraded_coverage` — green, and the count is
       at or above 13 (10 at HEAD plus the three above).
 
 ## 2. `covers-check` as a named gate
@@ -154,7 +154,10 @@ does moves — so there is no client-visible wiring for an outer loop to drive. 
 ## 3. The audit and the rebinding
 <!-- kind: operational -->
 
-- [ ] 3.1 CHANGE: Rebind the one range `make covers-check` rejects — `src/tasks.rs:193-196`,
+- [x] 3.1 CHANGE: *(landed in group 1: task 1.3's "the other 10 still do" and task 1.5's green
+      `degraded_coverage` binary are unreachable while the checked-in map still holds the range
+      the new rule rejects, so the rebinding is the GREEN half of 1.3 rather than a later step.)*
+      Rebind the one range `make covers-check` rejects — `src/tasks.rs:193-196`,
       under "a tasks file exists but cannot be read" — to code that runs when that condition
       holds. `make covers-check` exits 0 when this is done.
 - [ ] 3.2 CHANGE: Audit the remaining 73 ranges for **aboutness**, which no rule reaches (design.md → Risks). For each, read the row's `condition`, `why`, and `proof`, then confirm the range
