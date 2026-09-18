@@ -461,6 +461,22 @@ why = "`resolve` is driven against the measured corpus with `cursor` (listed, no
 covers = ["src/integration.rs:174-185"]
 
 [[row]]
+condition = "No installed integration leaves the settings panel's `agent_kind` row uneditable"
+tier = "unit"
+proof = ["an_empty_shortlist_never_reaches_the_view_as_kind", "no_installed_integration_makes_the_row_non_editable_with_a_reason"]
+verdict = "unproven"
+why = "`settings::agent_kind_setting` maps an empty installed list to `Editable::No { reason: NoIntegration }` rather than `Editable::Kind`, proved directly against the pure classifier; `Dashboard::apply(OpenDetail)` against that same row begins no edit and leaves the panel open for `Back` to close - both unit-tier only, since no test in src/ui/settings.rs renders the source row's `config.toml` text at either mandated width"
+covers = ["src/settings.rs:258-261"]
+
+[[row]]
+condition = "The settings panel's commit to `settings.toml` fails (the state directory cannot be created, or the write itself errors)"
+tier = "unit"
+proof = ["a_write_failure_is_reported_rather_than_panicking"]
+verdict = "unproven"
+why = "`state::record_kind` against a state-directory path that exists as a regular file returns `Err` naming that path and the OS's own reason, with the blocking file untouched and no temporary file left behind - the write itself, unit-tier only; `maybe_record_kind_commit` (src/ui/driver.rs), which turns that `Err` into the panel's one problem row while keeping the committed value and the `Launcher::set_kind` call, has no passing test of its own yet"
+covers = ["src/state.rs:367-376"]
+
+[[row]]
 condition = "`a`, `c`, or `s` pressed in file mode"
 tier = "unit"
 proof = ["file_mode_refuses_the_three_launch_keys_and_names_the_missing_binary", "focus_is_exempt_from_file_mode", "a_file_mode_refusal_renders_one_row_at_both_widths", "file_mode_leaves_a_refusing_and_g_working_in_the_shipped_root"]
