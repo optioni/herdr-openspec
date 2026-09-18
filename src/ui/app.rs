@@ -3009,6 +3009,69 @@ mod tests {
         assert_eq!(d.sections, before_sections);
     }
 
+    /// `agent-launch` :: "Opening the panel resolves the kind once and launches nothing" — the
+    /// `Dashboard` half of that scenario, beside
+    /// `launch::tests::opening_the_panel_resolves_the_kind_once_and_launches_nothing`, which
+    /// proves only the `Outcome` shape. `settings::PanelState::rows`'s own doc comment states
+    /// three moments `settings::settings` runs at: startup, every adopted `resolution`, and
+    /// every commit — this is the middle one. A `Request::Resolve` answer carries `picker`
+    /// unset (only `Choice::Ambiguous` reached through a launch refusal sets it) and
+    /// `resolution` `Some`; adopting it must replace the `agent_kind` row in place with what
+    /// `settings::agent_kind_setting` derives from that resolution — from `Pending`/
+    /// `Editable::No { reason: Resolving }` to `Provenance::Ambiguous`/`Editable::Kind` here —
+    /// so the very next `Enter` can begin an edit rather than finding the row still
+    /// resolving. `openspec_bin` and `prompts` are untouched: only `agent_kind`'s own entry
+    /// depends on `kind`.
+    #[test]
+    fn a_resolved_kind_updates_the_agent_kind_row_without_opening_the_panel() {
+        let mut d = dashboard_for_attribution(
+            vec![fixture::active("add-auth", 1, 2)],
+            Vec::new(),
+            1,
+            Vec::new(),
+            BTreeMap::new(),
+        );
+        d.settings.rows = three_settings_for_launch_tests();
+        let before_openspec_bin = d.settings.rows[0].clone();
+        let before_prompts = d.settings.rows[2].clone();
+        d.overlay.panel = None;
+
+        let outcome = crate::launch::Outcome {
+            named: None,
+            problems: Vec::new(),
+            picker: false,
+            resolution: Some(crate::settings::KindResolution {
+                choice: crate::integration::Choice::Ambiguous {
+                    installed: vec!["claude".to_string(), "codex".to_string()],
+                },
+                installed: vec!["claude".to_string(), "codex".to_string()],
+            }),
+        };
+        d.adopt_launch_outcome(outcome);
+
+        assert_eq!(
+            d.overlay.panel, None,
+            "picker unset: this Resolve answer must not open the panel"
+        );
+        let agent_kind = &d.settings.rows[1];
+        assert_eq!(agent_kind.key, "agent_kind");
+        assert_eq!(agent_kind.provenance, crate::settings::Provenance::Ambiguous);
+        match &agent_kind.editable {
+            crate::settings::Editable::Kind { shortlist } => {
+                assert_eq!(shortlist, &vec!["claude".to_string(), "codex".to_string()]);
+            }
+            other => panic!("expected Editable::Kind, got {other:?}"),
+        }
+        assert_eq!(
+            d.settings.rows[0], before_openspec_bin,
+            "openspec_bin does not depend on kind"
+        );
+        assert_eq!(
+            d.settings.rows[2], before_prompts,
+            "prompts does not depend on kind"
+        );
+    }
+
     /// `agent-launch` :: "No other outcome touches the overlay" — a successful launch, a
     /// failed call, a dead-worker-style refusal, and a `LastResort` warning, each adopted
     /// against a `Dashboard` whose overlay is closed and again against one whose overlay
