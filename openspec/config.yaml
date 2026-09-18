@@ -47,8 +47,8 @@ context: |
   ratatui `TestBackend` at 60 and 120 columns; run-time `crate::testutil::ScratchDir`
   trees, `include_str!` corpora, and the committed `tests/fixtures/build-graph.txt`
   tool-output snapshot. Coverage is enforced at 80% of lines. Commands: `make check`,
-  or individually `make fmt-check`, `make lint`, `make gates`, `make test`, and
-  `make coverage`.
+  or individually `make fmt-check`, `make lint`, `make gates`, `make covers-check`,
+  `make test`, and `make coverage`.
 
 rules:
   proposal:

@@ -1385,15 +1385,26 @@ own such test lives in `ui::tests::load::`, never in a view module.
 ### Gates
 
 Every gate command is written once, in the `Makefile`. Locally, `make check` composes
-five gates, in this order, and stops at the first failure:
+six gates, in this order, and stops at the first failure:
 
 | Target | Command |
 |---|---|
 | `fmt-check` | `cargo fmt --all -- --check` |
 | `lint` | `cargo clippy --all-targets --all-features -- -D warnings` |
 | `gates` | one invocation line per file under `scripts/gates/` |
+| `covers-check` | `cargo test --all-features --test degraded_coverage` |
 | `test` | `cargo test --all-features` |
 | `coverage` | `cargo llvm-cov --fail-under-lines 80`, plus a production-slice floor computed from its JSON export |
+
+`covers-check` sits fourth for `gates`' own reason carried one step further, and for a
+second reason `gates` does not have: it is the only member of the coverage tier that does
+**not** need the suite to pass. `coverage` runs the suite itself, so a red test aborts
+`check` before the coverage tier is reached at all — and on an outside-in change a red
+acceptance test is the normal state from the first task to the last, which made the whole
+tier unreachable for a change's entire duration rather than for a moment. It validates what
+can be validated without a report — that every `covers` range in
+`tests/degraded-coverage.toml` resolves and holds a statement — and asserts no coverage
+percentage and no line hotness, which only a completed run can measure.
 
 `gates-full` (`DEPS_FULL=1 /bin/sh scripts/gates/deps.sh`) is deliberately **not**
 composed into `check`: it rebuilds the crate several times over — once for the release
@@ -1402,9 +1413,9 @@ and that cost never lands on a local `make check` or on the per-platform `check`
 
 `cargo-llvm-cov` is chosen over `tarpaulin`, which is Linux-first and unreliable on
 Apple Silicon. CI invokes the same targets individually rather than the composite —
-`make fmt-check`, `make lint`, and `make gates` and `make test` on both `ubuntu-latest`
-and `macos-latest` with `Swatinem/rust-cache`, `make coverage` once on Linux, and
-`make gates-full` in its own Linux-only job.
+`make fmt-check`, `make lint`, `make gates`, `make covers-check`, and `make test` on both
+`ubuntu-latest` and `macos-latest` with `Swatinem/rust-cache`, `make coverage` once on
+Linux, and `make gates-full` in its own Linux-only job.
 
 Two one-time setup steps are required for local development — `rustup component add
 clippy` and `cargo install cargo-llvm-cov` — since CI obtains `clippy` from the

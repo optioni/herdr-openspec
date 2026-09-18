@@ -35,6 +35,8 @@ jobs:
         run: make lint
       - name: Gates
         run: make gates
+      - name: Covers
+        run: make covers-check
       - name: Test
         run: make test
 

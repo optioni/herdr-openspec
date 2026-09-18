@@ -120,8 +120,8 @@ the pane:
 make build
 ```
 
-Run every quality gate — format, lint, the hygiene-gate tier, tests, and the
-80% coverage floor:
+Run every quality gate — format, lint, the hygiene-gate tier, the structural
+`covers` check, tests, and the 80% coverage floor:
 
 ```sh
 make check

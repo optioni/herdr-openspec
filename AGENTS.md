@@ -275,7 +275,7 @@ stay in sync.
 
 ## Quality gates
 
-Five are enforced in CI, invoking the same `make` targets individually — with
+Six are enforced in CI, invoking the same `make` targets individually — with
 coverage on Linux only — and are available locally behind one composite target:
 
 ```sh
@@ -287,6 +287,7 @@ make check
 | Format | `cargo fmt --all -- --check` |
 | Lint | `cargo clippy --all-targets --all-features -- -D warnings` |
 | Hygiene gates | `make gates` |
+| Covers | `cargo test --all-features --test degraded_coverage` |
 | Test | `cargo test --all-features` |
 | Coverage | `cargo llvm-cov --fail-under-lines 80` |
 

@@ -1,4 +1,4 @@
-.PHONY: build fmt fmt-check lint test coverage gates gates-full check
+.PHONY: build fmt fmt-check lint test coverage gates gates-full covers-check check
 
 build:
 	/bin/sh scripts/build.sh
@@ -74,4 +74,12 @@ gates:
 gates-full:
 	DEPS_FULL=1 /bin/sh scripts/gates/deps.sh
 
-check: fmt-check lint gates test coverage
+# The structural half of the `covers` contract: every range in
+# tests/degraded-coverage.toml resolves, is in bounds, and holds a statement. It reads no
+# coverage report, so it is the one member of the coverage tier that does not need a green
+# suite - which is why `check` runs it before `test` rather than after. Line percentages and
+# hotness stay in `coverage`, where a completed run exists to measure them.
+covers-check:
+	cargo test --all-features --test degraded_coverage
+
+check: fmt-check lint gates covers-check test coverage

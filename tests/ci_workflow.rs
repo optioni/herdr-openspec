@@ -738,8 +738,10 @@ fn check_composes_gates_third() {
     let prereqs = parse_check_prereqs(&makefile);
     assert_eq!(
         prereqs,
-        vec!["fmt-check", "lint", "gates", "test", "coverage"],
-        "check: must compose fmt-check, lint, gates, test, coverage in that order"
+        vec!["fmt-check", "lint", "gates", "covers-check", "test", "coverage"],
+        "check: must compose fmt-check, lint, gates, covers-check, test, coverage in that \
+         order — covers-check sits fourth because it is the one member of the coverage tier \
+         that needs no green suite, and `coverage` runs the suite itself"
     );
 }
 

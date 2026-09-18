@@ -110,26 +110,26 @@ does moves — so there is no client-visible wiring for an outer loop to drive. 
 ## 2. `covers-check` as a named gate
 <!-- kind: operational -->
 
-- [ ] 2.1 CHECK: Confirm `check:`'s prerequisite list and CI's per-target steps are what the
+- [x] 2.1 CHECK: Confirm `check:`'s prerequisite list and CI's per-target steps are what the
       baseline table records, so the two edits below are made against the measured state:
       `grep -n '^check:' Makefile` and `grep -n 'make ' .github/workflows/ci.yml`.
-- [ ] 2.2 CHANGE: Add a `covers-check` phony target running
+- [x] 2.2 CHANGE: Add a `covers-check` phony target running
       `cargo test --all-features --test degraded_coverage`, and compose it into `check` between
       `gates` and `test` (per design.md → Decision 1: this runs the existing binary rather than
       reimplementing the rule). `make covers-check` exits 0 on a clean tree.
-- [ ] 2.3 CHANGE: Update `tests/ci_workflow.rs`'s `check_composes_gates_third`, which asserts
+- [x] 2.3 CHANGE: Update `tests/ci_workflow.rs`'s `check_composes_gates_third`, which asserts
       `parse_check_prereqs` **by equality** against
       `vec!["fmt-check", "lint", "gates", "test", "coverage"]` (`:741-742`). It goes red the
       moment 2.2 lands; `covers-check` belongs in that vector between `gates` and `test`.
-- [ ] 2.3b CHANGE: Add the matching CI step on both runners, between Gates and Test.
+- [x] 2.3b CHANGE: Add the matching CI step on both runners, between Gates and Test.
       `tests/ci_workflow.rs` asserts every `check:` prerequisite has a CI step and that Gates
       sits between Lint and Test; it goes red until both this and 2.2 land.
-- [ ] 2.6 CHANGE: `SPEC.md` → Gates — "composes five gates" → six, plus the `covers-check` row.
+- [x] 2.6 CHANGE: `SPEC.md` → Gates — "composes five gates" → six, plus the `covers-check` row.
       `tests/ci_workflow.rs` requires a row named exactly `covers-check` once 2.2 lands.
-- [ ] 2.7 CHANGE: `AGENTS.md:278` "Five are enforced in CI" → six, plus its gate-table row.
+- [x] 2.7 CHANGE: `AGENTS.md:278` "Five are enforced in CI" → six, plus its gate-table row.
       `CLAUDE.md` is a symlink to `AGENTS.md`, so this is one file.
-- [ ] 2.8 CHANGE: `README.md:123-124`'s prose enumeration — add `covers-check`.
-- [ ] 2.9 CHANGE: `openspec/config.yaml`'s context block — add `make covers-check`.
+- [x] 2.8 CHANGE: `README.md:123-124`'s prose enumeration — add `covers-check`.
+- [x] 2.9 CHANGE: `openspec/config.yaml`'s context block — add `make covers-check`.
       `unrepresented_check_targets` reads `check:`'s prerequisites from the `Makefile`.
 - [ ] 2.10 VERIFY: Prove the gate reports while the suite is red. Plant a failing unit test that
       clippy accepts — `assert_eq!(1 + 1, 3);`, measured; `assert!(false)` trips
@@ -147,7 +147,7 @@ does moves — so there is no client-visible wiring for an outer loop to drive. 
       leaves `target/llvm-cov.json` absent, `make coverage` exits non-zero naming the floor. On
       a clean tree both exit 0, which discriminates nothing and is why the below-floor tree is
       the one the scenario names.
-- [ ] 2.12 VERIFY: `ls scripts/gates/ | wc -l` → **32**, unchanged. `covers-check` is not a
+- [x] 2.12 VERIFY: `ls scripts/gates/ | wc -l` → **32**, unchanged. `covers-check` is not a
       hygiene gate and must not move the count `openspec/specs/quality-gates/spec.md` pins by
       equality.
 
