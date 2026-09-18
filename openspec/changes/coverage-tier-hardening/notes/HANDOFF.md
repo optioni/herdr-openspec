@@ -14,14 +14,15 @@ Four `planning-reviewer` subagents were dispatched, one slice each:
 |---|---|
 | A — coverage, delta fidelity, scenarios | **complete**, all findings merged and repaired |
 | B — design, boundaries, falsifiability | **complete**, all findings merged and repaired |
-| C — tasks, lifecycle, ordering | **DISPATCHED, NEVER REPORTED** |
+| C — tasks, lifecycle, ordering | reported late; both open findings repaired. Its report truncated mid-WARNING about `check_composes_gates_third` (already covered by task 2.3) |
 | D — factual verification | complete through its second message; a third was truncated mid-SUGGESTION about task 2.3 / ci.yml being one matrix job, not two edits |
 
 ## What remains
 
-1. **Chase slice C.** It is the only slice with no findings at all. Its subject — task lifecycle
-   discipline, one `kind:` marker per group, commands that select nothing, the parallelism veto
-   citation — is untested by A/B/D. Re-dispatch a fresh `planning-reviewer` if C is gone.
+1. **Optional: get C's and D's truncated tails.** C cut off mid-WARNING on
+   `check_composes_gates_third` (task 2.3 already covers it); it had not yet reported on one
+   `kind:` marker per group, commands that select nothing, or the parallelism-veto citation, so
+   those remain unreviewed.
 2. **Get D's last truncated SUGGESTION** (task 2.3 / proposal Impact: `.github/workflows/ci.yml`'s
    `check` job is a single matrix job, so "a CI step on both runners" is one edit, not two).
 3. **Write `planning-review.md`** as the repair log: findings by slice, what was repaired in which
@@ -46,6 +47,10 @@ Four `planning-reviewer` subagents were dispatched, one slice each:
 - Fixtures must be ranges of the **real tree**: `ScratchDir` is unreachable from `tests/` and
   `validate_covers` rejects paths outside `src/`.
 - `ci-workflow` is a third modified capability (REMOVED+ADDED: its title enumerates the gates).
+- Group 3's VERIFY was **green at HEAD whatever the audit found** — `covers-check` exits 0 once
+  3.1 lands, the range count is already 74, and the verdict file is self-authored prose. Now it
+  names both aboutness defects by path and requires a non-empty map diff or a recorded reason.
+- The ordering guarantee is **unverified after apply** and design.md → Risks says so.
 - `openspec/config.yaml` must gain `make covers-check` — a machine-checked contract, and the
   change's only edit inside `openspec/` outside its own directory.
 

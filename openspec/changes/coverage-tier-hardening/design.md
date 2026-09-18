@@ -154,6 +154,13 @@ other reasons — so it is corrected rather than reproduced.
   patterns, or a long multi-line call split so that some line is a lone delimiter, may be
   rejected. Mitigated by Decision 2's direction of error: the fix is always to widen the range,
   which makes the binding stronger rather than weaker.
+- **The ordering guarantee is unverified after apply.** The two `make check`-ordering scenarios
+  are manual plants performed once during implementation (tasks 2.10, 2.11); nothing durable
+  re-checks that `covers-check` still runs before `test`, because the composite cannot run
+  inside `cargo test`. What remains checked is the parsed prerequisite **order** in
+  `tests/ci_workflow.rs` — text, not execution. A change that reordered `check:` and updated
+  that vector would pass. This is a real residue and is recorded rather than papered over: the
+  alternative was a matrix row asserting a test no task could write.
 - **The audit touches several capabilities' proving tests.** Rebinding a range may reveal that a
   row's `proof` watches something other than what its `why` claims. Where that happens the row's
   `why` and `proof` are the contract and the range moves to match them; a row whose proof is

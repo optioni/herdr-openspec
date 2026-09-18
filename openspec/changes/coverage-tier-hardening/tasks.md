@@ -172,13 +172,16 @@ does moves — so there is no client-visible wiring for an outer loop to drive. 
       against 59, thirteen rows of slack) and the range floor lives solely in
       `scripts/coverage-prod.py`, where it fires only below the row count — so 74 ranges could
       fall to 59 unnoticed by `cargo test`.
-- [ ] 3.4 VERIFY: `make covers-check` exits 0, `notes/audit.md` carries a verdict for all 74
-      ranges, and `grep -o '"[^"]*:[0-9]*-[0-9]*"' tests/degraded-coverage.toml | wc -l` still
-      reports **74** — now enforced by 3.3's floor rather than asserted here. `MIN_ROWS` is not that
-      guard: at 46 against 59 rows it tolerates dropping thirteen.
-- [ ] 3.5 VERIFY: `make coverage` exits 0 — every rebound range is instrumented and hot, which
-      is the half `covers-check` cannot see and the half that catches a range moved to code no
-      test drives.
+- [ ] 3.4 VERIFY: Name the outcome, not the tally. `make covers-check` exits 0; `notes/audit.md`
+      carries a verdict for all 74 ranges; and **both** aboutness defects the plan names by path
+      are repaired: `src/ui/list.rs:300-322` (`fold_glyph`, under "No `openspec/` found while
+      walking up") and `src/ui/view.rs:400-421` (`detail_row_role`, under "`openspec` binary not
+      found") each now name code that executes when its row's condition holds.
+- [ ] 3.5 VERIFY: `git diff --stat tests/degraded-coverage.toml` shows changes beyond 3.1's single
+      range — or `notes/audit.md` records explicitly that no further range moved and why. Every
+      other check in this group is green at HEAD before the audit runs: `covers-check` exits 0
+      once 3.1 lands, the range count is already 74, and a verdict file is self-authored prose.
+      An audit that writes 74 lines of "looks fine" must not pass this group.
 
 ## 4. Documentation
 <!-- kind: operational -->
