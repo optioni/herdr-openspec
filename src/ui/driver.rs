@@ -451,15 +451,40 @@ pub fn mouse_action(dashboard: &Dashboard, area: Rect, mouse: &MouseEvent) -> Ac
             MouseEventKind::ScrollUp => Action::ScrollUp,
             MouseEventKind::Down(MouseButton::Left) => {
                 // The band derived from the same `area`, through exactly the
-                // pair `ui::view::render` hands `ui::help::render` — so the
-                // mouse target is the rectangle the reader is looking at
-                // rather than a second one computed here.
+                // pair `ui::view::render` hands `ui::help::render` /
+                // `ui::settings::render` — so the mouse target is the
+                // rectangle the reader is looking at rather than a second
+                // one computed here. Which panel decides which content-row
+                // count the band is sized to, `settings-window`'s addition:
+                // the help band is `ui::help::content_rows()`'s fixed
+                // count, the settings band `ui::settings::content_rows`'s
+                // count over the rows currently drawn.
                 let (body, _) = crate::ui::layout::split_frame(area);
-                let band = crate::ui::layout::overlay_band(body, crate::ui::help::content_rows());
+                let panel = dashboard
+                    .overlay
+                    .panel
+                    .expect("checked by the `is_some()` guard above");
+                let content_rows = match panel {
+                    Panel::Help => crate::ui::help::content_rows(),
+                    Panel::Settings => crate::ui::settings::content_rows(&dashboard.settings.rows),
+                };
+                let band = crate::ui::layout::overlay_band(body, content_rows);
                 if band.contains(point) {
-                    // Read-only and holding no control: no row is a button,
-                    // and there is nothing inside it a click could mean.
-                    Action::Ignore
+                    match panel {
+                        // Read-only and holding no control: no row is a
+                        // button, and there is nothing inside it a click
+                        // could mean.
+                        Panel::Help => Action::Ignore,
+                        // `settings-window`: a click on a setting's value or
+                        // source row selects it; the heading row, either
+                        // rule row, and a row the panel left blank all
+                        // resolve to `Ignore` through
+                        // `settings_click_target`'s `None`.
+                        Panel::Settings => {
+                            settings_click_target(&dashboard.settings, band, mouse.row)
+                                .map_or(Action::Ignore, |i| Action::Click(Target::Setting(i)))
+                        }
+                    }
                 } else {
                     Action::ToggleHelp
                 }
@@ -567,6 +592,47 @@ pub fn mouse_action(dashboard: &Dashboard, area: Rect, mouse: &MouseEvent) -> Ac
         // dimension only.
         _ => Action::Ignore,
     }
+}
+
+/// `settings-window`'s addition: the setting a click at band-relative
+/// `row` addresses while the settings panel is open — the exact inverse of
+/// `ui::settings::render`'s own row grammar (design.md -> Boundaries), so
+/// the hit test and the render grammar cannot drift apart. `band` is the
+/// same rectangle `render` draws into, derived from the same `area` just
+/// above; `row` is `mouse.row`, already known to be inside `band` by the
+/// caller.
+///
+/// `render`'s own rule, inverted here rather than restated: the cursor's
+/// setting's value row sits at interior row `1 + 2 * cursor` (the heading
+/// at row `0`), windowed into the band by `ui::layout::viewport` on
+/// exactly the terms `render` computes its own scroll offset. `None` for
+/// the top or bottom rule row, the heading row, or — for a band taller
+/// than the settings actually drawn, which does not arise from
+/// `ui::layout::overlay_band`'s own sizing today but is handled rather
+/// than assumed away — a row the panel left blank; `mouse_action` resolves
+/// every one of those to `Action::Ignore`.
+fn settings_click_target(
+    settings: &crate::settings::PanelState,
+    band: Rect,
+    row: u16,
+) -> Option<usize> {
+    if row == band.y || row == band.y + band.height.saturating_sub(1) {
+        return None;
+    }
+    let total = crate::ui::settings::content_rows(&settings.rows);
+    let interior_height = band.height.saturating_sub(2);
+    let cursor_row = if settings.rows.is_empty() {
+        0
+    } else {
+        1 + 2 * settings.cursor.min(settings.rows.len() - 1)
+    };
+    let offset = crate::ui::layout::viewport(total, cursor_row, interior_height);
+    let i = offset + (row - band.y - 1) as usize;
+    if i == 0 || i >= total {
+        return None;
+    }
+    let index = (i - 1) / 2;
+    (index < settings.rows.len()).then_some(index)
 }
 
 /// Resolve a `Zone::DetailRow` press or drag to its content-line index, its
@@ -8191,7 +8257,7 @@ mod tests {
 
             for row in [value_row, source_row] {
                 assert_eq!(
-                    mouse_action(&dashboard, area, &left(60, row)),
+                    mouse_action(&dashboard, area, &left(30, row)),
                     Action::Click(Target::Setting(2)),
                     "{area:?}: row {row}"
                 );
@@ -8199,20 +8265,20 @@ mod tests {
 
             // Applying moves the cursor and begins no edit.
             let mut applied = dashboard.clone();
-            applied.apply(mouse_action(&dashboard, area, &left(60, value_row)));
+            applied.apply(mouse_action(&dashboard, area, &left(30, value_row)));
             assert_eq!(applied.settings.cursor, 2);
             assert_eq!(applied.overlay.edit, None);
 
             // A second identical click still begins no edit — a click never
             // opens one.
             let mut twice = applied.clone();
-            twice.apply(mouse_action(&applied, area, &left(60, value_row)));
+            twice.apply(mouse_action(&applied, area, &left(30, value_row)));
             assert_eq!(twice.overlay.edit, None);
 
             // The heading row and both rule rows are `Ignore`.
             for row in [band.y, band.y + 1, band.y + band.height - 1] {
                 assert_eq!(
-                    mouse_action(&dashboard, area, &left(60, row)),
+                    mouse_action(&dashboard, area, &left(30, row)),
                     Action::Ignore,
                     "{area:?}: row {row}"
                 );
@@ -8237,14 +8303,14 @@ mod tests {
 
             for row in [band.y - 1, band.y + band.height, footer_row] {
                 assert_eq!(
-                    mouse_action(&dashboard, area, &left(60, row)),
+                    mouse_action(&dashboard, area, &left(30, row)),
                     Action::Back,
                     "{area:?}: row {row}, settings panel"
                 );
             }
 
             let mut applied = dashboard.clone();
-            applied.apply(mouse_action(&dashboard, area, &left(60, band.y - 1)));
+            applied.apply(mouse_action(&dashboard, area, &left(30, band.y - 1)));
             assert_eq!(applied.overlay.panel, None);
             assert_eq!(applied.selected, 2);
             assert_eq!(
@@ -8298,7 +8364,7 @@ mod tests {
             });
             let band = settings_band_for(area, &dashboard);
 
-            let action = mouse_action(&dashboard, area, &left(60, band.y + band.height));
+            let action = mouse_action(&dashboard, area, &left(30, band.y + band.height));
             assert_eq!(action, Action::Back, "{area:?}");
 
             let mut applied = dashboard.clone();
@@ -8311,7 +8377,7 @@ mod tests {
             );
 
             // A second such click then closes the panel.
-            let second = mouse_action(&applied, area, &left(60, band.y + band.height));
+            let second = mouse_action(&applied, area, &left(30, band.y + band.height));
             let mut closed = applied.clone();
             closed.apply(second);
             assert_eq!(closed.overlay.panel, None, "{area:?}");
