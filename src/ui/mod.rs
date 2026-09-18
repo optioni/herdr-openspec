@@ -3722,7 +3722,7 @@ esac
             herdr: &Path,
             state_dir: Option<&Path>,
             stages: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)>,
-        ) -> (Result<Dashboard, StartError>, Vec<String>) {
+        ) -> (Result<Dashboard, StartError>, Vec<String>, bool) {
             let backend = ratatui::backend::TestBackend::new(width, 20);
             let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
             let mut events = crate::testutil::Stages::new(stages);
@@ -3743,6 +3743,11 @@ esac
                 &|_: &str| Ok(()),
                 Duration::from_millis(1),
             );
+            // `change-review` W4: expose whether every stage's own key fired because its
+            // predicate went true, rather than `Stages::DEADLINE` forcing an early `q` — so a
+            // caller can tell a right-reason pass from a deadline pass instead of discarding
+            // the one signal that distinguishes them.
+            let completed = events.completed_every_stage();
             let buf = terminal.backend().buffer().clone();
             let rows: Vec<String> = (0..buf.area.height)
                 .map(|y| {
@@ -3751,7 +3756,7 @@ esac
                         .collect::<String>()
                 })
                 .collect();
-            (result, rows)
+            (result, rows, completed)
         }
 
         /// A key press, on `testutil::press`'s terms — a local alias so the stage tables below
@@ -4019,7 +4024,8 @@ esac
                 (&stage1, key('g')),
                 (&stage1, key('q')),
             ];
-            let (result, buf) = run_wired_staged(120, root, &config, &herdr, None, stages);
+            let (result, buf, _completed) =
+                run_wired_staged(120, root, &config, &herdr, None, stages);
             let dashboard = result.expect("no repository is a supported state");
 
             assert_eq!(dashboard.repo, None);
@@ -4209,7 +4215,7 @@ esac
                     (&stage2, key('q')),
                 ];
 
-                let (result, buf) =
+                let (result, buf, _completed) =
                     run_wired_staged(width, root, &config, &herdr, Some(state.path()), stages);
                 let dashboard = result.expect("run_wired must return Ok for a supported state");
 
@@ -4346,7 +4352,7 @@ esac
                     (&stage3, key('q')),
                 ];
 
-                let (result, buf) =
+                let (result, buf, _completed) =
                     run_wired_staged(width, root, &config, &herdr, Some(state.path()), stages);
                 let dashboard = result.expect("run_wired must return Ok for a supported state");
 
@@ -4441,7 +4447,7 @@ esac
                     (&stage2, key('q')),
                 ];
 
-                let (result, _buf) =
+                let (result, _buf, _completed) =
                     run_wired_staged(120, root, &config, &herdr, Some(state.path()), stages);
                 let dashboard = result.expect("both are supported states");
                 let calls = non_agent_list_lines(&herdr_log);
@@ -4529,7 +4535,7 @@ esac
                 (&stage2, key('q')),
             ];
 
-            let (result, _buf) =
+            let (result, _buf, _completed) =
                 run_wired_staged(120, root, &config, &herdr, Some(state.path()), stages);
             let dashboard = result.expect("a recorded kind is a supported state");
 
@@ -4664,7 +4670,13 @@ esac
 
             let stage0 = || true;
             let stage1 = || true;
-            let stage2 = || true;
+            // `change-review` W4: a real predicate rather than `|| true` — waits for the
+            // panel's own `Request::Resolve` (stage1's `,`) to have actually reached the
+            // scratch `herdr` before the row cursor steps onto `agent_kind`, so a stage2 that
+            // stopped firing would go red on `completed_every_stage()` below rather than
+            // pass 30s later for the wrong reason.
+            let stage2 =
+                || non_agent_list_lines(&herdr_log).contains(&"integration status".to_string());
             let stage3 = || true;
             let stage4 = || true;
             let stage5 = || true;
@@ -4683,9 +4695,15 @@ esac
                 (&stage8, key('q')),
             ];
 
-            let (result, _buf) =
+            let (result, _buf, completed) =
                 run_wired_staged(width, root, &config, &herdr, Some(state.path()), stages);
             let _dashboard = result.expect("run_wired must return Ok for a supported state");
+            assert!(
+                completed,
+                "every stage must fire because its own predicate went true, not because \
+                 Stages::DEADLINE forced an early `q` — a stage that stopped firing must fail \
+                 this assertion rather than pass 30s later for the wrong reason"
+            );
 
             let settings_path = state.path().join("settings.toml");
             let settings_text = std::fs::read_to_string(&settings_path).unwrap_or_else(|e| {
@@ -4744,7 +4762,10 @@ esac
 
             let stage0 = || true;
             let stage1 = || true;
-            let stage2 = || true;
+            // `change-review` W4: see the sibling test above for why this is a real
+            // predicate rather than `|| true`.
+            let stage2 =
+                || non_agent_list_lines(&herdr_log).contains(&"integration status".to_string());
             let stage3 = || true;
             let stage4 = || true;
             let stage5 = || true;
@@ -4763,9 +4784,14 @@ esac
                 (&stage8, key('q')),
             ];
 
-            let (result, _buf) =
+            let (result, _buf, completed) =
                 run_wired_staged(width, root, &config, &herdr, Some(state.path()), stages);
             let dashboard = result.expect("run_wired must return Ok for a supported state");
+            assert!(
+                completed,
+                "every stage must fire because its own predicate went true, not because \
+                 Stages::DEADLINE forced an early `q`"
+            );
 
             let calls = non_agent_list_lines(&herdr_log);
             assert_eq!(
@@ -4848,7 +4874,7 @@ esac
                 (&stage2, key('q')),
             ];
 
-            let (result, _buf) =
+            let (result, _buf, _completed) =
                 run_wired_staged(120, root, &config, &herdr, Some(state.path()), stages);
             result.expect("a prompt override is a supported state");
 
@@ -4903,7 +4929,7 @@ esac
                     vec![(&stage1, key('q'))]
                 };
 
-                let (result, _buf) =
+                let (result, _buf, _completed) =
                     run_wired_staged(120, root, &config, &herdr, Some(state.path()), stages);
                 result.expect("both runs are supported states");
 
@@ -4948,7 +4974,7 @@ esac
                     (&stage1, key('q')),
                 ];
 
-                let (result, buf) =
+                let (result, buf, _completed) =
                     run_wired_staged(width, root, &config, &herdr, Some(state.path()), stages);
                 let dashboard = result.expect("file mode is a supported state");
 
@@ -5132,7 +5158,7 @@ esac
                 (&immediately, key('q')),
             ];
 
-            let (result, _buf) =
+            let (result, _buf, _completed) =
                 run_wired_staged(120, root, &config, &herdr, Some(state.path()), stages);
             let dashboard = result.expect("run_wired must return Ok even when settling a launch");
 
@@ -5312,7 +5338,7 @@ esac
             let opened = || true;
             let stages: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> =
                 vec![(&opened, key(',')), (&opened, key('q'))];
-            let (result, _rows) =
+            let (result, _rows, _completed) =
                 run_wired_staged(120, root, &Config::default(), &herdr, None, stages);
             let dashboard = result.expect("no repository at all is a supported state");
 
@@ -5896,7 +5922,7 @@ esac
                 let herdr = root.join("does-not-exist-herdr");
                 let config = Config::default();
 
-                let (result, rows) = run_wired_staged(
+                let (result, rows, _completed) = run_wired_staged(
                     width,
                     root,
                     &config,
@@ -6212,7 +6238,7 @@ esac
                 let stage1 = || log_lines(&herdr_log) >= 1;
                 let with_g: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> =
                     vec![(&stage1, key('g')), (&stage1, key('q'))];
-                let (result_g, buf_g) =
+                let (result_g, buf_g, _completed_g) =
                     run_wired_staged(width, root, &config, &herdr, None, with_g);
                 let dashboard_g = result_g.expect("no attributed agent is a supported state");
 
@@ -6227,7 +6253,7 @@ esac
                 let stage1b = || log_lines(&herdr_log2) >= 1;
                 let without_g: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> =
                     vec![(&stage1b, key('q'))];
-                let (result_plain, buf_plain) =
+                let (result_plain, buf_plain, _completed_plain) =
                     run_wired_staged(width, root, &config, &herdr2, None, without_g);
                 let dashboard_plain = result_plain.expect("the control run is supported too");
 
@@ -6518,7 +6544,7 @@ esac
                             ]
                         };
 
-                    let (result, buf) =
+                    let (result, buf, _completed) =
                         run_wired_staged(width, root, &config, &herdr, state_dir, stages);
                     let dashboard = result.expect("every launch failure is a supported state");
 
