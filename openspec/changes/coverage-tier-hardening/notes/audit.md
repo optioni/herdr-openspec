@@ -1,4 +1,4 @@
-# The `covers` audit — all 78 ranges across 59 rows
+# The `covers` audit — all 74 ranges across 59 rows, and the 79 they became
 
 Task 3.2's mandate: for each range, read the row's `condition`, `why`, and `proof`, then
 confirm the range names code that **runs when that condition holds**. No rule reaches this
@@ -15,22 +15,29 @@ structural rule before it was written into the map. Where an agent's reading of 
 content was wrong, the source decided: `src/changes.rs:1794` is `archived,`, not
 `active: file_active,` — the substance of the finding survived, the detail did not.
 
-## Headline: 28 of 78 ranges were mis-bound, across 20 of the 59 rows
+## Headline: 24 of the 59 rows were mis-bound, replacing 28 ranges with 33
 
 The archived `settings-window` review scoped this at "~10 rows in the same vacuous shape"
-(`notes/change-review.md` -> W7), and the plan named two by path. The real yield is **twenty
-rows**. The difference is a defect class neither the review nor this change's plan
-anticipated.
+(`notes/change-review.md` -> W7), and the plan named two by path. The real yield is
+**twenty-four rows**. Part of the difference is a defect class neither the review nor this
+change's plan anticipated.
 
-### Three classes, and the gate catches one
+### Five classes, and the gate catches one
 
-| Class | Ranges | What it is | Caught by `covers-check`? |
-|---|---|---|---|
-| **Shape** | 1 | the range only *names* code — a bare signature, a struct's fields | **yes**, this is the rule's whole subject |
-| **Aboutness** | 11 | real, instrumented, hot code with nothing to do with the row | no, and no rule can |
-| **Drift** | 16 | a binding that was **correct when written** and silently slid | no — a drifted range still holds statements |
+Counted by **row** first, because a row is what the map binds; the range column counts the
+individual ranges replaced, and the two measures agree on the ordering.
 
-**Drift is the largest class, and it was not on anyone's list.** All eight `src/open.rs`
+| Class | Rows | Ranges | What it is | Caught by `covers-check`? |
+|---|---|---|---|---|
+| **Aboutness** | 12 | 13 | real, instrumented, hot code with nothing to do with the row | no, and no rule can |
+| **Drift** | 7 | 9 | a binding that was **correct when written** and silently slid | no — a drifted range still holds statements |
+| **Opposite branch** | 3 | 4 | the range names the path taken when the condition does *not* hold | no |
+| **Shape** | 1 | 1 | the range only *names* code — a bare signature, a struct's fields | **yes**, this is the rule's whole subject |
+| **Pattern field** | 1 | 1 | a field of a destructuring `let` pattern — shape, one step outside the rule | no, see below |
+| | **24** | **28** | | |
+
+**Drift was on nobody's list.** Aboutness is the larger class and the plan expected it; drift
+is second, and the plan did not name it at all. All eight `src/open.rs`
 ranges drifted in commit `3ce2d50 test(tab-open-focus): act on the change review's
 findings` — a commit of 38 added lines that are **mostly doc comments**. Eight insertions
 above `run`'s body and two above `context` moved every binding in the file. Verified by
@@ -74,14 +81,14 @@ patterns is a change with its own controls to write.
 | 4 | Schema not vendored (no `openspec/schemas/<name>/schema.y... | `src/changes.rs:993-995` | **confirmed** — `schema_load_problem`'s `NotVendored` arm; keyed on the condition by construction |
 | 5 | Schema unreadable or invalid (I/O error, or bytes that ar... | `src/changes.rs:996-1001` | **confirmed** — `schema_load_problem`'s `Unreadable` and `Invalid` arms. The I/O-error half is unproven by the named proof — see Reported and left |
 | 6 | Schema loads with no tasks artifact (`apply.tracks` match... | `src/changes.rs:808-810` | **confirmed** — `change_progress`'s `tasks.md` fallback, the arm taken exactly when no tasks artifact resolves |
-| 7 | No active changes | `src/ui/list.rs:536-542` | **CORRECTED (aboutness)** — was `list.rs:405-412`, unconditional count arithmetic; now the empty-state branch the proof drives |
+| 7 | No active changes | `src/ui/list.rs:536-542` | **CORRECTED (aboutness)** — was `list.rs:405-412`, unconditional count arithmetic; now **both** empty-state branches: the `No active changes` row that is the SPEC row's own behaviour ("archived changes remain browsable") and the `No changes yet` branch the named proof actually drives, which positively asserts the former's absence. Change Review WARNING 1: binding only the proof's branch left the row's own wording uncovered |
 | 8 | A `/` filter matches no change | `src/ui/list.rs:544-555` | **CORRECTED (aboutness)** — was `list.rs:413-426`, a comment plus more unconditional arithmetic; now the `No changes match` branch |
 | 9 | Artifact file missing | `src/ui/detail.rs:843-845` | **CORRECTED (aboutness)** — was `detail.rs:512-522`, `bodies_are_indented`; now the `out.is_empty()` -> `no_content_yet_row` fallback |
 | 10 | An artifact file exists and cannot be read (permission er... | `src/ui/app.rs:2218-2222`, `src/ui/detail.rs:672-672` | **CORRECTED (aboutness)** — was `detail.rs:525-535`, `indented_line`; now `sync_detail`'s read `Err` arm and the problem-row extend |
 | 11 | No change is selected (an empty visible list, or a `/` fi... | `src/ui/view.rs:128-130` | **confirmed** — `render_detail`'s `let ... else { return; }` guard — the blank interior itself |
 | 12 | Markdown source holds a construct the parser does not mod... | `src/ui/markdown.rs:809-811` | **CORRECTED (aboutness)** — was `markdown.rs:786-786`, `Folder::end`'s unconditional `self.blocks`; now the parser option set. No condition-exclusive code exists — see Reported and left |
 | 13 | A tasks file exists and yields no task **items** | `src/ui/tasks.rs:635-639` | **CORRECTED (aboutness)** — was `tasks.rs:591-597`, inside a per-item loop that does not run with zero items; now the `No tasks yet` site |
-| 14 | A marked tab's artifact resolves to no file while the cha... | `src/ui/detail.rs:843-845`, `src/ui/detail.rs:674-679` | **CORRECTED (aboutness)** — was the same two indent-geometry ranges as `Artifact file missing`, copied; now the `No content yet` fallback and the tracked-tasks progress decision |
+| 14 | A marked tab's artifact resolves to no file while the cha... | `src/ui/detail.rs:843-845`, `src/ui/detail.rs:674-679` | **CORRECTED (aboutness)** — was the same two indent-geometry ranges as `Artifact file missing`, copied; now the `No content yet` fallback and `header_row`'s `progress.total > 0` branch, which builds the counted pair the row's `why` names. Change Review WARNING 2: the first repair bound `tracked_tasks_progress`, whose value is read only inside `if detail.foldable()` and is therefore discarded on this row's own path |
 | 15 | `openspec/changes/` or its `archive/` exists and cannot b... | `src/ui/list.rs:432-439` | **confirmed** — `push_problem`'s body, reached by the `changes.problems` loop. Shared by five sources — see Reported and left |
 | 16 | An artifact's `generates` pattern falls outside the file ... | `src/changes.rs:748-751` | **confirmed** — `resolve_artifact`'s unsupported-glob `Err` arm, where the named reason is produced |
 | 17 | A `generates` glob crosses a symlinked directory whose ta... | `src/changes.rs:693-694`, `src/changes.rs:697-697`, `src/changes.rs:703-705` | **CORRECTED (opposite branch)** — `697-699`/`701-705` held the real-directory recursion, the opposite of the condition; now the `is_dir` branch guard and the regular-file rejection a symlink falls through to |
@@ -128,7 +135,7 @@ patterns is a change with its own controls to write.
 | 58 | The settings panel's commit to `settings.toml` fails (the... | `src/state.rs:367-376` | **confirmed** — `record_kind`'s resolve guard and the failing `create_dir_all`. The write-error leg has no range — see Reported and left |
 | 59 | `a`, `c`, or `s` pressed in file mode | `src/launch.rs:136-142` | **confirmed** — `decide`'s file-mode guard, after the `Focus` early return that exempts `g` |
 
-Rows: 59. Ranges: 78.
+Rows: 59. Ranges: 79 (74 before this change).
 
 ## Reported and left
 
@@ -184,13 +191,13 @@ rule above — this change corrects where rows point, never what they say.
 
 ## What this leaves standing
 
-`make covers-check` exits 0. All 78 ranges resolve, are in bounds, and hold a statement; all
-78 are instrumented and hot, confirmed by a full `make coverage` run (production slice
-96.48%, up from 96.23% — the corrected ranges point at better-covered code than the
-arithmetic and geometry they replaced).
+`make covers-check` exits 0. All 79 ranges resolve, are in bounds, and hold a statement, and
+all 79 are instrumented and hot, confirmed by a full `make coverage` run — production slice
+96.48%, up from 96.23%, because the corrected ranges point at better-covered code than the
+arithmetic and geometry they replaced.
 
 What it does **not** leave standing is the reading this change exists to prevent: the gate
 being green does not mean the bindings are right. One of the three defect classes above is
-machine-caught. The other two were found by reading 78 ranges against 59 conditions, and
+machine-caught. The other four were found by reading 74 ranges against 59 conditions, and
 they will come back — drift in particular, on the next commit that inserts a line above a
 bound range.

@@ -57,7 +57,7 @@ tier = "view"
 proof = ["a_repository_with_no_changes_says_so"]
 verdict = "confirmed"
 why = "the list region's empty state, rendered through render_at"
-covers = ["src/ui/list.rs:536-542"]
+covers = ["src/ui/list.rs:525-535", "src/ui/list.rs:536-542"]
 
 [[row]]
 condition = "A `/` filter matches no change"
@@ -113,7 +113,7 @@ tier = "view"
 proof = ["missing_tasks_artifact_no_content_yet"]
 verdict = "confirmed"
 why = "the header's counted pair beside the tab's own No content yet, rendered through render_at"
-covers = ["src/ui/detail.rs:843-845", "src/ui/detail.rs:674-679"]
+covers = ["src/ui/detail.rs:843-845", "src/ui/detail.rs:64-70"]
 
 [[row]]
 condition = "`openspec/changes/` or its `archive/` exists and cannot be read"

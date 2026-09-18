@@ -61,10 +61,13 @@ The check SHALL fail when any of the following is true, naming the offending row
 4c. a `covers` range does not resolve: its path does not exist under `src/`, its `first` and
    `last` are not a `first <= last` pair within that file's line count, or the range holds no
    **statement**. A line SHALL be treated as a declaration when it is blank, a comment, an
-   item declaration (`fn`, `struct`, `enum`, `impl`, `trait`, `mod`, `use`, `const`, `static`)
-   together with its generics and parameter list, an attribute, a lone delimiter, or a struct
+   item declaration (`fn`, `struct`, `enum`, `impl`, `trait`, `mod`, `use`, `const`, `static`,
+   `type`) together with its generics and parameter list, an attribute, a lone delimiter, or a struct
    field or enum variant. A range SHALL be rejected when it holds no line that is none of
-   these.
+   these. A multi-line signature SHALL be ended by a lone delimiter that closes it: a
+   bracketed item (`const STATUSES: [AgentStatus; 5] = [`) closes on `];`, which is itself a
+   lone delimiter, so a scanner clearing the signature state only on a brace latches and
+   swallows every following line until one happens to carry one.
 
    A field or variant SHALL be recognised by its **enclosing item**, not by the shape of the
    line alone. An item's extent SHALL run from its declaration line to the closing brace at
@@ -76,7 +79,13 @@ The check SHALL fail when any of the following is true, naming the offending row
    exists to reject passes again. `scripts/coverage-prod.py` solves that on its own side by
    masking literals before counting, and its docstring records that this crate's tests hold
    `r#"{"schemaName":…}"#` fixtures; the indentation rule needs no masking because it never
-   counts. A fixture holding a brace inside a string literal SHALL be among the tests. A line-local rule cannot do this and must not be written: `name: Type,` and
+   counts. A fixture holding a brace inside a string literal SHALL be among the tests, and
+   **each** clause of the declaration list SHALL carry a range that only that clause rejects.
+   Measured during this change's own review: the attribute, lone-delimiter and
+   multi-line-signature clauses could each be deleted with the whole test binary still green,
+   although every such deletion **widens** what the rule accepts. A clause nothing falsifies is
+   the vacuous check this requirement exists to forbid, wearing the rule's own clothes.
+   A line-local rule cannot do this and must not be written: `name: Type,` and
    `name: expr,` are the same shape, so a line-local test also classifies every struct-literal
    initialiser and every `Enum::Variant => expr,` match arm as a declaration. Both forms were
    measured against `target/llvm-cov.json`, counting a line as instrumented exactly as
@@ -91,7 +100,7 @@ The check SHALL fail when any of the following is true, naming the offending row
    misclassification: llvm-cov instruments a function's `fn` line and its closing brace, and
    those are declarations by this rule's own definition. Measured across the map as it stood
    when this rule was written — 74 ranges — the enclosing-item form rejected exactly **one**;
-   the audit that followed rebound 28 of them and left 78, none rejected. Both shapes this rule exists
+   the audit that followed replaced 28 of them with 33 and left 79, none rejected. Both shapes this rule exists
    to reject were live at HEAD: `src/tasks.rs:193-196` is three doc-comment lines plus
    `pub fn task_number_len(text: &str) -> usize {` — a function that reads no file — bound to
    "a tasks file exists but cannot be read"; and `src/ui/app.rs:830-843`, bound to "Herdr
@@ -125,10 +134,10 @@ The check SHALL fail when any of the following is true, naming the offending row
    `MIN_ROWS` does not bound this and never could: a map may keep every row and collapse each
    multi-range row to a single range, losing a fifth of what it names while the row floor stays
    satisfied. The only range floor before this one lived in `scripts/coverage-prod.py`, which
-   requires ranges to be at least rows — so the map could fall from 78 ranges to 59 without
+   requires ranges to be at least rows — so the map could fall from 79 ranges to 59 without
    either check firing, and `coverage-prod.py` would not have been run to fire: it needs a
    green suite, which is the scheduling defect this change exists to correct. `MIN_RANGES` is
-   **70** at HEAD against 78 ranges, stated as the constant for the same reason `MIN_ROWS` is.
+   **70** at HEAD against 79 ranges, stated as the constant for the same reason `MIN_ROWS` is.
 
 `tier` SHALL record the tier at which the row's **own wording** is observable, not the
 cheapest tier that could be written. A row that names something rendered is `view`; a row

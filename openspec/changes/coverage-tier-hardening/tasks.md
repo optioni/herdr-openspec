@@ -221,19 +221,19 @@ group's remaining work is 4.5's confirmation and 4.6's verification, both record
 ## 5. Change Review
 <!-- kind: operational -->
 
-- [ ] 5.1 CHECK: Dispatch an independent `outside-in-tdd-reviewer` — not a fork of the applying
+- [x] 5.1 CHECK: Dispatch an independent `outside-in-tdd-reviewer` — not a fork of the applying
       session — against proposal.md, both delta specs, design.md, and the diff. Point it at the
       rebound ranges in `tests/degraded-coverage.toml` specifically: this change's whole subject
       is bindings that pass while proving nothing, and a rebinding that is merely *plausible* is
       the same defect in a new place.
-- [ ] 5.2 CHANGE: Fix every CRITICAL. Resolve or consciously accept each WARNING with a one-line
+- [x] 5.2 CHANGE: Fix every CRITICAL. Resolve or consciously accept each WARNING with a one-line
       reason recorded in `notes/change-review.md`.
-- [ ] 5.3 VERIFY: Confirm no blocking or unowned finding remains.
+- [x] 5.3 VERIFY: Confirm no blocking or unowned finding remains.
 
 ## 6. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 6.1 CHECK: Inspect the intended verification commands and the tiers they reach, so a
+- [x] 6.1 CHECK: Inspect the intended verification commands and the tiers they reach, so a
       command that selects nothing is caught before it is trusted.
 - [ ] 6.2 VERIFY: `cargo fmt --all -- --check` — clean.
 - [ ] 6.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.

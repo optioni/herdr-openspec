@@ -55,9 +55,11 @@ bound to "a tasks file exists but cannot be read", is three doc-comment lines pl
     rule least of all: a drifted range still holds statements, and the code it drifted onto is
     hot, so `make coverage` cannot see it. What would catch it is an anchor that survives an
     edit above it, which is a different change to propose.
-  The audit's measured yield: **28 of 78 ranges rebound, across 20 of the 59 rows** — 1 shape,
-  11 aboutness, 16 drift. `settings-window`'s review scoped this at "~10 rows"; the difference
-  is the class nobody had named.
+  The audit's measured yield: **24 of the 59 rows rebound, replacing 28 ranges with 33** — by
+  row, 12 aboutness, 7 drift, 3 an opposite branch, 1 shape, and 1 a destructuring pattern's
+  field. Aboutness is the largest class on either measure, as this document expected; drift is
+  the second and was not expected at all. `settings-window`'s review scoped the whole thing at
+  "~10 rows".
 - `scripts/gates/` gains no script: `covers-check` reads a test fixture and a coverage contract,
   not source hygiene, so it belongs beside `coverage`. Not **BREAKING**: no plugin manifest,
   config format, or keybinding changes.

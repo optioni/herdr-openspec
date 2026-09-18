@@ -20,7 +20,7 @@ const MIN_ROWS: usize = 46;
 /// bound this: a map could keep all 59 rows and drop every multi-range row to one range each,
 /// losing a fifth of what the map names while `cargo test` reported green. The only range
 /// floor before this one lived in `scripts/coverage-prod.py`, which requires ranges >= rows —
-/// so 78 ranges could fall to 59 without either check firing, and `coverage-prod.py` runs
+/// so 79 ranges could fall to 59 without either check firing, and `coverage-prod.py` runs
 /// only behind a green suite. A lower bound on the same terms as `MIN_ROWS`: whichever of two
 /// changes in flight lands second adopts the higher count, and neither lowers it.
 const MIN_RANGES: usize = 70;
@@ -467,6 +467,19 @@ fn declaration_lines(text: &str) -> BTreeSet<usize> {
             || is_attribute(trimmed)
             || is_lone_delimiter(trimmed)
         {
+            // A lone delimiter that *closes* the declaration ends it. Without this, an item
+            // whose signature ends in a bracket rather than a brace — `const STATUSES:
+            // [AgentStatus; 5] = [` — leaves `in_signature` latched, because a lone `];`
+            // reaches this branch and never the clearing arm below. Measured before the
+            // repair: five such runs under `src/`, swallowing about a hundred lines, the
+            // longest from `src/ui/palette.rs:400` to `:435`. The direction of error was
+            // conservative — a latched run only ever *adds* declarations, so it could reject
+            // a range and never accept one (design.md -> Decision 2) — but a latent false
+            // rejection is still one, and `covers-check`'s answer to it is to widen the
+            // range, which would have written the quirk into the map.
+            if in_signature && (trimmed.ends_with(';') || trimmed.ends_with(']')) {
+                in_signature = false;
+            }
             out.insert(number);
         } else if opens_an_item(trimmed) {
             out.insert(number);
@@ -1143,12 +1156,78 @@ fn dropping_covers_ranges_fails_the_range_floor() {
     let files = searchable_files();
     let err = check_coverage(&spec_md(), &render_rows_as_toml(&mutated), &files)
         .expect_err("collapsing every row to one range must fail the range floor");
+    // Asserted against the message's own distinguishing phrase, not against the pair
+    // (`"covers"`, `"70"`): `"covers"` appears in several of `check_coverage`'s other
+    // messages and `"70"` is a short numeric substring, so that pair is satisfiable by an
+    // unrelated failure — a `validate_covers` rejection naming a range that happens to span
+    // line 70, for instance.
     assert!(
-        err.contains("covers") && err.contains(&MIN_RANGES.to_string()),
-        "the failure must name the range floor, not the row floor: {err:?}"
+        err.contains("\"covers\" ranges across its"),
+        "the failure must be the range floor's own message: {err:?}"
+    );
+    assert!(
+        err.contains(&format!("expected at least {MIN_RANGES}")),
+        "and must name the floor it fell below: {err:?}"
     );
     assert!(
         !err.contains(&format!("expected at least {MIN_ROWS}")),
         "MIN_ROWS must still be satisfied, so it cannot be what fired: {err:?}"
     );
+}
+
+/// Change Review, WARNING 3: three branches of `declaration_lines` were load-bearing for
+/// nothing. Measured by deleting each in turn and re-running the whole binary — sixteen tests
+/// green every time, although each deletion **widens** what the rule accepts, which is the
+/// failure mode this change exists to prevent. The fixtures below are the controls those
+/// branches lacked: each range is rejected today and accepted with its one branch removed.
+///
+/// The multi-line-signature case is the sharpest of the three, because "a range that is only
+/// a signature" is this change's headline shape and the only signature fixture it shipped —
+/// `src/tasks.rs:193-196` — is a **single-line** one, which `opens_an_item` alone already
+/// catches.
+#[test]
+fn each_declaration_branch_has_a_range_only_it_rejects() {
+    // `is_attribute`: two attribute lines and nothing else.
+    let (condition, err) = covers_error(("src/changes.rs", 1981, 1982));
+    assert!(err.contains(&condition), "{err:?}");
+    assert!(err.contains("src/changes.rs:1981-1982"), "{err:?}");
+    assert!(err.contains("holds no statement"), "{err:?}");
+
+    // `is_lone_delimiter`: three closing braces and nothing else.
+    let (condition, err) = covers_error(("src/ui/view.rs", 107, 109));
+    assert!(err.contains(&condition), "{err:?}");
+    assert!(err.contains("src/ui/view.rs:107-109"), "{err:?}");
+    assert!(err.contains("holds no statement"), "{err:?}");
+
+    // The `in_signature` continuation: `header_row`'s four parameter lines, which are a
+    // multi-line item declaration's own signature and not statements. Without that branch
+    // `name: &str,` reads as a statement, because no `struct` extent is open around it.
+    let (condition, err) = covers_error(("src/ui/detail.rs", 45, 48));
+    assert!(err.contains(&condition), "{err:?}");
+    assert!(err.contains("src/ui/detail.rs:45-48"), "{err:?}");
+    assert!(
+        err.contains("holds no statement"),
+        "a multi-line signature's parameter list names where the code is declared: {err:?}"
+    );
+}
+
+/// Change Review, SUGGESTION 2: the repair to `in_signature`'s latching, pinned by a range
+/// the bug misclassified. `src/ui/palette.rs:400` is `const STATUSES: [AgentStatus; 5] = [`
+/// — an item whose signature ends in a bracket, not a brace — and before the repair every
+/// line from there to `:435` was swallowed as a signature continuation, including this one.
+#[test]
+fn a_lone_delimiter_ends_a_bracketed_item_signature() {
+    let palette = fs::read_to_string(manifest_dir().join("src/ui/palette.rs"))
+        .expect("read src/ui/palette.rs");
+    assert!(
+        range_holds_a_statement(&palette, 435, 435),
+        "`for expect in table() {{` is a statement — it is only a declaration to a scanner \
+         whose `in_signature` latched at line 400 and was never cleared by the `];` at 405"
+    );
+    // The repair does not cost the multi-line-signature clause its own subject: a `fn`
+    // signature closes on a brace, never on `;` or `]`, so `header_row`'s parameter list is
+    // still recognised.
+    let detail =
+        fs::read_to_string(manifest_dir().join("src/ui/detail.rs")).expect("read src/ui/detail.rs");
+    assert!(!range_holds_a_statement(&detail, 45, 48));
 }

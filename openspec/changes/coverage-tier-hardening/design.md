@@ -103,6 +103,7 @@ defect buried in a 1600-test run into a named gate that fails in seconds, before
 | A range of real statements is accepted whatever it starts with | new test: a range starting at a `fn` line but including its guard body is accepted; the `fn` line alone is rejected | unit | the tree itself | `cargo test --test degraded_coverage` |
 | Dropping `covers` ranges fails a floor of their own | new test: every row truncated to one range, all 59 rows kept so `MIN_ROWS` cannot be what fires, the message asserted to name the range floor | unit | the map itself | `cargo test --test degraded_coverage` |
 | A range that is only a signature or only struct fields is rejected | scanner control: a fixture holding a `{` inside a string literal, asserted not to desync field recognition — the failure mode is vacuous acceptance | unit | the tree itself | `cargo test --test degraded_coverage` |
+| A range that is only a signature or only struct fields is rejected | clause controls: one range per declaration clause that only that clause rejects — two attribute lines, three closing braces, and a multi-line signature's parameter list. Added after the change review measured all three clauses deletable with the binary green | unit | the tree itself | `cargo test --test degraded_coverage` |
 | An uncovered degraded path fails the coverage run | existing behaviour, unchanged | integration | `cargo llvm-cov` | `make coverage` |
 | Deleting the test that drives a degraded path is caught | existing behaviour, unchanged | integration | `cargo llvm-cov` | `make coverage` |
 | The range check cannot pass vacuously | existing tests in `tests/coverage_prod.rs`, unchanged | unit | fixture maps | `cargo test --test coverage_prod` |
@@ -180,10 +181,18 @@ other reasons — so it is corrected rather than reproduced.
   when written slides when a line is inserted above it, and nothing here catches that — the
   drifted-onto code holds statements, so the structural rule passes it, and it is hot, so the
   coverage run passes it too. Measured during group 3: all eight `src/open.rs` ranges drifted
-  in `3ce2d50`, a commit of mostly doc comments, and it was the **largest** of the three
-  classes at 16 of 28 rebound ranges. Recorded here because this document's own risk list
-  predicted two classes and the shape-versus-aboutness framing below reads, wrongly, as
-  exhaustive. A line-anchored `covers` form is the repair and is a separate change.
+  in `3ce2d50`, a commit of mostly doc comments. It is the **second** largest of the classes —
+  7 of 24 rebound rows, behind aboutness at 12 — but the only one this document did not name,
+  and the shape-versus-aboutness framing below reads, wrongly, as exhaustive. A line-anchored
+  `covers` form is the repair and is a separate change.
+- **A live count restated in prose is the same drift, one level up.** The range total appears
+  as a literal in five places across the spec, the test's own doc comment and the audit note,
+  and every one of them went stale the moment the review added two ranges. `MIN_RANGES` itself
+  is written as a constant precisely so two changes in flight cannot fight over the number —
+  and the surrounding prose then restates the live number anyway. This is the class the audit
+  found in `SPEC.md` -> Gates' "five", reproduced inside the change that was correcting it. Not
+  given a machine binding here, because a floor's slack is the point and an equality would
+  defeat it; said out loud instead, so the next change knows the sites exist.
 - **The structural rule does not reach a destructuring pattern.** `changes.rs:1794-1794` was a
   field of `let ChangeSet { .. } = files;` — the vacuous shape the rule exists to reject, one
   syntactic step outside it, because the extent scan recognises a struct *declaration* and a
