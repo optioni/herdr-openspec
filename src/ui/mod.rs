@@ -3773,6 +3773,18 @@ esac
             )
         }
 
+        /// `settings-window`'s addition, beside [`enter_key`]: `esc` has no `char` either, and
+        /// the stage tables below press it once per drive, after the `agent_kind` commit and
+        /// with no edit in progress, to close the settings panel (`specs/settings-window/spec.md`
+        /// :164's dispatch table — `Back` closes the panel outright only when
+        /// `overlay.edit` is already `None`).
+        fn esc_key() -> ratatui::crossterm::event::Event {
+            crate::testutil::press(
+                ratatui::crossterm::event::KeyCode::Esc,
+                ratatui::crossterm::event::KeyModifiers::NONE,
+            )
+        }
+
         /// A scratch repository holding one active change, `2fa-support`, whose derived agent
         /// name is `c-2fa-support` — `state::agent_name`'s own output, since a leading digit
         /// cannot begin an agent name.
@@ -4556,40 +4568,62 @@ esac
             );
         }
 
-        // --- settings-window: outer-loop acceptance RED (group 0) ------------------------
+        // --- settings-window: outer-loop acceptance (group 11) ----------------------------
         //
-        // Both tests below drive the same key sequence design.md -> Decisions 2, 9, and 13
-        // describe: `,` opens the settings panel on the `agent_kind` row, the first `Enter`
-        // begins the edit at the shortlist's first entry (Herdr's own print order — `claude`
-        // before `codex`, since `status_with_installed` preserves it), `j` (`Next`) steps to
-        // the second entry, the second `Enter` commits it and closes the panel, and `a`
-        // launches. Once the settings-window change is fully wired, that launch is the
-        // *second* place `agent_kind` reaches Herdr: the first is the lazy `integration
-        // status` call `,` itself triggers (`Request::Resolve`, design.md -> Contracts), which
-        // is also what makes the eventual launch need no status call of its own.
+        // Both tests below drive the same nine-key sequence. The first `j` is not part of
+        // `settings-window` at all — it is the ordinary list-route `Next`, pressed while
+        // `overlay.panel` is still `None`, and it is required: `ui::load` seeds
+        // `selected: 0`, which `Dashboard::selected_change`'s own doc comment says addresses
+        // a *section* header (`active`), not a change, on `list-sections`' terms — every one
+        // of the four launch actions resolves its target through `selected_change()`, so `a`
+        // pressed with `selected` still at the header launches nothing at all, silently
+        // (`launch::decide` sees `change: None`). `a_per_kind_prompt_override_reaches_the_
+        // logged_agent_prompt`, above, already presses this same leading `j` against this same
+        // one-change fixture for this same reason; missing it here cost a debugging pass that
+        // watched the herdr log stall at its own first entry (`integration status`, from `,`'s
+        // `Request::Resolve`) for the full 30s `Stages::DEADLINE` before `q` forced an early
+        // exit — the deadline path `plugin-state`'s own `the_commit_writes_settings_toml_
+        // while_the_loop_is_still_running` names as the wrong-reason pass design.md -> Test
+        // Strategy warns against, caught here by rerunning long enough to notice neither
+        // acceptance test got any faster once it was believed fixed.
         //
-        // RED at HEAD, for exactly one reason: `,` has no binding at all — a tree-wide search
-        // for its `action_for` match arm turns up nothing — so `action_for` returns
-        // `Action::Ignore` for it and every key that follows plays out against the plain, unmodified
-        // `Dashboard`: the first `Enter` is inert (the cursor still addresses the `active`
-        // section header, and `list-sections` refuses `OpenDetail` there), `j` moves the list
-        // selection onto `2fa-support`, the second `Enter` opens the (ordinary) detail route,
-        // and `a` reaches `agent-client-choice`'s already-landed launch path directly. That
-        // path resolves the same two-installed-integration `Choice::Ambiguous` this fixture's
-        // `herdr` reports, and stops before any pane is split — so the herdr log holds exactly
-        // one non-`agent list` entry (`integration status`) rather than the four asserted
-        // below, and no `settings.toml` is ever created. Both failures are the panel's absence,
-        // not a harness misconfiguration: `the_scratch_herdr_program_answers_integration_status`
-        // (above) proves the scratch `herdr` program itself answers `integration status`
-        // correctly, and `the_sole_installed_integration_is_what_launches`'s ambiguous case
-        // (above) already exercises this exact single-call stop as its own, unrelated, GREEN
-        // assertion.
+        // The rest is `settings-window`'s own sequence: `,` opens the settings panel with the
+        // row cursor on `openspec_bin` (row 0, `settings::settings`'s own emitted order, and
+        // `Editable::No { reason: Reason::SetOnce }` — `specs/settings-window/spec.md`'s
+        // "`Enter` on a read-only setting begins no edit" scenario, so an `Enter` here would
+        // begin nothing); `j` (`Next`) moves the row cursor to `agent_kind` (row 1, the only
+        // editable row); the first `Enter` begins the edit at the shortlist's first entry
+        // (Herdr's own print order — `claude` before `codex`, since `status_with_installed`
+        // preserves it, and `apply_settings_open_detail` starts an edit whose committed value
+        // is not in the shortlist at entry `0`); `j` (`Next` again, now with an edit in
+        // progress) steps the *candidate*, not the row cursor, to the second entry; the second
+        // `Enter` commits it, writing `codex` back to the row and ending the edit, per
+        // `apply_settings_open_detail`; `Esc` (`Back`) closes the panel outright, because no
+        // edit is in progress by then (`specs/settings-window/spec.md` :164's dispatch table —
+        // `OpenDetail` begins or commits, only `ToggleSettings`/`Back` with no edit in progress
+        // closes); and `a` — now reaching the ordinary, un-overlaid dispatch table, since the
+        // panel is closed and `selected` already addresses the one change — launches. Once the
+        // settings-window change is fully wired, that launch is the *second* place `agent_kind`
+        // reaches Herdr: the first is the lazy `integration status` call `,` itself triggers
+        // (`Request::Resolve`, design.md -> Contracts), which is also what makes the eventual
+        // launch need no status call of its own.
+        //
+        // A shorter drive of `,` `Enter` `j` `Enter` `a` (with no leading list `j` either) is
+        // wrong on two further, independent counts, not a valid shortcut to the same outcome:
+        // the first `Enter` lands on the read-only `openspec_bin` row and begins nothing, so
+        // `j` moves the *row* cursor (not a shortlist candidate) onto `agent_kind` and the
+        // second `Enter` only *begins* an edit there — the drive ends having never stepped a
+        // candidate or committed; and even a drive that does commit needs `Esc` before `a`,
+        // because committing leaves the panel open (`LaunchApply` is one of the seventeen
+        // inert actions `apply_settings_action` lists while a panel is open) and `a` pressed
+        // inside the settings panel launches nothing at all.
 
         /// `plugin-state` :: "Nothing outside the commit writes the file", and the write-
         /// boundary half of `setting-provenance`'s claim: the panel's commit is `settings.toml`'s
         /// only writer, it reaches no other file, and it leaves both `openspec/` and the
-        /// configuration directory exactly as it found them. RED until group 6 gives
-        /// `state::record_kind` a caller and group 4 wires `,`/`Enter`/`j` to reach it.
+        /// configuration directory exactly as it found them. GREEN as of group 11, closing the
+        /// outer loop groups 1-10 built toward: group 6 gives `state::record_kind` a caller and
+        /// group 4 wires `,`/`j`/`Enter` to reach it.
         #[test]
         fn committing_an_agent_kind_writes_settings_toml_and_touches_nothing_else() {
             let width = 120u16;
@@ -4633,14 +4667,20 @@ esac
             let stage2 = || true;
             let stage3 = || true;
             let stage4 = || true;
-            let stage5 = || non_agent_list_lines(&herdr_log).len() >= 4;
+            let stage5 = || true;
+            let stage6 = || true;
+            let stage7 = || true;
+            let stage8 = || non_agent_list_lines(&herdr_log).len() >= 4;
             let stages: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> = vec![
-                (&stage0, key(',')),
-                (&stage1, enter_key()),
+                (&stage0, key('j')),
+                (&stage1, key(',')),
                 (&stage2, key('j')),
                 (&stage3, enter_key()),
-                (&stage4, key('a')),
-                (&stage5, key('q')),
+                (&stage4, key('j')),
+                (&stage5, enter_key()),
+                (&stage6, esc_key()),
+                (&stage7, key('a')),
+                (&stage8, key('q')),
             ];
 
             let (result, _buf) =
@@ -4675,8 +4715,8 @@ esac
         /// call": the same drive as above, asserted instead against the herdr invocation log —
         /// exactly one `integration status` call for the whole run (the panel's own
         /// `Request::Resolve`, issued when `,` opens it) followed by the ordinary three-call
-        /// launch, carrying `--kind codex`. RED until group 4 wires `,`/`Enter`/`j` to the
-        /// panel and group 7 gives `Launcher::set_kind` a caller.
+        /// launch, carrying `--kind codex`. GREEN as of group 11: group 4 wires `,`/`j`/`Enter`
+        /// to the panel and group 7 gives `Launcher::set_kind` a caller.
         #[test]
         fn committed_kind_reaches_the_launch_without_a_second_status_call() {
             let width = 120u16;
@@ -4707,14 +4747,20 @@ esac
             let stage2 = || true;
             let stage3 = || true;
             let stage4 = || true;
-            let stage5 = || non_agent_list_lines(&herdr_log).len() >= 4;
+            let stage5 = || true;
+            let stage6 = || true;
+            let stage7 = || true;
+            let stage8 = || non_agent_list_lines(&herdr_log).len() >= 4;
             let stages: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> = vec![
-                (&stage0, key(',')),
-                (&stage1, enter_key()),
+                (&stage0, key('j')),
+                (&stage1, key(',')),
                 (&stage2, key('j')),
                 (&stage3, enter_key()),
-                (&stage4, key('a')),
-                (&stage5, key('q')),
+                (&stage4, key('j')),
+                (&stage5, enter_key()),
+                (&stage6, esc_key()),
+                (&stage7, key('a')),
+                (&stage8, key('q')),
             ];
 
             let (result, _buf) =

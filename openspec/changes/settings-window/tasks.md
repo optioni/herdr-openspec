@@ -56,7 +56,10 @@ establish (design.md → Test Strategy).
       `ScratchDir` state and config directories, `TestBackend` terminal.
 - [x] 0.2 RED: Write the failing end-to-end test for `plugin-state` :: "Nothing outside the
       commit writes the file" and `agent-launch` :: "The next launch uses the committed kind
-      and issues no status call" — drive `,`, `Enter`, `Next`, `Enter`, then `a`.
+      and issues no status call" — drive `j` (select the one change; `selected` starts on the
+      `active` section header), `,` (open the panel), `j` (row cursor to `agent_kind`),
+      `Enter` (begin the edit at the shortlist's first entry), `j` (step the candidate to the
+      second entry), `Enter` (commit), `Esc` (close the panel), then `a` (launch).
 - [x] 0.3 Confirm both fail because `Action::ToggleSettings` does not exist, not because the
       harness is misconfigured: `grep -rn "Char(',')" src/ | wc -l` → 0 at HEAD, so the
       keypress is inert and the panel is never reached.
