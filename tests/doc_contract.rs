@@ -4437,7 +4437,10 @@ fn every_non_mouse_row_parses_and_agrees_at_head() {
             checked += 1;
         }
     }
-    assert_eq!(checked, 26, "five non-mouse groups, 5 + 7 + 4 + 5 + 5 rows");
+    assert_eq!(
+        checked, 30,
+        "six non-mouse groups, 5 + 7 + 4 + 5 + 5 + 4 rows"
+    );
 }
 
 #[test]
