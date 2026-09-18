@@ -245,19 +245,19 @@ establish (design.md → Test Strategy).
 ## 9. The binding inventory
 <!-- kind: behavior -->
 
-- [ ] 9.1 RED: Write failing tests for `binding-inventory` :: "The settings group is present and
+- [x] 9.1 RED: Write failing tests for `binding-inventory` :: "The settings group is present and
       names the reinterpreted keys", "The settings group renders at both mandated widths", "The
       sweep covers the mouse under all three overlay states", "`ToggleSettings` has a `Pane` row
       and no exemption", and the updated "The sweep's totals and the exemption set are pinned".
-- [ ] 9.2 GREEN: Add `Scope::Settings` with the suffix `settings panel`; add the `,` row to
+- [x] 9.2 GREEN: Add `Scope::Settings` with the suffix `settings panel`; add the `,` row to
       `Pane` (4 → 5) and group 7 `While settings is open` with its four rows (6 → 7 groups,
       32 → 37 bindings).
-- [ ] 9.3 GREEN: Extend `tests/doc_contract.rs`'s mouse sweep from two overlay states to three
+- [x] 9.3 GREEN: Extend `tests/doc_contract.rs`'s mouse sweep from two overlay states to three
       and raise the swept union from 25 to 26 names and the compared set from 23 to 24.
-- [ ] 9.4 CHECK: Delete the `,` row from `INVENTORY` and confirm `cargo test --test doc_contract`
+- [x] 9.4 CHECK: Delete the `,` row from `INVENTORY` and confirm `cargo test --test doc_contract`
       goes red naming `ToggleSettings` as bound but not documented; restore it and confirm
       green. Record both halves.
-- [ ] 9.5 Run the group tests — `cargo test --test doc_contract` **and** `cargo test ui::help`
+- [x] 9.5 Run the group tests — `cargo test --test doc_contract` **and** `cargo test ui::help`
       as two commands, for the reason 2.6 gives: no doc_contract test name contains `ui::help`,
       so the combined form selects zero and exits 0.
 
