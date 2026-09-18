@@ -818,3 +818,96 @@ fn a_row_with_no_covers_entries_fails_the_six_key_rule() {
         .expect_err("a row with no covers key at all must fail the six-key rule");
     assert!(err.contains(&mutated[0].condition), "{err:?}");
 }
+
+// --- coverage-tier-hardening, group 1: condition 4c's structural rule --------------------
+
+/// The rule condition 4c replaced: a range held code when any of its lines was non-empty and
+/// did not open with `//`. Retained solely as this group's negative control — tasks 1.2b's
+/// assertion is that it *accepts* both shapes the structural rule rejects, so the
+/// strengthening is shown to be what catches them rather than asserted to be.
+fn legacy_holds_code(text: &str, first: usize, last: usize) -> bool {
+    let lines: Vec<&str> = text.lines().collect();
+    lines[(first - 1)..last].iter().any(|line| {
+        let t = line.trim();
+        !t.is_empty() && !t.starts_with("//")
+    })
+}
+
+/// Point the first row's `covers` at one range and run the whole check, returning the error.
+fn covers_error(range: (&str, usize, usize)) -> (String, String) {
+    let mut mutated = parse_coverage_toml(&coverage_toml()).expect("parse the coverage map");
+    mutated[0].covers = vec![(range.0.to_string(), range.1, range.2)];
+    let condition = mutated[0].condition.clone();
+    let mutated_toml = render_rows_as_toml(&mutated);
+    let files = searchable_files();
+    let err = check_coverage(&spec_md(), &mutated_toml, &files)
+        .expect_err("the range must be rejected by condition 4c");
+    (condition, err)
+}
+
+/// Condition 4c, the signature-only shape: `src/tasks.rs:193-196` is three doc-comment lines
+/// and `pub fn task_number_len(text: &str) -> usize {` — a function that reads no file —
+/// and was bound to "a tasks file exists but cannot be read". It is the one range in the
+/// whole map the hotness check can never catch: its only instrumented line is the `pub fn`
+/// signature, hot at 35,050.
+#[test]
+fn a_signature_only_covers_range_is_rejected() {
+    let (condition, err) = covers_error(("src/tasks.rs", 193, 196));
+    assert!(
+        err.contains(&condition),
+        "the failure must name the row's condition, or it reads as an unrelated error: {err:?}"
+    );
+    assert!(err.contains("src/tasks.rs:193-196"), "{err:?}");
+    assert!(err.contains("holds no statement"), "{err:?}");
+}
+
+/// Condition 4c, the field-declaration shape: `src/ui/app.rs:820-846` is `pub struct
+/// Dashboard`'s field declarations and their doc comments. This is the binding that stayed
+/// broken for seven task groups during `settings-window`, because the always-on structural
+/// check accepted it and the hotness check that would have rejected it could not run.
+#[test]
+fn a_struct_field_only_covers_range_is_rejected() {
+    let (condition, err) = covers_error(("src/ui/app.rs", 820, 846));
+    assert!(
+        err.contains(&condition),
+        "the failure must name the row's condition: {err:?}"
+    );
+    assert!(err.contains("src/ui/app.rs:820-846"), "{err:?}");
+    assert!(err.contains("holds no statement"), "{err:?}");
+}
+
+/// The scanner control. A field is recognised by its **enclosing item extent** — the closing
+/// brace at the same indentation — and never by a running brace counter, because a `{` inside
+/// a string literal desyncs a counter for the remainder of the file and its failure mode is
+/// **vacuous acceptance**: fields stop being recognised and the very range this rule exists to
+/// reject passes again. `src/ui/mod.rs` holds `{` inside string literals well before line
+/// 2672 (`r#"{"workspace_id":"w8",…}"#` at 698, 737 and 764), and 2672-2674 is `struct
+/// Recorder`'s two field declarations.
+#[test]
+fn field_recognition_does_not_desync_on_a_brace_in_a_string_literal() {
+    let (condition, err) = covers_error(("src/ui/mod.rs", 2672, 2674));
+    assert!(
+        err.contains(&condition),
+        "the failure must name the row's condition: {err:?}"
+    );
+    assert!(err.contains("src/ui/mod.rs:2672-2674"), "{err:?}");
+    assert!(err.contains("holds no statement"), "{err:?}");
+}
+
+/// Task 1.2b: the negative control. The rule condition 4c replaced **accepts** both shapes
+/// above, which is why they were live at HEAD. Deleting `legacy_holds_code` outright would
+/// leave this control with nothing to assert against; it must pass before and after the
+/// strengthening.
+#[test]
+fn the_replaced_rule_accepts_both_shapes_the_structural_rule_rejects() {
+    let tasks_rs = fs::read_to_string(manifest_dir().join("src/tasks.rs")).expect("read tasks.rs");
+    assert!(
+        legacy_holds_code(&tasks_rs, 193, 196),
+        "the replaced rule accepted the signature-only shape — that is what it was replaced for"
+    );
+    let app_rs = fs::read_to_string(manifest_dir().join("src/ui/app.rs")).expect("read app.rs");
+    assert!(
+        legacy_holds_code(&app_rs, 820, 846),
+        "the replaced rule accepted the field-declaration shape"
+    );
+}
