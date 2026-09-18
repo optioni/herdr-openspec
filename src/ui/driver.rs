@@ -3107,8 +3107,8 @@ mod tests {
         .expect("loop ends");
 
         assert_eq!(
-            dashboard.overlay.scroll, 27,
-            "44 content rows less a 17-row interior"
+            dashboard.overlay.scroll, 33,
+            "50 content rows less a 17-row interior"
         );
         assert_eq!(
             dashboard.detail.scroll, 0,
@@ -8499,11 +8499,17 @@ mod tests {
         let mut dashboard = overlay_open(2, Route::List);
         dashboard.overlay.scroll = 3;
         let band = band_for(TALL);
-        // 46 rows centred in a 59-row body: rows 0 through 5 and rows 52
-        // through 58 are outside it, and row 59 is the footer.
-        assert_eq!((band.y, band.height), (6, 46));
+        // 52 rows centred in a 59-row body (content_rows() rose from 44 to
+        // 50 when `settings-window` added INVENTORY's seventh group): rows 0
+        // through 2 and rows 55 through 58 are outside it, and row 59 is the
+        // footer. The band's growth also swallowed every change row that
+        // used to sit above it — row 2, `list_row`'s own offset 0, is now the
+        // `active` section header, the last list row still outside the band.
+        assert_eq!((band.y, band.height), (3, 52));
+        let header_row = list_row(TALL, Route::List, 0);
+        assert_eq!(header_row, 2, "the active section header, above the band");
 
-        for (column, row) in [(5u16, 4u16), (5, 55), (5, 59)] {
+        for (column, row) in [(5u16, header_row), (5, 55), (5, 59)] {
             assert_eq!(
                 mouse_action(&dashboard, TALL, &left(column, row)),
                 Action::Back,
@@ -8514,7 +8520,7 @@ mod tests {
         // The click that dismissed the overlay did not also move the cursor
         // to the row under it.
         let mut dismissed = dashboard.clone();
-        dismissed.apply(mouse_action(&dashboard, TALL, &left(5, 4)));
+        dismissed.apply(mouse_action(&dashboard, TALL, &left(5, header_row)));
         assert!(dismissed.overlay.panel.is_none());
         assert_eq!(dismissed.overlay.scroll, 0);
         assert_eq!(dismissed.selected, 2);
@@ -8522,18 +8528,21 @@ mod tests {
         // A second identical click, now that the overlay is closed, resolves
         // through the click table this requirement took precedence over — so
         // the precedence is conditional on `overlay.panel` being `Some`, not
-        // permanent.
+        // permanent. The section header is the row under the point now, so
+        // the click table's answer is `Target::Section`, not `Target::Change`
+        // — still the ordinary click table, which is the only thing this
+        // assertion is about.
         assert!(
             matches!(
-                mouse_action(&dismissed, TALL, &left(5, 4)),
-                Action::Click(Target::Change(_))
+                mouse_action(&dismissed, TALL, &left(5, header_row)),
+                Action::Click(Target::Section(_))
             ),
             "with the overlay closed the same press names the row under it"
         );
 
         // Past the frame's right edge: `Ignore`, and **not** `Back` — a
         // click the pane never received does not dismiss the overlay.
-        let outside = mouse_action(&dashboard, TALL, &left(200, 4));
+        let outside = mouse_action(&dashboard, TALL, &left(200, header_row));
         assert_ne!(outside, Action::Back);
         assert_eq!(outside, Action::Ignore);
     }
@@ -8546,7 +8555,7 @@ mod tests {
         // (design.md -> Decision 8).
         let dashboard = overlay_open(2, Route::List);
         let band = band_for(TALL);
-        assert_eq!((band.y, band.height), (6, 46));
+        assert_eq!((band.y, band.height), (3, 52));
         let first = band.y;
         let last = band.y + band.height - 1;
         for (row, want) in [
