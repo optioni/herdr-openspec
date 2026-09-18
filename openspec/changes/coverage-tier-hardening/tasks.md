@@ -235,16 +235,16 @@ group's remaining work is 4.5's confirmation and 4.6's verification, both record
 
 - [x] 6.1 CHECK: Inspect the intended verification commands and the tiers they reach, so a
       command that selects nothing is caught before it is trusted.
-- [ ] 6.2 VERIFY: `cargo fmt --all -- --check` — clean.
-- [ ] 6.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
-- [ ] 6.4 VERIFY: `make gates` — every gate green, and the script count still 32.
-- [ ] 6.5 VERIFY: `make covers-check` — exits 0. Anti-vacuity is 3.3's range floor, not the
+- [x] 6.2 VERIFY: `cargo fmt --all -- --check` — clean.
+- [x] 6.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
+- [x] 6.4 VERIFY: `make gates` — every gate green, and the script count still 32.
+- [x] 6.5 VERIFY: `make covers-check` — exits 0. Anti-vacuity is 3.3's range floor, not the
       target's output: the binary prints test names, `check_coverage` returns a **row** count,
       and cargo captures a passing test's stdout, so "names the number of ranges" describes
       nothing that exists.
-- [ ] 6.6 VERIFY: `cargo test --all-features` — green, and the count is at or above HEAD's
+- [x] 6.6 VERIFY: `cargo test --all-features` — green, and the count is at or above HEAD's
       **1818** across its ten binaries. 1624 is the `--lib` binary alone and is the wrong floor.
-- [ ] 6.7 VERIFY: `cargo llvm-cov --fail-under-lines 80` plus `scripts/coverage-prod.py` — both
+- [x] 6.7 VERIFY: `cargo llvm-cov --fail-under-lines 80` plus `scripts/coverage-prod.py` — both
       floors hold at or above 80% total and 96% production slice.
-- [ ] 6.8 VERIFY: `make check` as the single gate, naming the failing sub-command if it fails.
-- [ ] 6.9 VERIFY: `openspec validate coverage-tier-hardening --strict`.
+- [x] 6.8 VERIFY: `make check` as the single gate, naming the failing sub-command if it fails.
+- [x] 6.9 VERIFY: `openspec validate coverage-tier-hardening --strict`.

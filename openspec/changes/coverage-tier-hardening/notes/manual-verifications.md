@@ -81,3 +81,21 @@ EXIT=2
 `covers-check` exits 0 and leaves no report, because line percentages are not its subject
 and it reads none. The floor is enforced in exactly one place, and `covers-check` has not
 become a second, weaker definition of it.
+
+## Group 6's final numbers, at `d21db67`
+
+`make check` exits 0 as the single gate. Measured in that one run:
+
+| Gate | Result | Floor |
+|---|---|---|
+| `fmt-check` | clean | — |
+| `lint` | 0 errors under `-D warnings` | — |
+| `gates` | every invocation green; `ls scripts/gates/ \| wc -l` = **32** | 32, unchanged |
+| `covers-check` | exits 0; 79 ranges, none rejected | anti-vacuity is `MIN_RANGES`, not output |
+| `test` | **1826** passing across ten binaries | 1818 (task 6.6) |
+| `coverage` | total **95.19%**; production slice **96.48%** (6223/6450) | 80% and 96% |
+
+`openspec validate coverage-tier-hardening --strict` -> valid.
+
+Task 2.10's last step is discharged by this run: with both plants removed, `make check`
+returns to exit 0.
