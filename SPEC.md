@@ -268,14 +268,21 @@ the first usable candidate and probing no further:
 
    Two files live separately, under `HERDR_PLUGIN_STATE_DIR` — see Herdr
    integration → Attributing an agent — because the plugin writes there and must
-   not write into the directory the user hand-edits: `agent-names.toml`, which it
-   writes, and `settings.toml`, from which it **reads exactly one key**,
-   `agent_kind`, as step 2 of the kind precedence. Nothing in this crate writes
-   `settings.toml`; `settings-window` will. An absent directory, an absent file
+   not write into the directory the user hand-edits: `agent-names.toml`, and
+   `settings.toml`, which holds exactly one key, `agent_kind`, **read** as step 2
+   of the kind precedence. The settings panel is `settings.toml`'s **only**
+   writer (`settings-window`): exactly one path in the crate, the commit of an
+   `agent_kind` edit, atomic and temp-file-then-rename on `agent-names.toml`'s
+   own terms — nothing at startup, on a refresh, on a launch, or on a poll
+   writes it, so a reader who never opens the panel never has the file created.
+   A failed write is reported as a problem rather than panicking, and the
+   committed value still holds for the rest of the session even when it could
+   not be persisted for the next one. An absent directory, an absent file
    and an empty file each yield no recorded kind and no problem, while
    unparseable TOML, a non-string value and a blank value each yield none with
-   exactly one problem, and every other key is ignored without comment so the
-   file that change grows stays readable here
+   exactly one problem, and every other key is ignored without comment on
+   read — and dropped, not merged, by the next commit — so a file a later
+   version grows, or a hand-edit adds keys to, stays readable here
 2. `openspec` on `PATH`
 3. `<nvm root>/versions/node/<version>/bin/openspec`, where the nvm root is
    `NVM_DIR` when it is set to a non-blank value and `$HOME/.nvm` otherwise,
