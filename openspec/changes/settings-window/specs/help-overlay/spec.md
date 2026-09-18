@@ -82,6 +82,79 @@ one `Esc` away.
   unrelated row counts and a carried position would land the reader at an arbitrary row
 - **AND** `route`, `selected`, `detail`, `filter`, and `sections` are unchanged after all three
 
+### Requirement: The overlay's row grammar is a rule row, groups, and a rule row
+
+**Reason**: `binding-inventory`'s own MODIFIED requirement in this change raises the
+inventory from six groups and thirty-two bindings to seven groups and thirty-seven — the
+seventh, `While settings is open`, is `settings-window`'s own addition — and this
+requirement's `content_rows` arithmetic is derived from those two figures. The live spec's
+**43** is therefore stale the moment this change lands; `openspec/specs/help-overlay/spec.md`
+carried no delta for it (change-review W10), so archiving without one would have landed
+three wrong numbers with no record of why they moved.
+
+The band's first row SHALL be `─ Help ` followed by `─` to the band's right edge, with
+`Help` in `palette::Role::RegionHeadingFocused` and every `─` in
+`palette::Role::RegionRule`.
+
+Its last row SHALL be `─` repeated to the band's width, in `palette::Role::RegionRule`,
+carrying the position indicator below when the content does not fit.
+
+Between them, the band's **interior** — `height - 2` rows — SHALL render a window onto
+the row sequence the inventory produces, which is, in order and for each group:
+
+1. a **group heading** row: the group's `title`, and, when the group's `scope` is not
+   `Any`, a space and the scope in parentheses — `Changes (list route)`,
+   `Artifact (detail route)`, `While filtering (filter mode)` — in
+   `palette::Role::RegionHeadingFocused`;
+2. one **binding** row per binding: two spaces, then `input` padded with spaces to the
+   key column, then two spaces, then `description`. `input` SHALL be in
+   `palette::Role::Strong` and `description` in `palette::Role::ListRow`;
+3. a **blank** row after every group but the last.
+
+The **key column** SHALL be the display width of the widest `input` in the whole
+inventory, measured by `ui::layout::columns` and never by a `char` count, so the
+descriptions of every group align in one column. A binding row whose text exceeds the
+band's width SHALL be truncated by `ui::layout::truncate_columns`, never sliced by byte
+or by `char`.
+
+For the inventory `binding-inventory` mandates — **seven** groups, **thirty-seven**
+bindings — `content_rows` is therefore **50**: thirty-seven binding rows, seven heading
+rows, and six blanks.
+
+#### Scenario: The grammar renders at 120 columns
+
+- **WHEN** a dashboard with `help.open` true is rendered at 120x40 and the band's rows
+  are read out of the buffer
+- **THEN** the band's first row begins `─ Help ` and every remaining column of it is `─`
+- **AND** the first interior row reads `Changes (list route)`, padded with spaces to the
+  band's width
+- **AND** the next five interior rows each begin with two spaces, carry an `input` from
+  the `Changes` group, and carry that binding's `description` beginning at the same
+  column as every other binding row's description in the buffer
+- **AND** the row after those five is entirely spaces, and the one after it reads
+  `Artifact (detail route)`
+- **AND** the `Agents`, `Pane`, and `Mouse` headings carry no parenthesised scope,
+  because their groups' `scope` is `Any`
+
+#### Scenario: The grammar renders at 60 columns
+
+- **WHEN** the same dashboard is rendered at 60x20
+- **THEN** the band's first row begins `─ Help ` and is 60 columns wide
+- **AND** the interior rows follow the same grammar, with the descriptions beginning at
+  the same column as at 120, because the key column is measured from the inventory and
+  not from the frame
+- **AND** no interior row exceeds 60 columns, and any row whose text would have is
+  truncated rather than wrapped, so the buffer's row 19 is still the footer
+
+#### Scenario: The key column is measured in display columns
+
+- **WHEN** the key column is computed over an inventory whose widest `input` is
+  `Backspace` at nine columns
+- **THEN** every binding row's description begins at column `2 + 9 + 2`, which is `13`
+- **AND** the computation calls `ui::layout::columns` and the truncation calls
+  `ui::layout::truncate_columns`, so `src/ui/help.rs` carries no `.chars().count()`,
+  no `.chars().take(`, and no `Vec<char>` and passes `COLWIDTH`'s sweep
+
 ## REMOVED Requirements
 
 ### Requirement: The overlay answers seven actions and ignores every other one
