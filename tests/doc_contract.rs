@@ -3075,7 +3075,7 @@ fn sweep_change(name: &str, origin: Origin, tabs: usize) -> Change {
 /// section's own body row is drawn and `Action::Select` is reachable at all.
 /// Both sections collapsed would let every drawn content row be a header,
 /// silently dropping the mouse's selection coverage from the whole sweep —
-/// the widen-the-fixture rule `the_sweep_covers_the_mouse_under_both_overlay_states`
+/// the widen-the-fixture rule `the_sweep_covers_the_mouse_under_all_three_overlay_states`
 /// already states for the tab-switching case applies here identically.
 fn sweep_dashboard(route: Route, help_open: bool, fixture: SweepFixture) -> Dashboard {
     Dashboard {
@@ -3177,6 +3177,85 @@ fn sweep_dashboard(route: Route, help_open: bool, fixture: SweepFixture) -> Dash
             edit: None,
         },
     }
+}
+
+/// [`sweep_dashboard`]'s settings-panel sibling: `binding-inventory`'s own third
+/// overlay state, `Some(Panel::Settings)`, with `settings.rows` populated —
+/// `ui::driver`'s own `settings_overlay_open` fixture, three settings, the
+/// middle one editable — so a cell landing on a value or source row reaches
+/// `Action::Click(Target::Setting(_))` rather than the `Ignore` every row gets
+/// when `rows` is empty.
+///
+/// Kept as its **own** function rather than a third arm of `sweep_dashboard`'s
+/// `help_open: bool` parameter: that parameter, and the `Claim`-carrying sweep
+/// built on it (`mouse_claims`, `all_mouse_claims`, `swept_mouse_action_names`),
+/// are `doc-conformance`'s own machinery, binding `SPEC.md` -> Keys' mouse table
+/// to `mouse_action`'s executed behaviour. `SPEC.md`'s table names no row for a
+/// click landing inside the settings band — only `binding-inventory`'s own
+/// `INVENTORY` sweep owes `ToggleSettings` and its reinterpreted keys a name —
+/// so widening that shared bool axis to a third state would hand
+/// `mouse_bindings_match_spec_md`, an already-passing test outside this group's
+/// scope, an undocumented claim that is not its own requirement's to answer.
+fn sweep_dashboard_with_settings_panel(route: Route, fixture: SweepFixture) -> Dashboard {
+    let mut dashboard = sweep_dashboard(route, false, fixture);
+    dashboard.overlay.panel = Some(Panel::Settings);
+    dashboard.settings.rows = vec![
+        herdr_openspec::settings::Setting {
+            key: "openspec_bin",
+            value: "openspec_bin-value".to_string(),
+            provenance: herdr_openspec::settings::Provenance::Default,
+            editable: herdr_openspec::settings::Editable::No {
+                reason: herdr_openspec::settings::Reason::SetOnce,
+            },
+        },
+        herdr_openspec::settings::Setting {
+            key: "agent_kind",
+            value: "claude".to_string(),
+            provenance: herdr_openspec::settings::Provenance::SoleIntegration,
+            editable: herdr_openspec::settings::Editable::Kind {
+                shortlist: vec!["claude".to_string(), "codex".to_string()],
+            },
+        },
+        herdr_openspec::settings::Setting {
+            key: "prompts",
+            value: "prompts-value".to_string(),
+            provenance: herdr_openspec::settings::Provenance::Default,
+            editable: herdr_openspec::settings::Editable::No {
+                reason: herdr_openspec::settings::Reason::SetOnce,
+            },
+        },
+    ];
+    dashboard
+}
+
+/// The bare `Action` names `mouse_action` produces with `overlay.panel`
+/// `Some(Panel::Settings)`, over both mandated frames and every
+/// [`SWEEP_FIXTURES`] entry — `binding-inventory`'s ADDED requirement's step 3,
+/// third overlay state. Not cached: called once, by one test, unlike
+/// [`swept_mouse_action_names`], which several tests share.
+fn settings_mouse_action_names() -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    for fixture in SWEEP_FIXTURES {
+        for (route, width, height) in passes_for(fixture) {
+            let dashboard = sweep_dashboard_with_settings_panel(route, fixture);
+            let area = Rect::new(0, 0, width, height);
+            for kind in MOUSE_KINDS {
+                for row in 0..height {
+                    for column in 0..width {
+                        let mouse = MouseEvent {
+                            kind,
+                            column,
+                            row,
+                            modifiers: KeyModifiers::NONE,
+                        };
+                        let action = mouse_action(&dashboard, area, &mouse);
+                        names.insert(action_name(action).to_string());
+                    }
+                }
+            }
+        }
+    }
+    names
 }
 
 /// The **dashboard fixtures** the mouse sweep runs over, listed explicitly and
@@ -3465,10 +3544,18 @@ fn bound_action_names() -> BTreeSet<String> {
 
 /// The swept union itself, exemptions still in it — what the shape assertion
 /// counts, and the shared setup both sweeps' callers want.
+///
+/// `binding-inventory`'s ADDED requirement's step 3 sweeps three overlay
+/// states, so the third — [`settings_mouse_action_names`] — is unioned in
+/// beside the closed and help-open passes. It adds no name the other two do
+/// not already contribute (`ScrollDown`, `ScrollUp`, `Back`, `Click`, and
+/// `Ignore` are each already produced elsewhere), so the pinned totals below
+/// do not move — see `sweep_finds_the_bound_actions_and_exactly_two_exemptions`.
 fn swept_action_names() -> BTreeSet<String> {
     let mut union = swept_key_action_names();
     union.extend(swept_mouse_action_names(false));
     union.extend(swept_mouse_action_names(true));
+    union.extend(settings_mouse_action_names());
     union
 }
 
@@ -3878,7 +3965,7 @@ fn the_wide_layout_resolves_every_cell_route_free() {
 }
 
 #[test]
-fn the_sweep_covers_the_mouse_under_both_overlay_states() {
+fn the_sweep_covers_the_mouse_under_all_three_overlay_states() {
     let closed = swept_mouse_action_names(false);
     let expected_closed: BTreeSet<String> = [
         "SelectNext",
@@ -3913,6 +4000,36 @@ fn the_sweep_covers_the_mouse_under_both_overlay_states() {
     // two panels sharing the overlay layer, `ToggleHelp` means *swap to
     // help* rather than *close*.
     assert!(closed.union(&open).any(|n| n == "Back"));
+
+    // `binding-inventory`'s ADDED requirement's step 3, third overlay state:
+    // `Some(Panel::Settings)`. `Click` joins `ScrollDown`, `ScrollUp`, `Back`,
+    // and `Ignore` here and only here — the setting row's own selection
+    // gesture, reachable only while the settings band is on screen.
+    let settings = settings_mouse_action_names();
+    let expected_settings: BTreeSet<String> = ["ScrollDown", "ScrollUp", "Back", "Click", "Ignore"]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    assert_eq!(settings, expected_settings);
+    assert!(
+        settings.contains("Click") && !open.contains("Click"),
+        "the settings-open pass is the only one naming Click alongside Back"
+    );
+}
+
+#[test]
+fn toggle_settings_has_a_pane_row_and_no_exemption() {
+    // `specs/binding-inventory/spec.md` -> "`ToggleSettings` has a `Pane` row
+    // and no exemption".
+    let union = swept_action_names();
+    assert!(union.contains("ToggleSettings"), "{union:?}");
+    let documented = inventory_action_names();
+    assert!(
+        documented.contains("ToggleSettings"),
+        "ui::help::INVENTORY: {documented:?}"
+    );
+    assert_eq!(EXEMPT_ACTIONS.len(), 2);
+    assert_eq!(EXEMPT_ACTIONS, ["FilterPush", "Ignore"]);
 }
 
 #[test]
