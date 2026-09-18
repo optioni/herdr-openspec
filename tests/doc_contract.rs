@@ -1947,7 +1947,7 @@ const ZONE_VARIANTS: [&str; 6] = [
 /// The token a row carries to say it describes the **overlay-open** pass, where
 /// `mouse_action` returns before consulting `ui::layout::zone` at all and there
 /// is no zone for the row to name (`design.md` -> Decision 6).
-const OVERLAY_TOKEN: &str = "`help.open`";
+const OVERLAY_TOKEN: &str = "`overlay.panel`";
 
 /// The **closed** gesture vocabulary: a leading phrase of the Gesture cell
 /// mapped to the `MouseEventKind` values it stands for (`design.md` ->
@@ -2772,7 +2772,7 @@ fn a_zone_less_row_is_rejected_unless_it_is_the_catch_all() {
     // overlay-open state instead, where `mouse_action` resolves no zone at all.
     let ok = mouse_table(&[
         "| Left click on an artifact tab cell | `Action::SelectTab` in `Zone::DetailTab` |",
-        "| Left click outside the band while `help.open` | `Action::ToggleHelp` |",
+        "| Left click outside the band while `overlay.panel` | `Action::ToggleHelp` |",
         "| Anything else | `Action::Ignore` |",
     ]);
     let rows = documented_mouse_rows(&ok).expect("both omissions are legal");
@@ -2791,11 +2791,11 @@ fn an_overlay_row_naming_a_zone_is_an_error() {
     // named. Reported on exactly the terms the mistyped-token check already
     // holds to: never left to surface as an unexplained vacuity.
     let doc = mouse_table(&[
-        "| Left click outside the band while `help.open` (`Zone::List`) | `Action::ToggleHelp` |",
+        "| Left click outside the band while `overlay.panel` (`Zone::List`) | `Action::ToggleHelp` |",
         "| Anything else | `Action::Ignore` |",
     ]);
     let err = documented_mouse_rows(&doc).expect_err("an overlay row may not name a zone");
-    assert!(err.contains("help.open"), "{err}");
+    assert!(err.contains("overlay.panel"), "{err}");
     assert!(err.contains("List"), "{err}");
     assert!(!err.contains("vacuous"), "{err}");
 }
@@ -3901,15 +3901,18 @@ fn the_sweep_covers_the_mouse_under_both_overlay_states() {
     );
 
     let open = swept_mouse_action_names(true);
-    let expected_open: BTreeSet<String> = ["ScrollDown", "ScrollUp", "ToggleHelp", "Ignore"]
+    let expected_open: BTreeSet<String> = ["ScrollDown", "ScrollUp", "Back", "Ignore"]
         .into_iter()
         .map(str::to_string)
         .collect();
     assert_eq!(open, expected_open);
 
-    // The union names `ToggleHelp`, so the click-outside dismissal is bound here
-    // and not only by its own scenarios.
-    assert!(closed.union(&open).any(|n| n == "ToggleHelp"));
+    // The union names `Back`, so the click-outside dismissal is bound here
+    // and not only by its own scenarios. `settings-window`'s correction
+    // (design.md -> Decision 8) replaced `ToggleHelp` with `Back` here: with
+    // two panels sharing the overlay layer, `ToggleHelp` means *swap to
+    // help* rather than *close*.
+    assert!(closed.union(&open).any(|n| n == "Back"));
 }
 
 #[test]
@@ -3956,12 +3959,12 @@ fn the_overlay_state_is_its_own_axis() {
         "every closed-overlay claim carries a zone: {closed:?}"
     );
     assert!(
-        open.contains(&claim("Down(Left)", true, None, "ToggleHelp")),
+        open.contains(&claim("Down(Left)", true, None, "Back")),
         "the press outside the band dismisses the overlay: {open:?}"
     );
     assert!(
-        !closed.iter().any(|c| c.outcome == "ToggleHelp"),
-        "no closed-overlay cell produces ToggleHelp: {closed:?}"
+        !closed.iter().any(|c| c.outcome == "Back"),
+        "no closed-overlay cell produces Back: {closed:?}"
     );
     assert!(
         open.contains(&claim("ScrollDown", true, None, "ScrollDown")),
