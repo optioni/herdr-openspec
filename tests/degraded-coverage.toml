@@ -152,8 +152,8 @@ condition = "Herdr socket unreachable"
 tier = "view"
 proof = ["an_unreachable_socket_renders_the_agentless_pane"]
 verdict = "spec-corrected"
-why = "the pane renders identically whether AgentSnapshot::problem is Some or None, via render_at"
-covers = ["src/ui/app.rs:1916-1930"]
+why = "the pane renders identically whether AgentSnapshot::problem is Some or None, via render_at — because ui::list only draws that reason when the snapshot is also `stalled`, which the fixture never sets"
+covers = ["src/ui/list.rs:456-460"]
 
 [[row]]
 condition = "A launch's `pane split` call fails"
