@@ -324,29 +324,29 @@ establish (design.md → Test Strategy).
 ## 12. Change Review
 <!-- kind: operational -->
 
-- [ ] 12.1 CHECK: Dispatch an independent reviewer — not a fork of this session — against
+- [x] 12.1 CHECK: Dispatch an independent reviewer — not a fork of this session — against
       proposal.md, all eleven delta specs, design.md, and the diff.
-- [ ] 12.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
+- [x] 12.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
       one-line reason, note SUGGESTIONs, and re-run affected tests.
-- [ ] 12.3 VERIFY: Confirm no blocking or unowned finding remains.
+- [x] 12.3 VERIFY: Confirm no blocking or unowned finding remains.
 
 ## 13. Documentation
 <!-- kind: operational -->
 
-- [ ] 13.1 Rewrite in `README.md` → Keys (audience: users): add the `,` row. Rewrite rather
+- [x] 13.1 Rewrite in `README.md` → Keys (audience: users): add the `,` row. Rewrite rather
       than add — the Keys table is bound to `ui::help::INVENTORY` by `tests/doc_contract.rs`,
       so it goes red until it matches.
-- [ ] 13.2 Rewrite in `SPEC.md` → Keys and → the mouse table (audience: maintainers): add `,`
+- [x] 13.2 Rewrite in `SPEC.md` → Keys and → the mouse table (audience: maintainers): add `,`
       and the setting-row click, and change the click-outside row to `Back`. The mouse table is
       bound row by row by executing `mouse_action`, so a stale row fails `cargo test`.
-- [ ] 13.3 Rewrite in `SPEC.md` → the write-boundary sentence and the `settings.toml`
+- [x] 13.3 Rewrite in `SPEC.md` → the write-boundary sentence and the `settings.toml`
       description (audience: maintainers): the plugin's own writes become
       `agent-names.toml` **and** `settings.toml`. This corrects a sentence that currently names
       one file and would otherwise be false.
-- [ ] 13.4 Rewrite in `SPEC.md` → degraded-states table (audience: maintainers): add rows for
+- [x] 13.4 Rewrite in `SPEC.md` → degraded-states table (audience: maintainers): add rows for
       "no installed integration, `agent_kind` not editable" and "`settings.toml` write failed",
       each bound to its proving test in `tests/degraded-coverage.toml`.
-- [ ] 13.5 Rewrite in `AGENTS.md` (audience: agents) the **nine** sentences this change
+- [x] 13.5 Rewrite in `AGENTS.md` (audience: agents) the **nine** sentences this change
       falsifies, none of which is machine-bound except the first, so the rest drift silently:
       `:308` the claim count and its enumerated list; `:336` and `:342` `NODEFAULT-UI`'s two
       "eight"s → nine; `:403` the quoted "ten pure files" / "nine pure view files"; `:445-449`
@@ -354,13 +354,26 @@ establish (design.md → Test Strategy).
       `:512` `COLWIDTH`'s "nine" → ten; `:517` "The **six** `*WIDTHS` gates" → seven; and the
       **two** write-boundary sentences at `:545` and `:552`. `CLAUDE.md` is a symlink to
       `AGENTS.md`, so this is one file. All corrections, no additions.
-- [ ] 13.6 Rewrite the doc-conformance claim count at all four sites together, or
+- [x] 13.6 Rewrite the doc-conformance claim count at all four sites together, or
       `tests/doc_contract.rs` stays red: `CLAIM_COUNT` 15 → 16 (`tests/doc_contract.rs:4608`),
       `CLAIM_COUNT_WORDS` extended to `[(&str, usize); 7]` with `("sixteen", 16)` (`:4613`),
       `AGENTS.md:308` "fifteen further claims" → "sixteen", and a new bullet under `SPEC.md` →
       `### Doc-conformance checks` naming `src/settings.rs`' no-I/O claim. That section holds 16
       bullets for 15 claims — the last, "A claim with no second site is argued in review, not
       checked", is a meta-statement and must stay last, so insert the new claim above it.
+- [x] 13.7 Widen `tests/doc_contract.rs`' mouse-claim overlay axis from two states to three,
+      because task 13.2 cannot otherwise be satisfied. Added during apply: the `Claim` axis was
+      `help_open: bool` and `sweep_dashboard` built `Some(Panel::Help)` or `None`, so
+      `Click(Target::Setting(_))` was unobservable and 13.2's new row failed as **vacuous**
+      rather than passing. Replace the bool with `OverlayPass { Closed, Help, Settings }`; give
+      `MouseRow` an `overlays: Vec<OverlayPass>` so a row naming `overlay.panel` without naming
+      a panel claims **both** open passes — which is what newly binds the `Action::Back`
+      click-outside row under the settings panel, the regression design.md Decision 8 exists to
+      prevent; fold `sweep_dashboard_with_settings_panel` into `sweep_dashboard`'s own
+      parameter; and make `outcome_name`'s `Target` match **exhaustive** with no wildcard, since
+      `Target::Setting` collapsing to a bare `Click` is what let the `Target::Change` row cover
+      it. Negative control: the row reports `vacuous` before the axis widens and `undocumented`
+      before the `outcome_name` arm is added — both observed.
 
 ## 14. Lint & Verify
 <!-- kind: operational -->

@@ -1968,6 +1968,48 @@ const MOUSE_GESTURES: [(&str, &[MouseEventKind]); 5] = [
 /// A row's claims are the **cross product** of its gestures, its zones and its
 /// outcomes. The catch-all is the exception: it names no zone, its only outcome
 /// is `Ignore`, and it claims the remainder rather than a cross product.
+/// The overlay axis, three-state since `settings-window`.
+///
+/// Was a `help_open: bool` while the overlay layer held one panel. It holds two
+/// now, and `mouse_action` answers a click **inside** the band differently under
+/// each — `Ignore` under `Panel::Help`, which is read-only and holds no control,
+/// and `Click(Target::Setting(i))` under `Panel::Settings` — so a two-state axis
+/// cannot observe the settings panel's own binding at all, and the row
+/// documenting it is vacuous by construction rather than merely undocumented.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum OverlayPass {
+    Closed,
+    Help,
+    Settings,
+}
+
+impl OverlayPass {
+    /// The panel this pass builds, `None` for the closed pass.
+    fn panel(self) -> Option<Panel> {
+        match self {
+            OverlayPass::Closed => None,
+            OverlayPass::Help => Some(Panel::Help),
+            OverlayPass::Settings => Some(Panel::Settings),
+        }
+    }
+
+    /// How [`describe`] spells the pass in a failure message.
+    fn label(self) -> &'static str {
+        match self {
+            OverlayPass::Closed => "overlay closed",
+            OverlayPass::Help => "help open",
+            OverlayPass::Settings => "settings open",
+        }
+    }
+}
+
+/// Every pass the claim sweep runs, in the order a failure message lists them.
+const OVERLAY_PASSES: [OverlayPass; 3] = [
+    OverlayPass::Closed,
+    OverlayPass::Help,
+    OverlayPass::Settings,
+];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct MouseRow {
     /// The row's own line, quoted back in a failure message.
@@ -1975,8 +2017,16 @@ struct MouseRow {
     /// Axis 1: the gesture kinds the row's Gesture cell resolves to, as
     /// [`kind_name`] spells them.
     kinds: Vec<&'static str>,
-    /// Axis 2: whether the row describes the overlay-open pass.
-    help_open: bool,
+    /// Axis 2: the overlay states the row describes.
+    ///
+    /// `[Closed]` for an ordinary row. A row naming `Panel::Settings` claims
+    /// `[Settings]` alone. A row naming `overlay.panel` without naming a panel
+    /// claims **both** open passes: the dismissal and the wheel behave
+    /// identically whichever panel is up, so such a row is a claim about the
+    /// layer, and binding it to one pass would leave the other unguarded —
+    /// which is exactly how `settings-window`'s own `Action::Back` correction
+    /// could have regressed under the settings panel unnoticed.
+    overlays: Vec<OverlayPass>,
     /// Axis 3: the `Zone` variants the row covers. Empty only for the catch-all
     /// and for an overlay-open row.
     zones: Vec<&'static str>,
@@ -2092,8 +2142,15 @@ fn parse_mouse_row(line: &str) -> Result<MouseRow, String> {
         }
     }
 
-    let help_open = line.contains(OVERLAY_TOKEN);
-    if help_open && !zones.is_empty() {
+    let overlays = if line.contains("Panel::Settings") {
+        vec![OverlayPass::Settings]
+    } else if line.contains(OVERLAY_TOKEN) {
+        vec![OverlayPass::Help, OverlayPass::Settings]
+    } else {
+        vec![OverlayPass::Closed]
+    };
+    let overlay_row = overlays != [OverlayPass::Closed];
+    if overlay_row && !zones.is_empty() {
         return Err(format!(
             "SPEC.md -> Keys' mouse table row {line:?} carries {OVERLAY_TOKEN} and names \
              {zones:?} as well - while the overlay is open `mouse_action` returns before \
@@ -2101,11 +2158,11 @@ fn parse_mouse_row(line: &str) -> Result<MouseRow, String> {
              name, and its zones would be silently discarded"
         ));
     }
-    let catch_all = zones.is_empty() && !help_open && outcomes == ["Ignore"];
+    let catch_all = zones.is_empty() && !overlay_row && outcomes == ["Ignore"];
     Ok(MouseRow {
         text: line.to_string(),
         kinds,
-        help_open,
+        overlays,
         zones,
         outcomes,
         catch_all,
@@ -2140,7 +2197,7 @@ fn documented_mouse_rows(spec_md: &str) -> Result<Vec<MouseRow>, String> {
     }
 
     for row in &rows {
-        if row.zones.is_empty() && !row.catch_all && !row.help_open {
+        if row.zones.is_empty() && !row.catch_all && row.overlays == [OverlayPass::Closed] {
             return Err(format!(
                 "SPEC.md -> Keys' mouse table row {:?} names no `Zone` - only the single \
                  `Ignore`-only catch-all, and a row naming the overlay-open state with \
@@ -2296,15 +2353,27 @@ fn mouse_bindings_match_spec_md() {
         "the sweep reaches {} of the six Zone variants: {zones:?}",
         zones.len()
     );
-    assert!(
-        claims.iter().any(|c| c.help_open),
-        "the overlay-open pass is represented in the claim set"
-    );
+    for pass in OVERLAY_PASSES {
+        assert!(
+            claims.iter().any(|c| c.overlay == pass),
+            "the {} pass is represented in the claim set",
+            pass.label()
+        );
+    }
 
     // The two rows this change added, for a binding the pane has had since
     // `help-overlay` and the table documented only in the paragraph after it.
-    assert!(claims.contains(&claim("ScrollDown", true, None, "ScrollDown")));
-    assert!(claims.contains(&claim("ScrollUp", true, None, "ScrollUp")));
+    assert!(claims.contains(&claim("ScrollDown", OverlayPass::Help, None, "ScrollDown")));
+    assert!(claims.contains(&claim("ScrollUp", OverlayPass::Help, None, "ScrollUp")));
+
+    // `settings-window`: the third pass carries the binding the other two
+    // cannot produce, which is the whole reason the axis widened.
+    assert!(claims.contains(&claim(
+        "Down(Left)",
+        OverlayPass::Settings,
+        None,
+        "Click(Setting)"
+    )));
 
     assert_eq!(
         KNOWN_MOUSE_COLLISIONS.len(),
@@ -2325,8 +2394,13 @@ fn mouse_bindings_match_spec_md() {
 /// The one at HEAD is the click on a change row and the second click on the row
 /// already selected: both produce `Click(Change)`, because "a second click opens
 /// the detail" is decided in `Dashboard::apply`, not in `mouse_action`.
-const KNOWN_MOUSE_COLLISIONS: [(&str, bool, &str, &str, usize); 1] =
-    [("Down(Left)", false, "ListRow", "Click(Change)", 2)];
+const KNOWN_MOUSE_COLLISIONS: [(&str, OverlayPass, &str, &str, usize); 1] = [(
+    "Down(Left)",
+    OverlayPass::Closed,
+    "ListRow",
+    "Click(Change)",
+    2,
+)];
 
 /// One row's claims: the **cross product** of its gestures, its zones and its
 /// outcomes. An overlay-open row has one zone slot, `None`, because
@@ -2335,33 +2409,38 @@ const KNOWN_MOUSE_COLLISIONS: [(&str, bool, &str, &str, usize); 1] =
 /// cross product and is therefore vacuous, which is the right answer.
 ///
 /// The catch-all is not computed this way: it claims the remainder.
-fn row_claims(row: &MouseRow) -> BTreeSet<(&'static str, bool, Option<&'static str>, &str)> {
-    let slots: Vec<Option<&'static str>> = if row.help_open {
-        vec![None]
-    } else {
+fn row_claims(row: &MouseRow) -> BTreeSet<(&'static str, OverlayPass, Option<&'static str>, &str)> {
+    let slots: Vec<Option<&'static str>> = if row.overlays == [OverlayPass::Closed] {
         row.zones.iter().map(|zone| Some(*zone)).collect()
+    } else {
+        vec![None]
     };
     let mut out = BTreeSet::new();
     for kind in &row.kinds {
-        for zone in &slots {
-            for outcome in &row.outcomes {
-                out.insert((*kind, row.help_open, *zone, outcome.as_str()));
+        for overlay in &row.overlays {
+            for zone in &slots {
+                for outcome in &row.outcomes {
+                    out.insert((*kind, *overlay, *zone, outcome.as_str()));
+                }
             }
         }
     }
     out
 }
 
-fn claim_key(c: &Claim) -> (&'static str, bool, Option<&'static str>, &'static str) {
-    (c.kind, c.help_open, c.zone, c.outcome)
+fn claim_key(
+    c: &Claim,
+) -> (
+    &'static str,
+    OverlayPass,
+    Option<&'static str>,
+    &'static str,
+) {
+    (c.kind, c.overlay, c.zone, c.outcome)
 }
 
-fn describe(kind: &str, help_open: bool, zone: Option<&str>, outcome: &str) -> String {
-    let overlay = if help_open {
-        "overlay open"
-    } else {
-        "overlay closed"
-    };
+fn describe(kind: &str, overlay: OverlayPass, zone: Option<&str>, outcome: &str) -> String {
+    let overlay = overlay.label();
     let zone = zone.map_or_else(|| "no zone".to_string(), |z| format!("Zone::{z}"));
     format!("({kind}, {overlay}, {zone}, {outcome})")
 }
@@ -2389,14 +2468,15 @@ fn compare_mouse_claims(rows: &[MouseRow], claims: &BTreeSet<Claim>) -> Result<(
         ));
     }
 
-    let observed: BTreeSet<(&str, bool, Option<&str>, &str)> =
+    let observed: BTreeSet<(&str, OverlayPass, Option<&str>, &str)> =
         claims.iter().map(claim_key).collect();
 
     let mut problems: Vec<String> = Vec::new();
 
     // Direction 2, and the coverage tally direction 1 and the collision check
     // both read.
-    let mut cover_count: BTreeMap<(&str, bool, Option<&str>, &str), Vec<&str>> = BTreeMap::new();
+    let mut cover_count: BTreeMap<(&str, OverlayPass, Option<&str>, &str), Vec<&str>> =
+        BTreeMap::new();
     for row in rows.iter().filter(|row| !row.catch_all) {
         let mine = row_claims(row);
         let hits: Vec<_> = mine.iter().filter(|c| observed.contains(*c)).collect();
@@ -2404,11 +2484,11 @@ fn compare_mouse_claims(rows: &[MouseRow], claims: &BTreeSet<Claim>) -> Result<(
             let near: Vec<String> = claims
                 .iter()
                 .filter(|c| {
-                    c.help_open == row.help_open
+                    row.overlays.contains(&c.overlay)
                         && row.kinds.contains(&c.kind)
                         && c.zone.is_some_and(|z| row.zones.contains(&z))
                 })
-                .map(|c| describe(c.kind, c.help_open, c.zone, c.outcome))
+                .map(|c| describe(c.kind, c.overlay, c.zone, c.outcome))
                 .collect();
             problems.push(format!(
                 "vacuous row - it covers no observed claim: {:?}\n    it claims {:?}\n    \
@@ -2459,8 +2539,8 @@ fn compare_mouse_claims(rows: &[MouseRow], claims: &BTreeSet<Claim>) -> Result<(
         }
         let pinned = KNOWN_MOUSE_COLLISIONS
             .iter()
-            .find(|(kind, help_open, zone, outcome, _)| {
-                (*kind, *help_open, Some(*zone), *outcome) == *key
+            .find(|(kind, overlay, zone, outcome, _)| {
+                (*kind, *overlay, Some(*zone), *outcome) == *key
             })
             .map(|(_, _, _, _, rows)| *rows);
         match pinned {
@@ -2498,8 +2578,9 @@ fn real_mouse_rows() -> Vec<MouseRow> {
 
 /// Every claim the sweep observes, both overlay states over every fixture.
 fn all_mouse_claims() -> BTreeSet<Claim> {
-    let mut claims = mouse_claims(false);
-    claims.extend(mouse_claims(true));
+    let mut claims = mouse_claims(OverlayPass::Closed);
+    claims.extend(mouse_claims(OverlayPass::Help));
+    claims.extend(mouse_claims(OverlayPass::Settings));
     claims
 }
 
@@ -2558,9 +2639,9 @@ fn two_rows_differing_only_in_payload_are_told_apart() {
             .split_once('(')
             .map_or(outcome.to_string(), |(variant, _)| variant.to_string())
     };
-    let observed: BTreeSet<(&str, bool, Option<&str>, String)> = all_mouse_claims()
+    let observed: BTreeSet<(&str, OverlayPass, Option<&str>, String)> = all_mouse_claims()
         .iter()
-        .map(|c| (c.kind, c.help_open, c.zone, bare(c.outcome)))
+        .map(|c| (c.kind, c.overlay, c.zone, bare(c.outcome)))
         .collect();
     let mut covered = BTreeSet::new();
     for row in &rows {
@@ -2568,14 +2649,16 @@ fn two_rows_differing_only_in_payload_are_told_apart() {
             continue;
         }
         for kind in &row.kinds {
-            let slots: Vec<Option<&str>> = if row.help_open {
-                vec![None]
-            } else {
+            let slots: Vec<Option<&str>> = if row.overlays == [OverlayPass::Closed] {
                 row.zones.iter().map(|z| Some(*z)).collect()
+            } else {
+                vec![None]
             };
-            for zone in slots {
-                for outcome in &row.outcomes {
-                    covered.insert((*kind, row.help_open, zone, bare(outcome)));
+            for overlay in &row.overlays {
+                for zone in &slots {
+                    for outcome in &row.outcomes {
+                        covered.insert((*kind, *overlay, *zone, bare(outcome)));
+                    }
                 }
             }
         }
@@ -2595,7 +2678,12 @@ fn two_rows_differing_only_in_payload_are_told_apart() {
 fn a_binding_with_no_row_fails_as_undocumented() {
     let rows = real_mouse_rows();
     let mut claims = all_mouse_claims();
-    claims.insert(claim("Down(Middle)", false, Some("List"), "ToggleHelp"));
+    claims.insert(claim(
+        "Down(Middle)",
+        OverlayPass::Closed,
+        Some("List"),
+        "ToggleHelp",
+    ));
 
     let err = compare_mouse_claims(&rows, &claims).expect_err("a bound gesture with no row");
     assert!(err.contains("undocumented"), "{err}");
@@ -2616,7 +2704,7 @@ fn a_binding_with_no_row_fails_as_undocumented() {
 fn the_overlay_axis_keeps_the_two_passes_apart() {
     let mut rows = real_mouse_rows();
     let at = row_index(&rows, "Left click outside the help overlay's band");
-    rows[at].help_open = false;
+    rows[at].overlays = vec![OverlayPass::Closed];
 
     let err = compare_mouse_claims(&rows, &all_mouse_claims())
         .expect_err("the overlay axis is load-bearing");
@@ -2777,11 +2865,15 @@ fn a_zone_less_row_is_rejected_unless_it_is_the_catch_all() {
     ]);
     let rows = documented_mouse_rows(&ok).expect("both omissions are legal");
     assert_eq!(rows.len(), 3, "{rows:?}");
-    assert!(
-        rows[1].help_open,
-        "the overlay row carries the overlay axis"
+    assert_eq!(
+        rows[1].overlays,
+        vec![OverlayPass::Help, OverlayPass::Settings],
+        "a row naming `overlay.panel` without naming a panel claims both open \
+         passes - the layer holds two since `settings-window`, and the gesture \
+         resolves the same way under either"
     );
-    assert!(!rows[0].help_open && !rows[2].help_open);
+    assert_eq!(rows[0].overlays, vec![OverlayPass::Closed]);
+    assert_eq!(rows[2].overlays, vec![OverlayPass::Closed]);
 }
 
 #[test]
@@ -3077,8 +3169,8 @@ fn sweep_change(name: &str, origin: Origin, tabs: usize) -> Change {
 /// silently dropping the mouse's selection coverage from the whole sweep —
 /// the widen-the-fixture rule `the_sweep_covers_the_mouse_under_all_three_overlay_states`
 /// already states for the tab-switching case applies here identically.
-fn sweep_dashboard(route: Route, help_open: bool, fixture: SweepFixture) -> Dashboard {
-    Dashboard {
+fn sweep_dashboard(route: Route, overlay: OverlayPass, fixture: SweepFixture) -> Dashboard {
+    let mut dashboard = Dashboard {
         settings: herdr_openspec::settings::PanelState {
             rows: Vec::new(),
             cursor: 0,
@@ -3172,34 +3264,36 @@ fn sweep_dashboard(route: Route, help_open: bool, fixture: SweepFixture) -> Dash
         },
         file_mode: false,
         overlay: Overlay {
-            panel: if help_open { Some(Panel::Help) } else { None },
+            panel: overlay.panel(),
             scroll: 0,
             edit: None,
         },
+    };
+    // The settings pass alone needs populated rows: a cell landing on a value
+    // or source row reaches `Click(Target::Setting(_))` only when there is a
+    // row under it, and `Ignore` otherwise - so an empty `rows` would leave the
+    // pass observationally identical to the help pass, and the widened axis
+    // pointless.
+    if overlay == OverlayPass::Settings {
+        dashboard.settings.rows = settings_fixture_rows();
     }
+    dashboard
 }
 
-/// [`sweep_dashboard`]'s settings-panel sibling: `binding-inventory`'s own third
-/// overlay state, `Some(Panel::Settings)`, with `settings.rows` populated —
-/// `ui::driver`'s own `settings_overlay_open` fixture, three settings, the
-/// middle one editable — so a cell landing on a value or source row reaches
-/// `Action::Click(Target::Setting(_))` rather than the `Ignore` every row gets
-/// when `rows` is empty.
+/// The settings panel's own sweep rows: `ui::driver`'s `settings_overlay_open`
+/// fixture - three settings, the middle one editable - so a cell landing on a
+/// value or source row reaches `Action::Click(Target::Setting(_))` rather than
+/// the `Ignore` every row gets when `rows` is empty.
 ///
-/// Kept as its **own** function rather than a third arm of `sweep_dashboard`'s
-/// `help_open: bool` parameter: that parameter, and the `Claim`-carrying sweep
-/// built on it (`mouse_claims`, `all_mouse_claims`, `swept_mouse_action_names`),
-/// are `doc-conformance`'s own machinery, binding `SPEC.md` -> Keys' mouse table
-/// to `mouse_action`'s executed behaviour. `SPEC.md`'s table names no row for a
-/// click landing inside the settings band — only `binding-inventory`'s own
-/// `INVENTORY` sweep owes `ToggleSettings` and its reinterpreted keys a name —
-/// so widening that shared bool axis to a third state would hand
-/// `mouse_bindings_match_spec_md`, an already-passing test outside this group's
-/// scope, an undocumented claim that is not its own requirement's to answer.
-fn sweep_dashboard_with_settings_panel(route: Route, fixture: SweepFixture) -> Dashboard {
-    let mut dashboard = sweep_dashboard(route, false, fixture);
-    dashboard.overlay.panel = Some(Panel::Settings);
-    dashboard.settings.rows = vec![
+/// `settings-window` folded this into [`sweep_dashboard`]'s own overlay
+/// parameter, which it had deliberately been kept out of. The reason it was
+/// kept out - "`SPEC.md`'s table names no row for a click landing inside the
+/// settings band" - stopped being true when task 13.2 added that row. A
+/// two-state axis then made the new row **vacuous by construction** rather than
+/// merely leaving the binding undocumented, because `Click(Target::Setting(_))`
+/// is unobservable under both passes such a sweep can build.
+fn settings_fixture_rows() -> Vec<herdr_openspec::settings::Setting> {
+    vec![
         herdr_openspec::settings::Setting {
             key: "openspec_bin",
             value: "openspec_bin-value".to_string(),
@@ -3224,38 +3318,7 @@ fn sweep_dashboard_with_settings_panel(route: Route, fixture: SweepFixture) -> D
                 reason: herdr_openspec::settings::Reason::SetOnce,
             },
         },
-    ];
-    dashboard
-}
-
-/// The bare `Action` names `mouse_action` produces with `overlay.panel`
-/// `Some(Panel::Settings)`, over both mandated frames and every
-/// [`SWEEP_FIXTURES`] entry — `binding-inventory`'s ADDED requirement's step 3,
-/// third overlay state. Not cached: called once, by one test, unlike
-/// [`swept_mouse_action_names`], which several tests share.
-fn settings_mouse_action_names() -> BTreeSet<String> {
-    let mut names = BTreeSet::new();
-    for fixture in SWEEP_FIXTURES {
-        for (route, width, height) in passes_for(fixture) {
-            let dashboard = sweep_dashboard_with_settings_panel(route, fixture);
-            let area = Rect::new(0, 0, width, height);
-            for kind in MOUSE_KINDS {
-                for row in 0..height {
-                    for column in 0..width {
-                        let mouse = MouseEvent {
-                            kind,
-                            column,
-                            row,
-                            modifiers: KeyModifiers::NONE,
-                        };
-                        let action = mouse_action(&dashboard, area, &mouse);
-                        names.insert(action_name(action).to_string());
-                    }
-                }
-            }
-        }
-    }
-    names
+    ]
 }
 
 /// The **dashboard fixtures** the mouse sweep runs over, listed explicitly and
@@ -3301,7 +3364,7 @@ struct Claim {
     /// The `MouseEventKind` dispatched, as [`kind_name`] spells it.
     kind: &'static str,
     /// The overlay state, as its own axis rather than a sentinel in `zone`.
-    help_open: bool,
+    overlay: OverlayPass,
     /// The `Zone` the cell resolved to, payload discarded — `None` while the
     /// overlay is open, where `mouse_action` returns before consulting
     /// `ui::layout::zone` at all (`design.md` -> Decision 6 and Decision 11).
@@ -3315,13 +3378,13 @@ struct Claim {
 /// same way.
 fn claim(
     kind: &'static str,
-    help_open: bool,
+    overlay: OverlayPass,
     zone: Option<&'static str>,
     outcome: &'static str,
 ) -> Claim {
     Claim {
         kind,
-        help_open,
+        overlay,
         zone,
         outcome,
     }
@@ -3390,9 +3453,19 @@ fn zone_name(zone: &Zone) -> &'static str {
 /// a new `Action` variant is still a compile error — there, rather than here.
 fn outcome_name(action: Action) -> &'static str {
     match action {
-        Action::Click(Target::Section(_)) => "Click(Section)",
-        Action::Click(Target::Change(_)) => "Click(Change)",
-        Action::Click(Target::DetailHeader { .. }) => "Click(DetailHeader)",
+        // Exhaustive over `Target`, with no wildcard arm and deliberately: a
+        // new variant must fail to **compile** here rather than fall through
+        // to `action_name` and collapse to a bare `Click`. `settings-window`
+        // added `Target::Setting` and it did collapse — the sweep observed
+        // `Click`, the `Target::Change` row already covered `Click`, and the
+        // row documenting the setting binding read as covered while the
+        // binding itself went unguarded.
+        Action::Click(target) => match target {
+            Target::Section(_) => "Click(Section)",
+            Target::Change(_) => "Click(Change)",
+            Target::Setting(_) => "Click(Setting)",
+            Target::DetailHeader { .. } => "Click(DetailHeader)",
+        },
         Action::Select(SelectPhase::Begin { .. }) => "Select(Begin)",
         Action::Select(SelectPhase::Extend { .. }) => "Select(Extend)",
         other => action_name(other),
@@ -3458,10 +3531,10 @@ fn passes_for(fixture: SweepFixture) -> Vec<(Route, u16, u16)> {
     }
 }
 
-fn sweep_mouse_claims(fixture: SweepFixture, help_open: bool) -> BTreeSet<Claim> {
+fn sweep_mouse_claims(fixture: SweepFixture, overlay: OverlayPass) -> BTreeSet<Claim> {
     let mut claims = BTreeSet::new();
     for (route, width, height) in passes_for(fixture) {
-        let dashboard = sweep_dashboard(route, help_open, fixture);
+        let dashboard = sweep_dashboard(route, overlay, fixture);
         let area = Rect::new(0, 0, width, height);
         for kind in MOUSE_KINDS {
             for row in 0..height {
@@ -3472,12 +3545,12 @@ fn sweep_mouse_claims(fixture: SweepFixture, help_open: bool) -> BTreeSet<Claim>
                         row,
                         modifiers: KeyModifiers::NONE,
                     };
-                    let zone = (!help_open).then(|| {
+                    let zone = (overlay == OverlayPass::Closed).then(|| {
                         zone_name(&herdr_openspec::ui::layout::zone(area, route, column, row))
                     });
                     claims.insert(Claim {
                         kind: kind_name(kind),
-                        help_open,
+                        overlay,
                         zone,
                         outcome: outcome_name(mouse_action(&dashboard, area, &mouse)),
                     });
@@ -3492,30 +3565,30 @@ fn sweep_mouse_claims(fixture: SweepFixture, help_open: bool) -> BTreeSet<Claim>
 /// on exactly [`swept_key_action_names`]' terms. Every `(fixture, overlay)`
 /// combination is filled on the first touch: the full check wants all of them,
 /// and one table keeps the expensive sweep to a single pass per combination.
-fn swept_mouse_claims(fixture: SweepFixture, help_open: bool) -> BTreeSet<Claim> {
-    static CACHE: std::sync::OnceLock<BTreeMap<(SweepFixture, bool), BTreeSet<Claim>>> =
+fn swept_mouse_claims(fixture: SweepFixture, overlay: OverlayPass) -> BTreeSet<Claim> {
+    static CACHE: std::sync::OnceLock<BTreeMap<(SweepFixture, OverlayPass), BTreeSet<Claim>>> =
         std::sync::OnceLock::new();
     CACHE
         .get_or_init(|| {
             let mut table = BTreeMap::new();
             for entry in SWEEP_FIXTURES {
-                for open in [false, true] {
-                    table.insert((entry, open), sweep_mouse_claims(entry, open));
+                for pass in OVERLAY_PASSES {
+                    table.insert((entry, pass), sweep_mouse_claims(entry, pass));
                 }
             }
             table
         })
-        .get(&(fixture, help_open))
+        .get(&(fixture, overlay))
         .expect("SWEEP_FIXTURES covers every fixture the sweep is asked for")
         .clone()
 }
 
 /// The claims observed at one overlay state, over **every** fixture — the
 /// left-hand side of the two-way comparison.
-fn mouse_claims(help_open: bool) -> BTreeSet<Claim> {
+fn mouse_claims(overlay: OverlayPass) -> BTreeSet<Claim> {
     let mut all = BTreeSet::new();
     for fixture in SWEEP_FIXTURES {
-        all.extend(swept_mouse_claims(fixture, help_open));
+        all.extend(swept_mouse_claims(fixture, overlay));
     }
     all
 }
@@ -3523,8 +3596,8 @@ fn mouse_claims(help_open: bool) -> BTreeSet<Claim> {
 /// The bare action names, as a **projection** of [`mouse_claims`] rather than a
 /// second sweep, so the two cannot disagree. Keeps its signature and its
 /// `BTreeSet<String>` return: three callers want a name-set view of this data.
-fn swept_mouse_action_names(help_open: bool) -> BTreeSet<String> {
-    mouse_claims(help_open)
+fn swept_mouse_action_names(overlay: OverlayPass) -> BTreeSet<String> {
+    mouse_claims(overlay)
         .into_iter()
         .map(|c| match c.outcome.split_once('(') {
             Some((variant, _)) => variant.to_string(),
@@ -3553,9 +3626,9 @@ fn bound_action_names() -> BTreeSet<String> {
 /// do not move — see `sweep_finds_the_bound_actions_and_exactly_two_exemptions`.
 fn swept_action_names() -> BTreeSet<String> {
     let mut union = swept_key_action_names();
-    union.extend(swept_mouse_action_names(false));
-    union.extend(swept_mouse_action_names(true));
-    union.extend(settings_mouse_action_names());
+    for pass in OVERLAY_PASSES {
+        union.extend(swept_mouse_action_names(pass));
+    }
     union
 }
 
@@ -3905,8 +3978,9 @@ fn select_is_the_only_mouse_only_action_by_name_and_count() {
     // removing both SHALL be exactly one name, `Select`, asserted by name and
     // by length exactly as `EXEMPT_ACTIONS` is, so a second mouse-only action
     // fails here rather than passing silently.
-    let mut mouse_only = swept_mouse_action_names(false);
-    mouse_only.extend(swept_mouse_action_names(true));
+    let mut mouse_only = swept_mouse_action_names(OverlayPass::Closed);
+    mouse_only.extend(swept_mouse_action_names(OverlayPass::Help));
+    mouse_only.extend(swept_mouse_action_names(OverlayPass::Settings));
     for name in swept_key_action_names() {
         mouse_only.remove(&name);
     }
@@ -3966,7 +4040,7 @@ fn the_wide_layout_resolves_every_cell_route_free() {
 
 #[test]
 fn the_sweep_covers_the_mouse_under_all_three_overlay_states() {
-    let closed = swept_mouse_action_names(false);
+    let closed = swept_mouse_action_names(OverlayPass::Closed);
     let expected_closed: BTreeSet<String> = [
         "SelectNext",
         "SelectPrev",
@@ -3987,7 +4061,7 @@ fn the_sweep_covers_the_mouse_under_all_three_overlay_states() {
          fixture, never narrow this set"
     );
 
-    let open = swept_mouse_action_names(true);
+    let open = swept_mouse_action_names(OverlayPass::Help);
     let expected_open: BTreeSet<String> = ["ScrollDown", "ScrollUp", "Back", "Ignore"]
         .into_iter()
         .map(str::to_string)
@@ -4005,7 +4079,7 @@ fn the_sweep_covers_the_mouse_under_all_three_overlay_states() {
     // `Some(Panel::Settings)`. `Click` joins `ScrollDown`, `ScrollUp`, `Back`,
     // and `Ignore` here and only here — the setting row's own selection
     // gesture, reachable only while the settings band is on screen.
-    let settings = settings_mouse_action_names();
+    let settings = swept_mouse_action_names(OverlayPass::Settings);
     let expected_settings: BTreeSet<String> = ["ScrollDown", "ScrollUp", "Back", "Click", "Ignore"]
         .into_iter()
         .map(str::to_string)
@@ -4041,18 +4115,33 @@ fn the_sweep_records_all_four_claim_axes() {
     // projections separately, which is why the third assertion below is an
     // **absence**: `Zone::ListRow` under the wheel is `SelectNext`, never
     // `ScrollDown`, and a zone/outcome mix-up says otherwise.
-    let claims = swept_mouse_claims(SweepFixture::SelectionAbsent, false);
+    let claims = swept_mouse_claims(SweepFixture::SelectionAbsent, OverlayPass::Closed);
 
     assert!(
-        claims.contains(&claim("ScrollDown", false, Some("ListRow"), "SelectNext")),
+        claims.contains(&claim(
+            "ScrollDown",
+            OverlayPass::Closed,
+            Some("ListRow"),
+            "SelectNext"
+        )),
         "the wheel over a list row moves the list selection: {claims:?}"
     );
     assert!(
-        claims.contains(&claim("Down(Left)", false, Some("DetailTab"), "SelectTab")),
+        claims.contains(&claim(
+            "Down(Left)",
+            OverlayPass::Closed,
+            Some("DetailTab"),
+            "SelectTab"
+        )),
         "a left press on a tab cell switches the tab: {claims:?}"
     );
     assert!(
-        !claims.contains(&claim("ScrollDown", false, Some("ListRow"), "ScrollDown")),
+        !claims.contains(&claim(
+            "ScrollDown",
+            OverlayPass::Closed,
+            Some("ListRow"),
+            "ScrollDown"
+        )),
         "the wheel over a list row must not be recorded as scrolling the detail \
          region - the zone and the outcome have been paired wrongly"
     );
@@ -4064,19 +4153,39 @@ fn the_overlay_state_is_its_own_axis() {
     // returns before consulting `ui::layout::zone` at all, so an open-overlay
     // claim has no zone to carry. The axis is its own field rather than a
     // sentinel written into the zone slot, so the two passes stay disjoint.
-    let open = swept_mouse_claims(SweepFixture::SelectionAbsent, true);
-    let closed = swept_mouse_claims(SweepFixture::SelectionAbsent, false);
+    let open = swept_mouse_claims(SweepFixture::SelectionAbsent, OverlayPass::Help);
+    let settings = swept_mouse_claims(SweepFixture::SelectionAbsent, OverlayPass::Settings);
+    let closed = swept_mouse_claims(SweepFixture::SelectionAbsent, OverlayPass::Closed);
 
     assert!(
-        open.iter().all(|c| c.help_open && c.zone.is_none()),
+        open.iter()
+            .all(|c| c.overlay == OverlayPass::Help && c.zone.is_none()),
         "every open-overlay claim carries the overlay axis and no zone: {open:?}"
     );
+    // `settings-window`'s third pass, on the same terms - and the one claim
+    // neither other pass can produce, which is why the axis is three-state.
     assert!(
-        closed.iter().all(|c| !c.help_open && c.zone.is_some()),
+        settings
+            .iter()
+            .all(|c| c.overlay == OverlayPass::Settings && c.zone.is_none()),
+        "every settings-open claim carries the overlay axis and no zone: {settings:?}"
+    );
+    assert!(
+        settings.iter().any(|c| c.outcome == "Click(Setting)"),
+        "the settings pass reaches the binding the other two cannot: {settings:?}"
+    );
+    assert!(
+        !open.iter().any(|c| c.outcome == "Click(Setting)"),
+        "and the help pass does not - a click inside its band is `Ignore`"
+    );
+    assert!(
+        closed
+            .iter()
+            .all(|c| c.overlay == OverlayPass::Closed && c.zone.is_some()),
         "every closed-overlay claim carries a zone: {closed:?}"
     );
     assert!(
-        open.contains(&claim("Down(Left)", true, None, "Back")),
+        open.contains(&claim("Down(Left)", OverlayPass::Help, None, "Back")),
         "the press outside the band dismisses the overlay: {open:?}"
     );
     assert!(
@@ -4084,7 +4193,7 @@ fn the_overlay_state_is_its_own_axis() {
         "no closed-overlay cell produces Back: {closed:?}"
     );
     assert!(
-        open.contains(&claim("ScrollDown", true, None, "ScrollDown")),
+        open.contains(&claim("ScrollDown", OverlayPass::Help, None, "ScrollDown")),
         "the wheel scrolls the overlay from anywhere in the frame: {open:?}"
     );
 }
@@ -4106,13 +4215,11 @@ fn a_point_outside_the_frame_resolves_to_outside_under_both_overlay_states() {
                 Zone::Outside,
                 "({column}, {row}) is outside a 120x40 frame"
             );
-            for (fixture, help_open) in [
-                (SweepFixture::SelectionAbsent, false),
-                (SweepFixture::SelectionAbsent, true),
-                (SweepFixture::SelectionPresent, false),
-                (SweepFixture::SelectionPresent, true),
-            ] {
-                let dashboard = sweep_dashboard(route, help_open, fixture);
+            for (fixture, overlay) in SWEEP_FIXTURES
+                .into_iter()
+                .flat_map(|f| OVERLAY_PASSES.map(|pass| (f, pass)))
+            {
+                let dashboard = sweep_dashboard(route, overlay, fixture);
                 for kind in MOUSE_KINDS {
                     let mouse = MouseEvent {
                         kind,
@@ -4126,15 +4233,15 @@ fn a_point_outside_the_frame_resolves_to_outside_under_both_overlay_states() {
                     // anywhere, `Zone::Outside` included, which is why the
                     // table's drag row names that zone. Everything else outside
                     // the frame is not a gesture the pane received.
-                    let clamps = !help_open
+                    let clamps = overlay == OverlayPass::Closed
                         && fixture == SweepFixture::SelectionPresent
                         && kind == MouseEventKind::Drag(MouseButton::Left);
                     let expected = if clamps { "Select(Extend)" } else { "Ignore" };
                     assert_eq!(
                         outcome_name(mouse_action(&dashboard, area, &mouse)),
                         expected,
-                        "{kind:?} at ({column}, {row}), overlay open = {help_open}, \
-                         fixture = {fixture:?}"
+                        "{kind:?} at ({column}, {row}), {}, fixture = {fixture:?}",
+                        overlay.label()
                     );
                 }
             }
@@ -4152,8 +4259,8 @@ fn the_trimmed_passes_could_contribute_no_claim() {
     //
     // If this goes red, the fix is to restore the narrow passes in `passes_for`
     // and NOT to weaken the assertion.
-    let absent = swept_mouse_claims(SweepFixture::SelectionAbsent, false);
-    let present = swept_mouse_claims(SweepFixture::SelectionPresent, false);
+    let absent = swept_mouse_claims(SweepFixture::SelectionAbsent, OverlayPass::Closed);
+    let present = swept_mouse_claims(SweepFixture::SelectionPresent, OverlayPass::Closed);
 
     // `mouse_action` reads `dashboard.selection` in exactly one arm
     // (`src/ui/driver.rs`, the `Drag(MouseButton::Left)` arm), **observed** here
@@ -4190,14 +4297,19 @@ fn the_clamp_is_observed_under_a_selection_fixture() {
     // `selection: None`. So the clamp `SPEC.md`'s drag row documents is
     // unobservable under that fixture alone, the two-way check would report that
     // row vacuous, and it would be right to.
-    let clamp = claim("Drag(Left)", false, Some("List"), "Select(Extend)");
+    let clamp = claim(
+        "Drag(Left)",
+        OverlayPass::Closed,
+        Some("List"),
+        "Select(Extend)",
+    );
 
     assert!(
-        mouse_claims(false).contains(&clamp),
+        mouse_claims(OverlayPass::Closed).contains(&clamp),
         "the clamp must be observable under some fixture the sweep runs"
     );
     assert!(
-        !swept_mouse_claims(SweepFixture::SelectionAbsent, false).contains(&clamp),
+        !swept_mouse_claims(SweepFixture::SelectionAbsent, OverlayPass::Closed).contains(&clamp),
         "the selection-absent fixture alone cannot reach the clamp - which is the \
          state this check would have shipped in without the fixture axis"
     );
@@ -4221,7 +4333,7 @@ fn every_zone_is_reached_by_every_fixture() {
     // weaken this assertion.
     let mut sets = Vec::new();
     for fixture in SWEEP_FIXTURES {
-        let zones: BTreeSet<&str> = swept_mouse_claims(fixture, false)
+        let zones: BTreeSet<&str> = swept_mouse_claims(fixture, OverlayPass::Closed)
             .iter()
             .filter_map(|c| c.zone)
             .collect();

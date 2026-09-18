@@ -100,3 +100,32 @@ descriptive `SHALL carry exactly **three** fields` sentences quoted above are **
 this reversal** and remain open: they describe `live-refresh`'s and `agent-polling`'s own
 historical additions, not a build-breaking compile-time check, and fixing them would still
 widen the diff into those two capabilities' own text for no reader-facing gain here.
+
+## Where the rest of the apply-time findings live
+
+This file covers only what was found **before** any implementation task ran. Everything the
+change review turned up — 3 CRITICAL, 9 WARNING, 5 SUGGESTION, each with its disposition and
+the commit that carried it — is in `notes/change-review.md`, and the two reversals above are
+recorded in both. Read that file rather than this one for the finished picture.
+
+Two things it holds that belong beside the "recorded, not repaired" list above, because they
+are the same kind of item — real, verified, and deliberately **not** this change's to fix:
+
+- **Roughly ten more `tests/degraded-coverage.toml` rows are bound to unrelated code.** The
+  review sampled the full 72 and found the same shape as the `Herdr socket unreachable` row:
+  a `covers` range that is instrumented and hot, so both checks pass, while naming code that
+  never exercises the row's own condition — a `fold_glyph` signature under the "No
+  `openspec/` found" row, `task_number_len`'s signature under "Tasks file exists but cannot
+  be read". This change fixed the two rows it had itself disturbed (the socket row, and the
+  clipboard row that group 7's `maybe_resolve_kind` drifted underneath) and left the rest.
+- **The whole coverage tier is unreachable for the duration of every outside-in change.**
+  `make check` is `fmt-check lint gates test coverage`, so a red outer-loop acceptance test —
+  which is the normal state of an outside-in change from its first task to its last — aborts
+  before `coverage-prod.py` ever runs, locally and in CI alike. The only in-`cargo test`
+  stand-in accepts any range whose first non-comment line is non-empty, which a struct field
+  declaration satisfies. That is how the socket row stayed broken across seven groups.
+
+Both are scoped in `notes/change-review.md` to a follow-up change, working name
+`coverage-tier-hardening`, to propose after this one archives. Neither is a defect in this
+change's own work, and folding either into task 12.2 would have widened the diff into
+capabilities `settings-window` does not touch.
