@@ -31,7 +31,16 @@ and no key pressed while it is open changes anything the pane shows underneath i
 a collaborator, spawns a process, touches the filesystem, or reads a clock.
 
 The overlay SHALL be a **layer**, not a route. `Dashboard::route` SHALL remain an enum of
-exactly `List` and `Detail`, and opening the overlay SHALL NOT change it. The precedent is
+exactly `List` and `Detail`, and opening the overlay SHALL NOT change it.
+
+`settings-window` gives that layer a **second panel**, and the help overlay becomes one of
+two rather than the only one. The layer's state is `overlay: Overlay` carrying
+`panel: Option<Panel>`, so what this requirement called `help.open` being true is
+`overlay.panel` being `Some(Panel::Help)`; nothing else about it moves. `ToggleSettings`
+pressed while the help panel is open SHALL swap the panel to `Settings` and reset
+`overlay.scroll` to `0`, and `ToggleHelp` pressed while the settings panel is open SHALL swap
+it back on the same terms. The two SHALL NOT stack: there is no representable state in which
+both are open. The precedent is
 `filter.active`, which is likewise a mode that changes what keys mean without being a
 route, and the reason is the same: closing the overlay must return the reader to the
 route they were on, which a third `Route` variant would have to remember separately.
@@ -68,8 +77,8 @@ one `Esc` away.
 
 - **WHEN** a `Dashboard` at `Route::Detail` with `detail.tab` `2`, `detail.scroll` `7`,
   and `selected` `3` is given `ToggleHelp`, then `ToggleHelp` again
-- **THEN** after the first, `help.open` is true and `help.scroll` is `0`
-- **AND** after the second, `help.open` is false and `help.scroll` is `0`
+- **THEN** after the first, `overlay.panel` is `Some(Panel::Help)` and `overlay.scroll` is `0`
+- **AND** after the second, `overlay.panel` is `None` and `overlay.scroll` is `0`
 - **AND** `route` is `Detail`, `detail.tab` is `2`, `detail.scroll` is `7`, and `selected`
   is `3` after both, so the reader returns to exactly the frame they left
 - **AND** `changes`, `filter`, `quit`, `refresh`, `agents`, `agent_names`, `launch`, and
@@ -78,14 +87,23 @@ one `Esc` away.
 #### Scenario: `Esc` closes the overlay before any other layer
 
 - **WHEN** a `Dashboard` at `Route::Detail` whose `filter.query` is `add`, whose
-  `filter.active` is true, and whose `help.open` is true is given four consecutive `Back`
+  `filter.active` is true, and whose `overlay.panel` is `Some(Panel::Help)` is given four consecutive `Back`
   actions
-- **THEN** after the first, `help.open` is false and `filter.active` is **still true**
+- **THEN** after the first, `overlay.panel` is `None` and `filter.active` is **still true**
   with the query still `add` — the overlay is the outermost layer and `Back` dismisses
   exactly one
 - **AND** after the second, `filter.active` is false and `filter.query` is empty; after
   the third, `route` is `List`; after the fourth, nothing has changed
 - **AND** `quit` is false after all four
+
+#### Scenario: `?` and `,` swap panels rather than stacking them
+
+- **WHEN** a `Dashboard` at `Route::Detail` with `overlay.panel` `Some(Panel::Help)` and
+  `overlay.scroll` `6` is given `ToggleSettings`, then `ToggleHelp`, then `ToggleHelp`
+- **THEN** `overlay.panel` is `Some(Panel::Settings)`, then `Some(Panel::Help)`, then `None`
+- **AND** `overlay.scroll` is `0` after each of the first two, since the two panels have
+  unrelated row counts and a carried position would land the reader at an arbitrary row
+- **AND** `route`, `selected`, `detail`, `filter`, and `sections` are unchanged after all three
 
 ### Requirement: The overlay is a full-width band, vertically centred in the body
 
@@ -148,6 +166,14 @@ has no text — so no character of the frame beneath shows through a gap.
 
 ### Requirement: The overlay's row grammar is a rule row, groups, and a rule row
 
+**Reason**: `binding-inventory`'s own MODIFIED requirement in this change raises the
+inventory from six groups and thirty-two bindings to seven groups and thirty-seven — the
+seventh, `While settings is open`, is `settings-window`'s own addition — and this
+requirement's `content_rows` arithmetic is derived from those two figures. The live spec's
+**43** is therefore stale the moment this change lands; `openspec/specs/help-overlay/spec.md`
+carried no delta for it (change-review W10), so archiving without one would have landed
+three wrong numbers with no record of why they moved.
+
 The band's first row SHALL be `─ Help ` followed by `─` to the band's right edge, with
 `Help` in `palette::Role::RegionHeadingFocused` and every `─` in
 `palette::Role::RegionRule`.
@@ -173,9 +199,9 @@ descriptions of every group align in one column. A binding row whose text exceed
 band's width SHALL be truncated by `ui::layout::truncate_columns`, never sliced by byte
 or by `char`.
 
-For the inventory `binding-inventory` mandates — six groups, thirty-two bindings —
-`content_rows` is therefore **43**: thirty-two binding rows, six heading rows, and five
-blanks.
+For the inventory `binding-inventory` mandates — **seven** groups, **thirty-seven**
+bindings — `content_rows` is therefore **50**: thirty-seven binding rows, seven heading
+rows, and six blanks.
 
 #### Scenario: The grammar renders at 120 columns
 
@@ -324,27 +350,39 @@ close the overlay or the pane, because they are handled in `apply` and not in th
 - **AND** none of the three panics, and none depends on anything the view computed, since
   `apply` never receives a `Rect`
 
-### Requirement: The overlay answers seven actions and ignores every other one
+### Requirement: The help panel answers eight actions and ignores every other one
 
-While `help.open` is set, `Dashboard::apply` SHALL dispatch as follows, and this dispatch
+While `overlay.panel` is `Some(Panel::Help)`, `Dashboard::apply` SHALL dispatch as follows, and this dispatch
 SHALL take precedence over the route dispatch and over the filter dispatch alike:
 
 | Action | Effect while the overlay is open |
 |---|---|
 | `Quit` | quit, exactly as when it is closed |
-| `ToggleHelp` | close the overlay and reset `help.scroll` to `0` |
-| `Back` | close the overlay and reset `help.scroll` to `0` |
-| `Next`, `ScrollDown` | move `help.scroll` down one line |
-| `Prev`, `ScrollUp` | move `help.scroll` up one line, saturating at `0` |
+| `ToggleHelp` | close the overlay and reset `overlay.scroll` to `0` |
+| `ToggleSettings` | swap the panel to `Settings` and reset `overlay.scroll` to `0` |
+| `Back` | close the overlay and reset `overlay.scroll` to `0` |
+| `Next`, `ScrollDown` | move `overlay.scroll` down one line |
+| `Prev`, `ScrollUp` | move `overlay.scroll` up one line, saturating at `0` |
 | every other action | change nothing at all |
 
 "Every other action" is the closed remainder: `OpenDetail`, `SelectTab`, `NextTab`,
 `PrevTab`, `FilterStart`, `FilterPush`, `FilterPop`, `Refresh`, `LaunchApply`,
 `LaunchContinue`, `LaunchArchive`, `FocusAgent`, `ToggleSection`, `SelectNext`,
-`SelectPrev`, `Click`, and `Ignore`. Eighteen actions, and none of them does anything
-while the overlay is open. Seven answer — `Quit`, `ToggleHelp`, `Back`, `Next`, `Prev`,
-`ScrollDown`, `ScrollUp` — and eighteen plus seven is the twenty-five `Action` carries after
-this change, so the two lists are exhaustive between them with nothing counted twice.
+`SelectPrev`, `Click`, `Select`, and `Ignore`. Eighteen actions — `Select` was missing from
+this enumeration while the count already said eighteen, a slip `text-selection` left behind
+and this change repairs in passing rather than reproduces — and none of them does anything
+while the help panel is open. **Eight** answer — `Quit`, `ToggleHelp`, `ToggleSettings`,
+`Back`, `Next`, `Prev`, `ScrollDown`, `ScrollUp` — and eighteen plus eight is the
+**twenty-six** `Action` carries after `settings-window`, so the two lists are exhaustive
+between them with nothing counted twice. The inert list is unchanged, member for member:
+`settings-window` added one action and it answers, so nothing moved from one list to the other.
+
+`ToggleSettings` answers rather than being inert, and it is the one answered action that
+neither closes nor scrolls: it **swaps** the panel. That is not a hole in "read-only".
+Swapping panels renders a different set of rows and reaches no collaborator, spawns no
+process, touches no filesystem, and reads no clock, which is exactly what the read-only rule
+names; and a `,` that did nothing from inside the help would be the same dead key the `Quit`
+exception exists to avoid.
 
 `LaunchApply`, `LaunchContinue`, `LaunchArchive`, and `FocusAgent` being inert is the
 load-bearing half of "read-only": `a`, `c`, `s`, and `g` reach Herdr and start a process,
@@ -364,7 +402,7 @@ open, unchanged. It is not an action's effect and the overlay does not suppress 
 #### Scenario: The agent keys launch nothing while the overlay is open
 
 - **WHEN** a `Dashboard` with `agents.reachable` true, a selected change `add-auth`, and
-  `help.open` true is given `LaunchApply`, `LaunchContinue`, `LaunchArchive`,
+  `overlay.panel` `Some(Panel::Help)` is given `LaunchApply`, `LaunchContinue`, `LaunchArchive`,
   `FocusAgent`, and `Refresh` in turn
 - **THEN** `launch.pending` is `None` and `launch.problems` is empty after all five
 - **AND** `refresh.requested` is false after all five, unless
@@ -378,37 +416,37 @@ open, unchanged. It is not an action's effect and the overlay does not suppress 
 
 #### Scenario: Both quit keys still quit from inside the overlay
 
-- **WHEN** a `Dashboard` with `help.open` true is given `Quit`
+- **WHEN** a `Dashboard` with `overlay.panel` `Some(Panel::Help)` is given `Quit`
 - **THEN** `quit` is true
-- **AND** the same holds for a dashboard whose `help.open` is true and whose
+- **AND** the same holds for a dashboard whose `overlay.panel` is `Some(Panel::Help)` and whose
   `filter.active` is also true, so no combination of layers traps the reader
 
 #### Scenario: The overlay swallows every inert action
 
 - **WHEN** a `Dashboard` at `Route::List` with six active changes, `selected` `2`,
-  `detail.tab` `1`, and `help.open` true is given `OpenDetail`, `SelectTab(3)`,
+  `detail.tab` `1`, and `overlay.panel` `Some(Panel::Help)` is given `OpenDetail`, `SelectTab(3)`,
   `NextTab`, `PrevTab`, `FilterStart`, `FilterPush('a')`, `FilterPop`, `ToggleSection`,
   `SelectNext`, `SelectPrev`, and `Click(Target::Change(0))` in turn
 - **THEN** `route` is still `List`, `selected` is still `2`, `detail.tab` is still `1`,
   `filter.query` is still empty, `filter.active` is still false, and `sections` is
   unchanged
-- **AND** `help.open` is still true and `help.scroll` is still `0` after all eleven
+- **AND** `overlay.panel` is still `Some(Panel::Help)` and `overlay.scroll` is still `0` after all eleven
 
 #### Scenario: `j` and `k` scroll the overlay rather than the frame beneath
 
 - **WHEN** a `Dashboard` at `Route::Detail` with `detail.scroll` `4`, `selected` `1`, and
-  `help.open` true is given `Next`, `Next`, `Next`, then `Prev`
-- **THEN** `help.scroll` is `3` after the third and `2` after the fourth
+  `overlay.panel` `Some(Panel::Help)` is given `Next`, `Next`, `Next`, then `Prev`
+- **THEN** `overlay.scroll` is `3` after the third and `2` after the fourth
 - **AND** `detail.scroll` is still `4` and `selected` is still `1` after all four
 - **AND** the same dashboard at `Route::List` given the same four actions moves
-  `help.scroll` identically and leaves `selected` at `1`, so the overlay's scroll is
+  `overlay.scroll` identically and leaves `selected` at `1`, so the overlay's scroll is
   route-agnostic where `Next` and `Prev` are not
-- **AND** `Prev` applied to a dashboard whose `help.scroll` is `0` leaves it `0` rather
+- **AND** `Prev` applied to a dashboard whose `overlay.scroll` is `0` leaves it `0` rather
   than underflowing
 
 #### Scenario: The overlay lists the agent keys when the socket is unreachable
 
-- **WHEN** a `Dashboard` with `agents.reachable` **false** and `help.open` true is rendered at
+- **WHEN** a `Dashboard` with `agents.reachable` **false** and `overlay.panel` `Some(Panel::Help)` is rendered at
   120x40 and at 60x20, and again with `agents.reachable` **true**
 - **THEN** the two bands are byte-identical, cell for cell, style included, at both widths
 - **AND** both hold the `Agents` group with all four of `a`, `c`, `s`, and `g` and their
@@ -421,10 +459,20 @@ open, unchanged. It is not an action's effect and the overlay does not suppress 
 
 #### Scenario: `Action::Select` is inert while the overlay is open
 
-- **WHEN** `Dashboard::apply` is called with `Action::Select` at any phase while `help.open`
-  is set
+- **WHEN** `Dashboard::apply` is called with `Action::Select` at any phase while `overlay.panel`
+  is `Some(Panel::Help)`
 - **THEN** nothing changes: no selection is made, extended, or cleared, and nothing is copied
-- **AND** the inert list holds eighteen actions and the answered list seven, summing to the
-  twenty-five `Action` carries after this change
+- **AND** the inert list holds eighteen actions and the answered list eight, summing to the
+  twenty-six `Action` carries after `settings-window`
 - **AND** the mouse resolver never produces it there anyway, because a drag over the band
   already resolves to `Action::Ignore`
+
+#### Scenario: `,` swaps to the settings panel from inside the help
+
+- **WHEN** a `Dashboard` at `Route::Detail` with `overlay.panel` `Some(Panel::Help)` and
+  `overlay.scroll` `9` is given `ToggleSettings`
+- **THEN** `overlay.panel` is `Some(Panel::Settings)` and `overlay.scroll` is `0`
+- **AND** `route` is still `Detail` and `selected`, `detail`, `filter`, and `sections` are
+  unchanged, so the swap moved no part of the frame beneath
+- **AND** no collaborator was reached, no process spawned, and no file read, so the swap is
+  read-only in the same sense the rest of this requirement is

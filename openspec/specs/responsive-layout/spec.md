@@ -1144,13 +1144,16 @@ requirement names it only so the two are not read as disagreeing.
 - **AND** the render tests above assert a cell's colour by comparing it against
   `palette::style(role)` rather than against a literal
 
-### Requirement: The help overlay is a full-body-width band the layout computes
+### Requirement: The overlay is a full-body-width band the layout computes
 
-`ui::layout` SHALL gain one function, and it SHALL be the only place the overlay's
-geometry is decided:
+`ui::layout` SHALL carry one function, and it SHALL be the only place **either** overlay
+panel's geometry is decided. `help-overlay` introduced it as `help_band`; this change renames
+it to `overlay_band` and adds no second geometry, because a settings panel with a band of its
+own would be two rectangles to keep centred, two sets of degenerate-frame tests, and two
+places for the footer-row rule to be got wrong:
 
 ```rust
-pub fn help_band(body: Rect, content_rows: usize) -> Rect;
+pub fn overlay_band(body: Rect, content_rows: usize) -> Rect;
 ```
 
 It SHALL be pure and total: no I/O, no clock, no panic for any `Rect` including a
@@ -1162,6 +1165,11 @@ It SHALL return a rectangle whose `x` and `width` are the **body's own**, whose 
 is `min(content_rows + 2, body.height)`, and whose `y` is
 `body.y + (body.height - height) / 2`. The band therefore runs the full width of the body,
 is vertically centred in it, and gives any odd remaining row to the space below it.
+
+Both panels SHALL use it, and `content_rows` SHALL be the only argument that differs between
+them: the help panel passes the rows its inventory grammar produces, the settings panel the
+rows `setting-provenance`' three settings produce. A panel SHALL NOT adjust `x`, `width`, or
+`y` for itself.
 
 The overlay SHALL NOT participate in the 100-column breakpoint. `split_body` decides one
 region or two and the overlay covers whichever it produced; there is no wide form and no
@@ -1179,9 +1187,13 @@ row SHALL render its hints unchanged while the overlay is open, so `? help` and 
 are both visible from inside it.
 
 `ui::layout::columns` and `ui::layout::truncate_columns` SHALL remain the crate's only
-display-width measure, and `src/ui/help.rs` SHALL use them for the key column and for
-every truncation. `COLWIDTH`'s `PURE` list SHALL gain `src/ui/help.rs`, taking it from
-eight files to **nine**, and `NOIO-VIEW`'s from nine to **ten**.
+display-width measure, and `src/ui/help.rs` and `src/ui/settings.rs` SHALL use them for their
+key columns and for every truncation. `COLWIDTH`'s `PURE` list SHALL gain
+`src/ui/settings.rs`, taking it from nine files to **ten**, and `NOIO-VIEW`'s from ten to
+**eleven**. `src/settings.rs` — the pure module `setting-provenance` adds — sits outside
+`src/ui/` and moves neither count, on exactly `src/specs.rs`' and `src/integration.rs`' terms;
+the cost of that placement is that no `make gates` script sweeps it, so its freedom from I/O
+is a `tests/doc_contract.rs` claim over its production slice instead.
 
 `ui::help`'s own both-widths rule SHALL be **mechanized**, not merely mandated. Every other
 view module in the crate has a width gate of its own — `detailwidths.sh`, `listwidths.sh`,
@@ -1227,7 +1239,7 @@ The floor SHALL therefore be the measured number of `src/ui/help.rs` tests that 
 
 #### Scenario: The band's rectangle at both mandated widths
 
-- **WHEN** `help_band` is called with the body a 120x40 frame produces — `x` 0, `y` 0,
+- **WHEN** `overlay_band` is called with the body a 120x40 frame produces — `x` 0, `y` 0,
   `width` 120, `height` 39 — and `content_rows` of 42
 - **THEN** it returns `x` 0, `width` 120, `height` 39, and `y` 0: the content needs 44
   rows and the body holds 39, so the band fills it
@@ -1238,7 +1250,7 @@ The floor SHALL therefore be the measured number of `src/ui/help.rs` tests that 
 
 #### Scenario: The band is total over degenerate and extreme rectangles
 
-- **WHEN** `help_band` is called with a zero-width body, a zero-height body, a 1x1 body, a
+- **WHEN** `overlay_band` is called with a zero-width body, a zero-height body, a 1x1 body, a
   120x1 body, a 120x2 body, a body at `u16::MAX` width and height, and `content_rows` of
   `0`, `1`, `42`, and `usize::MAX` against each
 - **THEN** no call panics, overflows, or underflows
@@ -1249,9 +1261,36 @@ The floor SHALL therefore be the measured number of `src/ui/help.rs` tests that 
 
 #### Scenario: The overlay does not move the breakpoint
 
-- **WHEN** a dashboard with `help.open` true is rendered at 120x40 and at 60x20, and
+- **WHEN** a dashboard with `overlay.panel` `Some(Panel::Help)` is rendered at 120x40 and at 60x20, and
   `split_body` is called for each
 - **THEN** `split_body` returns the two-region result at 120 and the one-region result at
-  60, byte-identical to what it returns for the same dashboard with `help.open` false
+  60, byte-identical to what it returns for the same dashboard with `overlay.panel` `None`
 - **AND** the band's `x` and `width` equal the body's at both, so the overlay spans both
   regions and the divider column at 120 rather than sitting inside one of them
+
+#### Scenario: Both panels are centred by the one function
+
+- **WHEN** `overlay_band` is called with a 120x40 frame's body — `x` 0, `y` 0, `width` 120,
+  `height` 39 — and `content_rows` of `42` (a scenario-local figure exceeding the body's own
+  height, to prove the overflow leg below — not the help panel's own inventory count, which
+  is `50`), and again with
+  `content_rows` of `7` (the settings panel's heading row plus its **three** settings' six
+  rows)
+- **THEN** the first returns `height` 39 and `y` 0, filling the body it cannot fit in
+- **AND** the second returns `height` 9 and `y` 15, centred with the odd row below it
+- **AND** both return `x` 0 and `width` 120, so neither panel narrows the band for itself
+- **AND** at 60x20, where the body's `height` is 19, the same two calls return `height` 19 /
+  `y` 0 and `height` 9 / `y` 5
+
+#### Scenario: The settings panel gets its own both-widths gate
+
+- **WHEN** `scripts/gates/settingswidths.sh` is run against the tree at the end of this change
+- **THEN** it exits zero and reports the number of `src/ui/settings.rs` tests asserting at both
+  60 and 120 columns, against a floor measured from that tree
+- **AND** it exits non-zero against a copy in which a test asserting at both widths is narrowed
+  to 120 alone, and against one in which the module's tests are removed
+- **AND** `tests/gate-controls.toml` binds it to a planted defect, so a `settingswidths.sh`
+  neutered to `exit 0` fails `cargo test` rather than passing `make gates` quietly
+- **AND** `scripts/gates/` holds one more file than before, and both
+  `openspec/specs/quality-gates/spec.md`'s stated count and `tests/ci_workflow.rs`' equality
+  against it are raised by one in the same change

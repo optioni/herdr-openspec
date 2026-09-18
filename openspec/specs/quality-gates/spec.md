@@ -141,7 +141,7 @@ invariant: `NOSPAWN-GREP`, `NOJSON-SEAM`, `NOCLI-SHELL`, `READSEAM`, `MDSEAM`, `
 `TASKWIDTHS`, `DETAILWIDTHS`, `NODEFAULT-UI`, `NOSLEEP`, `GATE-MECH1`, `COLWIDTH`, `PALETTE`,
 and `HELPWIDTHS`, plus
 `OPENSPEC-UNTOUCHED`'s `BASE`-free legs — twenty-nine, which with `deps.sh` and
-`build-graph.sh` is the **thirty-one** files this requirement's first scenario counts. **Two**
+`build-graph.sh` is the **thirty-two** files this requirement's first scenario counts. **Two**
 SHALL NOT be, and the reason is the same for both — neither guards a standing invariant, so
 neither can be run on an unmodified tree and pass. A third, `OPENSPEC-UNTOUCHED`, is split
 rather than excluded, and saying "three excluded gates" was the error that let its extracted
@@ -171,7 +171,7 @@ bare, and therefore run at a block default nobody chose. Where a gate has one su
 `Makefile` SHALL invoke it bare, and the floor SHALL NOT also appear on the recipe line.
 
 A gate with **more than one subject** — `LAUNCHSEAM` over `src/launch.rs` and `src/open.rs`,
-`NODEFAULT-UI` over its seven type sets — SHALL carry its subject-selecting variables on the
+`NODEFAULT-UI` over its nine type sets — SHALL carry its subject-selecting variables on the
 `Makefile` line. Where such a gate's floor is a **property of the subject** rather than of the
 gate, the floor SHALL accompany its subject there: `NODEFAULT-UI`'s span count differs by an
 order of magnitude between the `Dashboard` type set and the `Refresh` one, so a single default
@@ -188,7 +188,7 @@ Each script SHALL be hermetic and platform-portable: no network access beyond wh
 already needs to read `Cargo.lock`, no tool `make check` does not already require except
 `python3`, and no assertion whose truth depends on which of the two supported platforms it
 runs on. No extracted gate SHALL invoke `cargo` **except the two dependency gates**: measured,
-twenty-nine of the thirty-one are `grep`, `awk`, `sed`, `find`, and `python3` over the source
+thirty of the thirty-two are `grep`, `awk`, `sed`, `find`, and `python3` over the source
 tree and complete in under a second each, so composing them into `make gates` adds no
 meaningful time to `make check`. `deps.sh` (**eight** `cargo` invocation sites, ten calls on a
 default run because one is a loop over four target triples, sixteen under `DEPS_FULL=1` — the
@@ -231,7 +231,8 @@ worse outcome than the drift the sweep was hunting.
 
 - **WHEN** the repository tree is read at HEAD
 - **THEN** `scripts/gates/` holds `deps.sh`, `build-graph.sh`, and one file per extracted gate
-  — **thirty-one** in all, counting `openspec-untouched.sh` — each readable by `/bin/sh` or, for
+  — **thirty-two** in all, counting `openspec-untouched.sh` and `settingswidths.sh` — each
+  readable by `/bin/sh` or, for
   `GATE-MECH1`, by `python3`
 - **AND** the `Makefile`'s `gates` target invokes exactly those paths and no others, and no
   **live** file in the repository restates any of their commands. The copies under
@@ -250,13 +251,20 @@ worse outcome than the drift the sweep was hunting.
 - **WHEN** each extracted gate is run from the repository root with **no** environment prefix
 - **THEN** every one exits 0, and each `OK` line's reported count is greater than or equal to
   the floor it printed
-- **AND** running the same gate with its floor set one above the measured count exits
-  non-zero, which is what proves the floor is load-bearing rather than decorative
-- **AND** no floor appears in both a script's default and the `Makefile`'s recipe line. The
-  `Makefile` carries only what a subject genuinely requires: `LAUNCH`/`ENTRY` for
-  `LAUNCHSEAM`'s second subject, `SCAN_MIN`/`HOMEFILE`/`TYPES` for each of `NODEFAULT-UI`'s
-  seven, and `env -u GRAPH_WRITE` for `GRAPH-SNAP` — seven `SCAN_MIN` values and one `env -u`,
-  which the earlier wording "and nothing else" wrongly denied
+
+A floor that is load-bearing rather than decorative would make the same gate exit non-zero
+once its floor is set one above the measured count, and no floor is meant to appear in both
+a script's default and the `Makefile`'s recipe line — the `Makefile` carries only what a
+subject genuinely requires: `LAUNCH`/`ENTRY` for `LAUNCHSEAM`'s second subject,
+`SCAN_MIN`/`HOMEFILE`/`TYPES` for each of `NODEFAULT-UI`'s nine, and `env -u GRAPH_WRITE` for
+`GRAPH-SNAP` — nine `SCAN_MIN` values and one `env -u`, which the earlier wording "and
+nothing else" wrongly denied. **Neither of these two properties is exercised by an automated
+check in this repository** (change-review W11, softened from an unproven `THEN`/`AND` pair
+rather than left as a claim nothing verifies): `tests/ci_workflow.rs`'s correspondence check
+matches only `scripts/gates/<name>` tokens and never inspects an `env`/`SCAN_MIN` prefix, so
+both rest on each gate script's own logic and on review at extraction time, not on a probe
+`cargo test` runs. A future change that builds either probe folds it back into this
+scenario as a proven `THEN`/`AND`, rather than this one inventing it.
 
 #### Scenario: The three excluded gates are named, with reasons, where a reader will meet them
 
@@ -303,7 +311,7 @@ scenario contradict its own neighbour.
 
 - **WHEN** `tests/ci_workflow.rs` is run against the repository tree
 - **THEN** the number of files under `scripts/gates/` is asserted to equal a **literal** —
-  **thirty-one**, the figure this requirement's first scenario states — by an equality, not by
+  **thirty-two**, the figure this requirement's first scenario states — by an equality, not by
   a floor
 - **AND** the test does **not** read this document. `openspec/specs/` is written only by
   `openspec archive`, so an assertion over this file's text would be red for the whole apply
@@ -311,11 +319,21 @@ scenario contradict its own neighbour.
   The directory is bound to the test by machine; the test is bound to this sentence by its
   **failure message**, which SHALL name this file, this scenario, and both counts — because
   that message is the only thing standing between a developer who adds a gate and a developer
-  who bumps the literal to 32 and leaves this sentence at thirty-one
-- **AND** adding a thirty-second script under `scripts/gates/`, with its own `gates:` recipe
+  who bumps the literal and leaves this sentence behind it
+- **AND** adding a thirty-third script under `scripts/gates/`, with its own `gates:` recipe
   line so the existing correspondence assertions still pass, makes that test **fail**; the
   pre-existing `on_disk.len() >= 25` floor does not fire, which is why the equality is needed
 - **AND** deleting a script, again with its recipe line, fails it from the other side
+
+#### Scenario: The count moves with `settingswidths.sh` and both sites move together
+
+- **WHEN** `settings-window` adds `scripts/gates/settingswidths.sh` and its `gates:` recipe line
+- **THEN** `ls scripts/gates/ | wc -l` is **32**, and `STATED_GATE_SCRIPT_COUNT` in
+  `tests/ci_workflow.rs` is raised from 31 to 32 in the same change
+- **AND** the figure in this requirement moves with it, through this delta rather than by an
+  edit to `openspec/specs/`, which `OPENSPEC-UNTOUCHED`'s tracked-diff leg exists to refuse
+- **AND** `cargo test --test ci_workflow` passes only when the directory, the literal, and this
+  sentence all agree
 
 ### Requirement: The declared dependency set is checked against the argued set
 

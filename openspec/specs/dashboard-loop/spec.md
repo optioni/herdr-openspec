@@ -15,14 +15,15 @@ that region's capability; this specifies only the state, the dispatch, and the o
 
 ## Requirements
 
-### Requirement: Key handling is a pure, total function over events
+### Requirement: Key handling is a pure, total function over events, and the overlay layer dispatches first
 
 `ui::app::action_for(event: &Event, filtering: bool) -> Action` SHALL map a terminal event
-and the current filter mode to one of exactly **twenty-five** actions — `Quit`,
+and the current filter mode to one of exactly **twenty-six** actions — `Quit`,
 `OpenDetail`, `Back`, `Next`, `Prev`, `SelectNext`, `SelectPrev`, `ScrollDown`, `ScrollUp`,
 `Click(Target)`, `SelectTab(usize)`, `NextTab`, `PrevTab`, `FilterStart`,
 `FilterPush(char)`, `FilterPop`, `Refresh`, `LaunchApply`, `LaunchContinue`, `LaunchArchive`,
-`FocusAgent`, `ToggleSection`, `ToggleHelp`, `Select`, `Ignore` — and SHALL be total: every `Event`
+`FocusAgent`, `ToggleSection`, `ToggleHelp`, `ToggleSettings`, `Select`, `Ignore` — and SHALL be
+total: every `Event`
 value, including mouse, paste, focus-gained, focus-lost, and resize events, maps to one of
 them under either value of `filtering`, and none panics.
 
@@ -42,7 +43,8 @@ thirteen: `HANDOFF.md`'s Phase 5 constraint 8 read the count off a stale doc com
 `src/ui/app.rs` that still said "the nine outcomes" after four had been added. It moved to
 **eighteen** with `ToggleSection`, `list-sections`' one addition, to
 **twenty-three** with `mouse-input`'s five, moved to **twenty-four** with `help-overlay`'s one, `ToggleHelp`,
-and moves to **twenty-five** here, with `text-selection`'s one, `Select`.
+moved to **twenty-five** with `text-selection`'s one, `Select`, and moves to
+**twenty-six** here, with `settings-window`'s one, `ToggleSettings`.
 
 `SelectTab`, `NextTab`, and `PrevTab` are `detail-view`'s additions; `artifact-tabs` states
 their keys and their effect. They are route-agnostic in the same sense `Next` and `Prev`
@@ -66,6 +68,14 @@ accepted modifier values for one meaning: on a US layout `?` is `Shift`+`/` and 
 disagree about whether the shift modifier is reported beside the shifted character, so
 matching only `NONE` would make the key work on some terminals and not others.
 `help-overlay` owns what the action then does.
+
+`ToggleSettings` is `settings-window`'s addition and is route-agnostic in that same stronger
+sense: it opens the **same** layer `ToggleHelp` does, carrying the other panel, and leaves
+`route` alone. It moves no existing key — `Char(',')` was `Ignore` outside filter mode and
+`FilterPush(',')` inside it, and it stays `FilterPush(',')` inside it. Unlike `ToggleHelp` it
+is matched under `KeyModifiers::NONE` **only**: `,` is unshifted on every layout the pane
+targets, so the two-modifier allowance `?` needs — which exists because `?` *is* `Shift`+`/`
+and terminals disagree about reporting that shift — has no counterpart here. `settings-window` owns what the action then does.
 
 They are **four flat variants** rather than one variant carrying a payload. A payloaded
 `Launch(Intent)` would let `no_action_mutates_changes`' hand-written `variants` array carry one
@@ -126,13 +136,17 @@ character twice, refresh twice, or **launch a second agent**.
 - on `OpenDetail`, clear `filter.active` and change nothing else when `filter.active` is
   set — accepting a filter is not opening a detail — and otherwise set `route` to `Detail`
   and reset `detail.scroll` to `0`;
-- on `Back`, dismiss exactly one layer, in this order: **the help overlay when `help.open`
-  is set**, resetting `help.scroll` to `0`; else filter mode with its query when
+- on `Back`, dismiss exactly one layer, in this order: **the settings panel's edit when one
+  is in progress**, `settings-window`'s addition and the new innermost layer, leaving the
+  panel open and writing nothing; else **the overlay when `overlay.panel` is `Some`**,
+  resetting `overlay.scroll` to `0`; else filter mode with its query when
   `filter.active` is set; else a non-empty `filter.query`; else `route` back to `List`,
   resetting `detail.scroll` to `0`; else nothing at all, so a stray `Esc` at the root cannot
   close the pane. The overlay is `help-overlay`'s addition and is the **outermost** layer: it
   is drawn over everything else, so it is the first thing an `Esc` must take away, and a
-  reader who opened the help while filtering gets their query back rather than losing it.
+  reader who opened the help while filtering gets their query back rather than losing it. An
+  edit sits **inside** the overlay for the same reason the overlay sits inside the filter: it
+  is the innermost thing on screen, so it is the first thing an `Esc` takes away.
   `launch.problems` SHALL NOT be one of the layers: no key dismisses a launch problem, and the
   next launch outcome is what replaces it;
 - on `Next` and `Prev`, move and clamp `selected` per `list-selection` when `route` is
@@ -180,11 +194,17 @@ character twice, refresh twice, or **launch a second agent**.
   collaborator, spawn a process, touch the filesystem, or read a clock** — `apply` stays a pure
   function of `&mut self` and its argument, and `run_loop` is what turns `launch.pending` into a
   request to a collaborator that lives outside `src/ui/` entirely;
-- on `ToggleHelp`, set `help.open` to its negation and reset `help.scroll` to `0`,
-  changing nothing else at all — not `changes`, not `selected`, not `route`, not `detail`,
-  not `filter`, not `quit`, not `refresh`, not `agents`, not `agent_names`, not `launch`, and
-  not `sections` — and reaching no collaborator. `help-overlay` owns what the overlay then
-  renders;
+- on `ToggleHelp`, set `overlay.panel` to `Some(Panel::Help)` when it is `None` or
+  `Some(Panel::Settings)` and to `None` when it is already `Some(Panel::Help)`, resetting
+  `overlay.scroll` to `0`, changing nothing else at all — not `changes`, not `selected`, not
+  `route`, not `detail`, not `filter`, not `quit`, not `refresh`, not `agents`, not
+  `agent_names`, not `launch`, and not `sections` — and reaching no collaborator.
+  `help-overlay` owns what the overlay then renders;
+- on `ToggleSettings`, the mirror of the above with `Panel::Settings`, additionally clearing
+  any edit in progress and, **when the key opens the panel**, setting the one-shot flag
+  `run_loop` turns into a non-blocking `launch::Request::Resolve`. `apply` itself reaches no
+  collaborator, on exactly `launch.pending`'s terms: it records the intent and the loop sends
+  it. `settings-window` owns what the panel then renders;
 - change nothing on `Ignore`.
 
 **The overlay layer takes precedence over every dispatch above, and over every other
@@ -195,10 +215,14 @@ specified in several places — `detail-scroll` owns `ScrollDown`/`ScrollUp` and
 `agent-launch` owns the four launch actions. Several of those are worded "regardless of
 `route`", which remains true: the overlay is not a route. This clause binds all of them at
 once, so none needs a delta of its own and none is left contradicting the overlay after
-archive. A capability added later that owns an action inherits it without being edited. When `help.open` is set,
-`apply` SHALL dispatch per `help-overlay`'s table instead: `Quit` quits, `ToggleHelp` and
-`Back` close the overlay, `Next`/`ScrollDown` and `Prev`/`ScrollUp` move `help.scroll` by one
-line, and **every one of the other eighteen actions changes nothing at all**. The four
+archive. A capability added later that owns an action inherits it without being edited. When
+`overlay.panel` is `Some(Panel::Help)`, `apply` SHALL dispatch per `help-overlay`'s table
+instead: `Quit` quits, `ToggleHelp` and `Back` close the overlay, `ToggleSettings` swaps the
+panel, `Next`/`ScrollDown` and `Prev`/`ScrollUp` move `overlay.scroll` by one line, and
+**every one of the other eighteen actions changes nothing at all**. When `overlay.panel` is
+`Some(Panel::Settings)`, `apply` SHALL dispatch per `settings-window`'s rules instead, where
+`OpenDetail` and `Back` begin, commit, and cancel an edit and `Next`/`Prev` move the row
+cursor or the candidate. The four
 launch actions and `Refresh` being inert there is the load-bearing half of the overlay's
 read-only claim: a reader who opened the help to find out what `a` does must be able to press
 it without spawning an agent. `Quit` is the one action that still acts, because a modal that
@@ -298,13 +322,13 @@ is what restores that invariant, before the next draw rather than after it.
 #### Scenario: `Esc` dismisses one layer at a time
 
 - **WHEN** a `Dashboard` at `Route::Detail` whose `filter.query` is `add`, whose
-  `filter.active` is true, whose `help.open` is **false**, and whose `detail.scroll` is `3`
+  `filter.active` is true, whose `overlay.panel` is **`None`**, and whose `detail.scroll` is `3`
   is given four consecutive `Back` actions
 - **THEN** after the first, `filter.active` is false and `filter.query` is empty, and
   `detail.scroll` is still `3` — dismissing the filter layer is not leaving the route; after
   the second, `route` is `List` and `detail.scroll` is `0`; after the third and fourth,
   nothing has changed and `quit` is still false
-- **AND** the same dashboard with `help.open` **true** needs a fifth `Back` to reach the
+- **AND** the same dashboard with `overlay.panel` **`Some(Panel::Help)`** needs a fifth `Back` to reach the
   same end state: the first closes the overlay and leaves `filter.active` true with the
   query still `add`, and the remaining four behave exactly as the four above
 - **AND** a second `Dashboard` at `Route::List` whose `filter.query` is `add` with
@@ -373,10 +397,10 @@ is what restores that invariant, before the next draw rather than after it.
   `mouse-input` asserted returns exactly the same actions, so `?` gaining a meaning moved no
   existing key, and `filtering` true gains no row at all
 
-#### Scenario: The overlay layer suppresses every action but seven
+#### Scenario: The overlay layer suppresses every action but eight
 
 - **WHEN** a `Dashboard` at `Route::List` with `agents.reachable` true, six active changes,
-  `selected` `2`, `detail.tab` `1`, and `help.open` true is given each of `OpenDetail`,
+  `selected` `2`, `detail.tab` `1`, and `overlay.panel` `Some(Panel::Help)` is given each of `OpenDetail`,
   `SelectTab(3)`, `NextTab`, `PrevTab`, `FilterStart`, `FilterPush('a')`, `FilterPop`,
   `Refresh`, `LaunchApply`, `LaunchContinue`, `LaunchArchive`, `FocusAgent`, `ToggleSection`,
   `SelectNext`, `SelectPrev`, `Click(Target::Change(0))`, `Select`, and `Ignore` in turn
@@ -385,20 +409,27 @@ is what restores that invariant, before the next draw rather than after it.
   runs after every action and the overlay does not suppress it
 - **AND** in particular `launch.pending` is `None`, `launch.problems` is empty, no process was
   spawned, no file was read or written, and no clock was read
-- **AND** the same eighteen applied to the identical dashboard with `help.open` **false**
+- **AND** the same eighteen applied to the identical dashboard with `overlay.panel` **`None`**
   change it in the ways the bullets above require, so the suppression is the overlay's and not
   the dashboard's
+- **AND** the inert set is still exactly these eighteen after `settings-window`: the action it
+  adds, `ToggleSettings`, is **answered** rather than inert, so eighteen plus eight is the
+  twenty-six `Action` now carries
 
-#### Scenario: The overlay's seven live actions act and nothing else moves
+#### Scenario: The overlay's eight live actions act and nothing else moves
 
 - **WHEN** a `Dashboard` at `Route::Detail` with `detail.scroll` `4`, `selected` `1`, and
-  `help.open` true is given `Next`, `ScrollDown`, `Prev`, `ScrollUp`, and `Prev`
-- **THEN** `help.scroll` is `1`, `2`, `1`, `0`, and `0` after each, saturating at zero rather
-  than underflowing
+  `overlay.panel` `Some(Panel::Help)` is given `Next`, `ScrollDown`, `Prev`, `ScrollUp`, and
+  `Prev`
+- **THEN** `overlay.scroll` is `1`, `2`, `1`, `0`, and `0` after each, saturating at zero
+  rather than underflowing
 - **AND** `detail.scroll` is `4` and `selected` is `1` after all five, so the overlay's scroll
   is not the detail region's and not the list's
-- **AND** a sixth action, `Back`, sets `help.open` false and `help.scroll` `0`, and a seventh,
-  `Quit`, sets `quit` — both from inside the overlay
+- **AND** a sixth action, `Back`, sets `overlay.panel` `None` and `overlay.scroll` `0`, and a
+  seventh, `Quit`, sets `quit` — both from inside the overlay
+- **AND** an eighth, `ToggleSettings`, applied to the same dashboard sets `overlay.panel`
+  `Some(Panel::Settings)` and `overlay.scroll` `0` — `settings-window`'s addition to this
+  layer, and the reason the count is eight rather than seven
 
 #### Scenario: No key reaches `Select` at either filter mode
 
@@ -407,6 +438,17 @@ is what restores that invariant, before the next draw rather than after it.
 - **THEN** none returns `Action::Select`, so the mouse-only exemption is real rather than
   asserted
 - **AND** every other key returns exactly the action it returned before this change
+
+#### Scenario: `,` maps to `ToggleSettings` and moves no existing key
+
+- **WHEN** `action_for` is called with `filtering` false and a Press of `Char(',')` with
+  `KeyModifiers::NONE`
+- **THEN** it returns `ToggleSettings`
+- **AND** the same key with `SHIFT` and with `CONTROL`, and a Release and a Repeat of it, all
+  return `Ignore`
+- **AND** with `filtering` true it returns `FilterPush(',')`, so the key types into the query
+- **AND** every other key returns exactly the action it returned before this change, under
+  both values of `filtering`
 
 ### Requirement: The loop draws before it waits and stops when quit is set
 
@@ -832,47 +874,9 @@ quit check.
   because a selection move resets it — so the wheel reached `ScrollDown` and the key reached
   `Next`, and neither took the other's path
 
-### Requirement: A pointer-motion event does not trigger a draw
+### Requirement: `Dashboard` carries seventeen fields, none defaulted and none elided
 
-`ui::driver::run_loop` SHALL NOT draw, SHALL NOT call `Dashboard::sync_detail`, and SHALL
-NOT call `Dashboard::normalise_scroll` on the iteration following an `Event::Mouse` whose
-kind is `MouseEventKind::Moved` or `MouseEventKind::Drag(_)`, and SHALL NOT count such an
-iteration in `LoopSummary::frames`. It SHALL carry the previous drawn frame's `area`
-forward, so a click arriving after any number of motion events still resolves against the
-frame that is on screen.
-
-This rule exists because mapping the event to `Action::Ignore` cannot prevent the draw: the
-draw happens at the top of the iteration, before the event is read. Crossterm's
-`EnableMouseCapture` writes `?1003h` — any-event tracking — so a terminal reports every
-pointer move whether the pane wants it or not, and without this rule moving a pointer across
-a Herdr split would re-render the whole detail document once per motion event.
-
-The rule SHALL be confined to pointer motion. An ignored **key** SHALL still redraw, exactly
-as `An ignored key redraws and keeps waiting` requires; a wheel event, a button press, a
-button release, a resize, a focus change, a paste, and a timeout SHALL all still draw.
-
-#### Scenario: Pointer motion does not cost a frame
-
-- **WHEN** `run_loop` is driven at 120x40 with a scripted source yielding twenty
-  `MouseEventKind::Moved` events at varying coordinates, then `q`
-- **THEN** `LoopSummary::frames` is `1` — the frame drawn before the first event was read —
-  and `LoopSummary::polls` is `21`
-- **AND** the same run with twenty `MouseEventKind::Drag(MouseButton::Left)` events reports
-  the same counts
-- **AND** the same run with twenty `Char('z')` presses — an ignored key — reports `frames`
-  `21`, so the exemption is scoped to pointer motion and did not become a general
-  ignore-means-no-draw rule
-
-#### Scenario: A click after motion still resolves against the drawn frame
-
-- **WHEN** `run_loop` is driven at 120x40 with five `Moved` events and then a left press on
-  the second change row, then `q`
-- **THEN** the press selects that row, exactly as it does with no motion events before it
-- **AND** the frame count is `2`: one before the first event, one after the press
-
-### Requirement: `Dashboard` carries sixteen fields, none defaulted and none elided
-
-`ui::app::Dashboard` SHALL carry exactly **sixteen** fields: `repo: Option<PathBuf>` — the
+`ui::app::Dashboard` SHALL carry exactly **seventeen** fields: `repo: Option<PathBuf>` — the
 repository root when one was found; `searched_from: PathBuf` — the directory the walk began
 at, rendered by `change-rows`' no-repository state; `changes: changes::ChangeSet`;
 `route: Route`, an enum of `List` and `Detail`; `quit: bool`, set by the quit action;
@@ -888,9 +892,36 @@ detail region's state defined by `detail-scroll`, `artifact-tabs`, and `artifact
 `agent_names: state::Mapping`, the plugin-local agent-name mapping defined by
 `plugin-state` and consumed by `agent-attribution`'s first tier; `launch: Launch`, the
 launch tier's state defined by `agent-launch`; `file_mode: bool`, `degraded-states`'
-addition; `help: Help`, the help overlay's layer state defined by `help-overlay`,
-`help-overlay`'s one addition to this type; and `selection: Option<Selection>`,
-`text-selection`'s one addition.
+addition; `overlay: Overlay`, the overlay layer's state defined by `help-overlay` and
+`settings-window` — `help-overlay`'s one addition to this type, renamed from `help: Help`
+and generalised here to carry either panel; `selection: Option<Selection>`,
+`text-selection`'s one addition; and `settings: settings::PanelState`, `settings-window`'s one
+addition.
+
+`settings: settings::PanelState` is `settings-window`'s one addition to this type and the
+seventeenth field, carrying exactly two members: `rows: Vec<settings::Setting>` — what the
+panel renders, produced by `settings::settings` outside the render path — and `cursor: usize`,
+the row cursor over those rows.
+
+It is a field rather than a computation because the three inputs it needs are **not** on this
+type and two of them cannot be: `Config` and the `BinResolution` are read once at startup by
+the composition root, and the agent kind is resolved lazily on the launcher's worker thread,
+on the first `a`/`c`/`s` or on the first `,`. A view that derived the rows per frame would
+have to reach all three, which `NOIO-VIEW` forbids under `src/ui/`. The `FoundBin` reaches
+`ui::load` as a further parameter, which `setting-provenance` requires because `run_at` today
+moves the whole `BinResolution` into `cli::worker_cli` and keeps only its path. `rows` is therefore
+recomputed at exactly three moments — at startup, when the launcher's kind resolution is
+adopted, and on a commit — and read on every frame.
+
+`cursor` lives here rather than on `Overlay` because `overlay.scroll` already means "the first
+content row visible in the band", clamped by `ui::layout::scroll_offset`, and the settings
+panel needs a **selected setting**, whose window is derived with `ui::layout::viewport`
+instead. One field carrying both meanings would be two rules on one `usize`. It is a sibling
+of `overlay` rather than a member of it because it outlives the panel: closing and reopening
+`,` returns the reader to the setting they were on.
+
+This requirement's header moved from **sixteen** to seventeen, which is why it is replaced
+rather than modified: the count is in the header, and a MODIFIED block cannot change a header.
 
 `selection` is `None` when no span is selected and otherwise carries an anchor, a focus, and
 a granularity — armed, word, row, or span — and `problem: Option<String>`, the reason a
@@ -911,13 +942,20 @@ cleared by one. The clearing is a rule `text-selection` states, not an accident 
 field sits. `problem` lives here rather than on any existing `!`-marked list because every one of those —
 `launch.problems`, `refresh.problems`, `changes.problems`, `refresh.startup`,
 `agents.problem` — is replaced wholesale on its own producer's cadence and would drop a reason
-before the reader saw it, and because this requirement pins `Dashboard` at sixteen fields, so a
-dedicated field is not available. It is created and cleared at exactly the moments the reason
+before the reader saw it. It also argued that this requirement pinned `Dashboard` at sixteen
+fields, so a dedicated field was not available; `settings-window` takes the count to seventeen,
+which removes that second argument without touching the first — `problem` stays where
+`text-selection` put it because the `!`-marked lists would drop it, not because no field was
+available. It is created and cleared at exactly the moments the reason
 becomes and stops being true.
 
 It carries plain data — no trait, no handle, no thread — so the state value stays
 `Clone`, `PartialEq`, and constructible in a test, and it joins `NODEFAULT-UI`'s scanned sets
-on exactly `Filter`, `Refresh`, and `Launch`'s terms.
+on exactly `Filter`, `Refresh`, and `Launch`'s terms. `settings::PanelState`, `Setting`, and
+`KindResolution` join them on the same terms — the **structs** of `src/settings.rs`.
+`Provenance`, `Editable`, and `Reason` do **not**: they are enums, and the gate's positive
+control is anchored on `struct <T> {`. They are covered by an exhaustive `match` with no
+wildcard arm, on exactly `launch::Intent`'s terms.
 
 `file_mode` is true exactly when the `openspec` binary probe resolved no usable binary, so the
 pane's change list is file-sourced for the whole session and no CLI result will ever correct
@@ -955,16 +993,35 @@ watcher error on any iteration, and `ChangeSet::problems` is replaced wholesale 
 reader saw it. `pending` carries plain data — a `launch::Request` names no trait, no handle, and
 no thread — so the state value stays `Clone`, `PartialEq`, and constructible in a test.
 
-`ui::app::Help` is `help-overlay`'s addition and SHALL carry exactly **two** fields:
-`open: bool` — whether the overlay is drawn — and `scroll: usize` — the index of the first
-inventory row visible in its band, a user-controlled position on exactly `detail.scroll`'s
-terms and not derived geometry, clamped on every draw by
-`ui::layout::scroll_offset`. It is a `Dashboard` field and a **sibling** of `filter` rather
-than a third `Route` variant, for the reason `list-filtering` already established for
-`filter.active`: the overlay is a layer over whichever route is current, and closing it must
-return the reader to that route, which a `Route::Help` variant would have to remember
-separately. It carries plain data — no trait, no handle, no thread — so the state value stays
-`Clone`, `PartialEq`, and constructible in a test.
+`ui::app::Overlay` is `help-overlay`'s addition, renamed from `Help` and widened by
+`settings-window`, and SHALL carry exactly **three** fields: `panel: Option<Panel>` — which
+panel is drawn, where `Panel` is an enum of exactly `Help` and `Settings`, and `None` means
+no overlay; `scroll: usize` — the index of the first content row visible in its band, a
+user-controlled position on exactly `detail.scroll`'s terms and not derived geometry, clamped
+on every draw by `ui::layout::scroll_offset`; and `edit: Option<Edit>` — `settings-window`'s
+one addition, the edit in progress, `None` whenever none is.
+
+`panel` is an `Option<Panel>` rather than the two booleans the obvious reading of "a second
+overlay" would give, and that is the load-bearing choice: two booleans can both be true, and
+the state in which the help panel and the settings panel are both open is not one any code
+should have to handle. It cannot be represented. `open` is therefore gone as a field name and
+`overlay.panel.is_some()` is the question that replaces it.
+
+`edit` lives here rather than on `Panel::Settings` as a payload because an edit is state the
+reader creates and destroys while the panel stays put, and a payload on the panel variant
+would be rebuilt by every assignment to `panel`; and it lives on `Overlay` rather than on
+`Dashboard` because it is meaningless while no panel is open, which `Option` on the same
+struct keeps adjacent to the thing that makes it meaningful.
+
+It is a `Dashboard` field and a **sibling** of `filter` rather than a third `Route` variant,
+for the reason `list-filtering` already established for `filter.active`: the overlay is a
+layer over whichever route is current, and closing it must return the reader to that route,
+which a `Route::Help` variant would have to remember separately. It carries plain data — no
+trait, no handle, no thread — so the state value stays `Clone`, `PartialEq`, and
+constructible in a test. `Overlay` and `Edit` join `NODEFAULT-UI`'s scanned sets on exactly
+`Filter`, `Refresh`, and `Launch`'s terms; `Panel` does **not**, because it is an enum and the
+gate's positive control searches for `struct <T> {`. `Panel` is covered by an exhaustive
+`match` with no wildcard arm instead.
 
 `ui::app::Filter` SHALL carry exactly two fields: `query: String` and `active: bool`.
 `ui::app::Detail` SHALL carry exactly **seven** fields: `sections: Vec<ArtifactSection>`,
@@ -1030,8 +1087,9 @@ the attribution derived from all of it.
 through the state value, so `Dashboard` stays `Clone`, `PartialEq`, and constructible in a test
 with no thread and no filesystem.
 
-None of `Dashboard`, `Filter`, `Detail`, `Refresh`, `Launch`, `Help`, `help::Binding`, and
-`help::Group` SHALL implement `Default` —
+None of `Dashboard`, `Filter`, `Detail`, `Refresh`, `Launch`, `Overlay`, `Edit`,
+`help::Binding`, `help::Group`, `settings::PanelState`, `settings::Setting`, and
+`settings::KindResolution` SHALL implement `Default` —
 neither derived nor hand-written, anywhere in the crate — and every construction and every
 destructuring of any of them SHALL name every field, with no `..` rest, so a field added later
 fails to compile at each site rather than defaulting silently. The same SHALL hold for
@@ -1048,25 +1106,40 @@ enums, the check's positive control is anchored on `struct <T> {`, and an enum c
 swept list without breaking that control. What the check enforces about `Request` is the
 enclosing `Launch` literal, which must name `pending` explicitly at every site; what covers the
 enums themselves is an exhaustive `match` with no wildcard arm in the compile-time companions
-below. `help-overlay` adds **three** to the swept set — `Help` in `src/ui/app.rs`, which SHALL be
-named on that run's own `TYPES` list, taking it to `Dashboard Filter Detail Sections Help` and
-its `SCAN_MIN` from 206 to 308, and `help::Binding` and
-`help::Group`, which need one further parameterisation of the same script with `HOMEFILE` set to
-`src/ui/help.rs`. `make gates` runs `scripts/gates/nodefault-ui.sh` **six** times today
-(`grep -c nodefault-ui.sh Makefile` = 6, lines 45-50); this change makes it **seven**. The reason is `Binding`'s: it is thirty-two `'static` literals, which is
+below. `help-overlay` added **three** to the swept set — `Help` in `src/ui/app.rs`, named on
+that run's own `TYPES` list, and `help::Binding` and `help::Group`, which needed one further
+parameterisation of the same script with `HOMEFILE` set to `src/ui/help.rs`.
+
+Two corrections, made in passing under the rule Decision 9 states — a known-false sentence
+inside a block this change must copy anyway is repaired rather than reproduced. This paragraph
+said the script runs **six** times with `TYPES` `Dashboard Filter Detail Sections Help` at
+`SCAN_MIN` 206-to-308; at HEAD `grep -c nodefault-ui.sh Makefile` is **8**, and `Makefile:46`
+reads `SCAN_MIN=333 TYPES='Dashboard Filter Detail Sections Help Selection'`. `text-selection`
+added `Selection` and `agent-client-choice` added the eighth run without either reaching this
+sentence.
+
+`settings-window` renames `Help` to `Overlay` and adds `Edit`, so that first run's `TYPES` list
+becomes `Dashboard Filter Detail Sections Overlay Selection Edit`, and the script's run count
+goes from **eight** to **nine** with `setting-provenance`'s own `HOMEFILE=src/settings.rs` line.
+
+Only **structs** may join a `TYPES` list. `scripts/gates/nodefault-ui.sh`'s positive control is
+`grep -qE "struct[[:space:]]+$T[[:space:]]*\{"` against the `HOMEFILE`, so naming an enum there
+fails the control outright. `Overlay` and `Edit` are structs and join; `Panel` is an **enum**
+and SHALL NOT be added to any `TYPES` list. It is covered instead by an exhaustive `match` with
+no wildcard arm in the compile-time companions, on exactly `launch::Intent`'s terms. The reason is `Binding`'s: `INVENTORY` holds thirty-seven `'static` literals, which is
 exactly the shape a `..Default::default()` rest is tempting in, and a field added to it later
-would otherwise silently become the empty string at thirty-two sites at once.
+would otherwise silently become the empty string at thirty-seven sites at once.
 `change-model`'s existing gate does not reach any of these thirteen types: that gate is
 stated over `Change`, `ChangeSet`, `ArtifactRef`, and `Origin` in `src/changes.rs`, and none of
 these is one of those nor there.
 
 `src/ui/app.rs`, `src/ui/detail.rs`, `src/ui/help.rs`, `src/ui/layout.rs`, `src/ui/list.rs`,
-`src/ui/markdown.rs`, `src/ui/palette.rs`, `src/ui/tasks.rs`, `src/ui/view.rs`, and
-`src/ui/driver.rs` SHALL name
+`src/ui/markdown.rs`, `src/ui/palette.rs`, `src/ui/settings.rs`, `src/ui/tasks.rs`,
+`src/ui/view.rs`, and `src/ui/driver.rs` SHALL name
 no filesystem, process, environment, network, or standard-I/O API. Terminal work lives in
 `src/ui/terminal.rs`, event reading in `src/ui/event.rs`, and startup loading, the one
 artifact-read binding, the mapping read, and the composition root in `src/ui/mod.rs`; the
-**ten** files above are the pure side of the render seam. None of `agent-polling`,
+**eleven** files above are the pure side of the render seam. None of `agent-polling`,
 `agent-attribution`, and `agent-launch` added one — `src/watch.rs`, `src/refresh.rs`,
 `src/agents.rs`, and `src/launch.rs` sit outside `src/ui/` entirely, which is what kept this
 set and the `NOCLI-SHELL` set unchanged through all three;
@@ -1076,11 +1149,12 @@ its own spec — `NOIO-VIEW`'s `PURE` list of **nine** files — but did not car
 back into the sentence above, which still read **eight** and omitted the file; that drift is
 repaired here rather than left for the next reader to trip over. `help-overlay` adds
 `src/ui/help.rs`, the inventory and the overlay's renderer, taking the set to **ten** and
-`src/ui/` to **thirteen** `*.rs` files.
+`src/ui/` to **thirteen** `*.rs` files. `settings-window` adds `src/ui/settings.rs`, the
+settings panel's renderer, taking the set to **eleven** and `src/ui/` to **fourteen**.
 A view test that needs a real directory means logic leaked across that seam.
 
 `state::read` is a filesystem call and SHALL be named only in `src/ui/mod.rs` among the files
-under `src/ui/`, on exactly `tasks::read`'s terms below: the ten pure files SHALL
+under `src/ui/`, on exactly `tasks::read`'s terms below: the eleven pure files SHALL
 additionally be searched for `state::read`, so the one filesystem call an attribution renderer
 would plausibly reach for is caught by the same check rather than by nothing. `agent-launch`
 adds two more names to that same search for the same reason: `state::record`, which is the
@@ -1117,17 +1191,18 @@ The scenario's name is kept verbatim from `tui-shell` because a delta's scenario
 its merge key; its subject is unchanged and only the type list and the field count move.
 
 - **WHEN** every `*.rs` file under `src/` is searched, for each of the type names
-  `Dashboard`, `Filter`, `Detail`, `Refresh`, `Launch`, `Help`, `Binding`, `Group`, `Agent`,
-  `Listed`, `AgentSnapshot`,
-  `Attribution`, and `Outcome`, for `impl Default for <name>` — the target path-qualified or
+  `Dashboard`, `Filter`, `Detail`, `Refresh`, `Launch`, `Overlay`, `Edit`, `Binding`, `Group`,
+  `Agent`, `Listed`, `AgentSnapshot`, `Attribution`, `Outcome`, `PanelState`, `Setting`, and
+  `KindResolution`, for `impl Default for <name>` — the target path-qualified or
   bare — for a `Default` inside the `#[derive(...)]` immediately preceding `struct <name>`, and
   for a `..` appearing inside a `<name> { … }` literal or pattern, brace-matched from the
   opening `{` to its partner so a multi-line elision rustfmt spread over several lines is seen
-- **THEN** there is no match for any of the thirteen
+- **THEN** there is no match for any of the seventeen
 - **AND** the check fails when its positive-control file is absent, and it is paired with a
   positive control asserting that `src/ui/app.rs` **does** contain `struct Dashboard`,
-  `struct Filter`, `struct Detail`, `struct Refresh`, `struct Launch`, and `struct Help`,
-  anchored on both
+  `struct Filter`, `struct Detail`, `struct Refresh`, `struct Launch`, and `struct Overlay` —
+  `settings-window` renames `Help` to `Overlay`, and the control is anchored on the name, so
+  this rename is exactly the case the anchoring exists to catch — anchored on both
   sides so a rename fails the control rather than leaving every leg searching for a name that is
   no longer there
 - **AND** the control's file is a **parameter**, defaulting to `src/ui/app.rs`, and the check is
@@ -1163,16 +1238,16 @@ its merge key; its subject is unchanged and only the type list and the field cou
   same-line grep with the brace-matching pass named above. The companion is kept for what it
   genuinely does, below
 - **AND** a compile-time companion exists: a test destructures a `Dashboard` with an
-  exhaustive pattern naming all **sixteen** fields and no `..`, a companion destructures a
+  exhaustive pattern naming all **seventeen** fields and no `..`, a companion destructures a
   `Sections` naming its one field and no `..`, a second destructures a `Filter`
-  naming both, a third destructures a `Detail` naming all five and no `..`, a fourth
-  destructures a `Refresh` naming all **three** and no `..`, a fifth destructures a `Launch`
-  naming both and no `..` — `launch::Outcome`'s companion below naming its two fields after
-  `agent-launch`'s `problem` becomes `problems` — a sixth destructures an `Agent`
+  naming both, a third destructures a `Detail` naming all **seven** and no `..`, a fourth
+  destructures a `Refresh` naming all **four** and no `..`, a fifth destructures a `Launch`
+  naming all **three** and no `..` — `launch::Outcome`'s companion below naming its **four**
+  fields after `agent-launch`'s `problem` becomes `problems` — a sixth destructures an `Agent`
   naming all **eight**, a seventh destructures a `Listed` naming both, an eighth destructures
-  an `AgentSnapshot` naming all **three**, a ninth destructures an `Attribution` naming all
-  **three**, and a tenth destructures a `launch::Outcome` naming both, so adding a field breaks
-  the build at that site rather than passing a source grep that never saw it
+  an `AgentSnapshot` naming all **four**, a ninth destructures an `Attribution` naming all
+  **three**, and a tenth destructures a `launch::Outcome` naming all **four**, so adding a
+  field breaks the build at that site rather than passing a source grep that never saw it
 - **AND** two further compile-time companions cover the enums the sweep cannot reach: one
   matches a `launch::Intent` exhaustively over `Apply`, `Continue`, `Archive`, and `Focus` with
   no wildcard arm, and one matches a `launch::Request` exhaustively over `Launch` and `Focus`
@@ -1403,8 +1478,8 @@ its merge key; its subject is unchanged and only the type list and the field cou
 - **WHEN** every `*.rs` file under `src/` is searched for a `..` inside a `Dashboard { … }` or
   a `Sections { … }` literal or pattern, brace-matched from the opening `{` to its partner
 - **THEN** there is no match, so no construction site elides `file_mode` or `sections`
-- **AND** the compile-time companion destructures a `Dashboard` naming all **sixteen** fields
-  with no `..`, so a seventeenth breaks the build at that site, and a further companion
+- **AND** the compile-time companion destructures a `Dashboard` naming all **seventeen** fields
+  with no `..`, so an eighteenth breaks the build at that site, and a further companion
   destructures a `Sections` naming its one field
 - **AND** `impl Default for Dashboard` and `impl Default for Sections` appear nowhere in the
   crate, derived or hand-written
@@ -1418,3 +1493,59 @@ its merge key; its subject is unchanged and only the type list and the field cou
   afterwards and a freshly reloaded `detail`
 - **AND** the clearing happened at the site `text-selection` names, not as a side effect of
   `sync_detail` replacing `Detail`, which would leave the rule untested
+
+#### Scenario: `Dashboard` carries seventeen fields after the overlay is generalised
+
+- **WHEN** the compile-time companion that destructures `Dashboard` with an exhaustive
+  pattern naming all **seventeen** fields and no `..` rest is compiled against this change
+- **THEN** it compiles, names `overlay` where it named `help`, and names `settings`
+- **AND** a companion destructures `Overlay` with an exhaustive pattern naming all **three**
+  fields and no `..` rest
+- **AND** one matches `Panel` exhaustively over `Help` and `Settings` with no wildcard arm, so
+  a third panel added later fails to compile here rather than falling into a wrong branch
+
+#### Scenario: Both panels open is unrepresentable
+
+- **WHEN** `overlay.panel` is examined across a dashboard with no overlay, one with the help
+  panel, and one with the settings panel
+- **THEN** it is `None`, `Some(Panel::Help)`, and `Some(Panel::Settings)` respectively
+- **AND** there is no value of `Overlay` for which two panels are open, which is a property of
+  the type rather than of any code path that maintains it
+
+### Requirement: A pointer-motion event does not trigger a draw
+
+`ui::driver::run_loop` SHALL NOT draw, SHALL NOT call `Dashboard::sync_detail`, and SHALL
+NOT call `Dashboard::normalise_scroll` on the iteration following an `Event::Mouse` whose
+kind is `MouseEventKind::Moved` or `MouseEventKind::Drag(_)`, and SHALL NOT count such an
+iteration in `LoopSummary::frames`. It SHALL carry the previous drawn frame's `area`
+forward, so a click arriving after any number of motion events still resolves against the
+frame that is on screen.
+
+This rule exists because mapping the event to `Action::Ignore` cannot prevent the draw: the
+draw happens at the top of the iteration, before the event is read. Crossterm's
+`EnableMouseCapture` writes `?1003h` — any-event tracking — so a terminal reports every
+pointer move whether the pane wants it or not, and without this rule moving a pointer across
+a Herdr split would re-render the whole detail document once per motion event.
+
+The rule SHALL be confined to pointer motion. An ignored **key** SHALL still redraw, exactly
+as `An ignored key redraws and keeps waiting` requires; a wheel event, a button press, a
+button release, a resize, a focus change, a paste, and a timeout SHALL all still draw.
+
+#### Scenario: Pointer motion does not cost a frame
+
+- **WHEN** `run_loop` is driven at 120x40 with a scripted source yielding twenty
+  `MouseEventKind::Moved` events at varying coordinates, then `q`
+- **THEN** `LoopSummary::frames` is `1` — the frame drawn before the first event was read —
+  and `LoopSummary::polls` is `21`
+- **AND** the same run with twenty `MouseEventKind::Drag(MouseButton::Left)` events reports
+  the same counts
+- **AND** the same run with twenty `Char('z')` presses — an ignored key — reports `frames`
+  `21`, so the exemption is scoped to pointer motion and did not become a general
+  ignore-means-no-draw rule
+
+#### Scenario: A click after motion still resolves against the drawn frame
+
+- **WHEN** `run_loop` is driven at 120x40 with five `Moved` events and then a left press on
+  the second change row, then `q`
+- **THEN** the press selects that row, exactly as it does with no motion events before it
+- **AND** the frame count is `2`: one before the first event, one after the press

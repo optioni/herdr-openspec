@@ -164,7 +164,7 @@ character, a `X / Y` pair, a `Ctrl-<c>` form, a `<a>`–`<b>` digit range, and t
 
 ### Requirement: The inventory's groups and order are fixed and readable
 
-`INVENTORY` SHALL hold exactly **six** groups, in this order, with these titles and
+`INVENTORY` SHALL hold exactly **seven** groups, in this order, with these titles and
 these binding counts:
 
 | # | Title | `scope` | Bindings | What it covers |
@@ -172,11 +172,31 @@ these binding counts:
 | 1 | `Changes` | `List` | 5 | the list region at `Route::List` |
 | 2 | `Artifact` | `Detail` | 7 | the detail region at `Route::Detail` |
 | 3 | `Agents` | `Any` | 4 | the four keys that reach Herdr |
-| 4 | `Pane` | `Any` | 4 | the keys that name no region |
+| 4 | `Pane` | `Any` | 5 | the keys that name no region |
 | 5 | `While filtering` | `Filter` | 5 | the keys that keep a command meaning inside `/` |
 | 6 | `Mouse` | `Any` | 7 | the gestures `ui::driver::mouse_action` produces |
+| 7 | `While settings is open` | `Settings` | 4 | the keys the settings panel reinterprets |
 
-**Thirty-two** bindings in total, and the two counts that are not free are groups 5 and 6.
+**Thirty-seven** bindings in total, and the three counts that are not free are groups 5, 6,
+and 7.
+
+Group 4 SHALL hold **five**, not four, because `settings-window` adds `,` → `ToggleSettings`
+to the keys that name no region, beside `q`, `Ctrl-C`, `r`, and `?`.
+
+Group 7 SHALL hold **four** and is `settings-window`'s addition: `Enter` → `OpenDetail`,
+`Esc` → `Back`, `j / ↓` → `Next`, and `k / ↑` → `Prev`. Every one of its four actions is
+already named by an earlier group, which is exactly why the group is needed and exactly why
+it cannot be caught by the action-set check below: a set comparison cannot see a key whose
+*meaning changes* while its action stays the same. `Enter` opens a change at group 1 and
+begins or commits an edit here; `j` moves the list selection there and moves the row cursor
+or steps the candidate here. A reader who opens the help from inside the settings panel and
+finds only "Open the selected change" has been told something false about the key in front of
+them.
+
+`Scope` SHALL therefore gain a fifth variant, `Settings`, whose group-heading suffix is
+`settings panel`, beside `Any`, `List`, `Detail`, and `Filter`. It is a scope and not a
+seventh `Any` group for the same reason `Filter` is one: the bindings act this way only while
+that mode is on, and the heading is where the reader learns the condition.
 
 Group 5 SHALL hold **five**, not three, because `action_for`'s `filtering` table has exactly
 **six** non-typing rows (`src/ui/app.rs:1213-1225`): `Ctrl-C` → `Quit`, `Backspace` →
@@ -212,11 +232,11 @@ object to.
 #### Scenario: The inventory's shape is asserted, not described
 
 - **WHEN** `INVENTORY` is read
-- **THEN** it holds six groups whose titles, in order, are `Changes`, `Artifact`,
-  `Agents`, `Pane`, `While filtering`, and `Mouse`
+- **THEN** it holds seven groups whose titles, in order, are `Changes`, `Artifact`,
+  `Agents`, `Pane`, `While filtering`, `Mouse`, and `While settings is open`
 - **AND** their `scope` values, in order, are `List`, `Detail`, `Any`, `Any`, `Filter`,
-  and `Any`
-- **AND** their binding counts, in order, are 5, 7, 4, 4, 5, and 7, summing to 32
+  `Any`, and `Settings`
+- **AND** their binding counts, in order, are 5, 7, 4, 5, 5, 7, and 4, summing to 37
 - **AND** no group is empty, and no two groups share a title
 
 #### Scenario: `Space` and `Esc` each appear under their route
@@ -226,11 +246,14 @@ object to.
 - **THEN** there are exactly two `Space` bindings, one under a `Scope::List` group
   describing a list section and one under a `Scope::Detail` group describing a content
   section, and their descriptions differ
-- **AND** there are exactly two `Esc` bindings, one under a `Scope::Detail` group
-  describing the return to the change list and one under a `Scope::Filter` group
-  describing clearing the query, and their descriptions differ
-- **AND** both pairs name `Action::ToggleSection` and `Action::Back` respectively, so the
-  set check above counts each action once while the reader sees both routes
+- **AND** there are exactly **three** `Esc` bindings — `settings-window` adds the third,
+  under group 7's `Scope::Settings` — one under a `Scope::Detail` group describing the
+  return to the change list, one under a `Scope::Filter` group describing clearing the
+  query, and one under `Scope::Settings` describing cancelling the edit in progress or
+  closing the panel, and all three descriptions differ from one another
+- **AND** the `Space` pair names `Action::ToggleSection` and all three `Esc` bindings name
+  `Action::Back`, so the set check above counts each action once while the reader sees
+  every route or panel it appears at
 
 #### Scenario: Both quit keys have a row
 
@@ -239,7 +262,25 @@ object to.
 - **AND** both sit in the `Pane` group, whose `scope` is `Any`, and the action-set check
   still reports `Quit` once
 
-### Requirement: The inventory names every action the pane binds, and the sweep's totals live in its body
+#### Scenario: The settings group is present and names the reinterpreted keys
+
+- **WHEN** `INVENTORY` is inspected at the end of this change
+- **THEN** it holds seven groups, the seventh titled `While settings is open` with scope
+  `Scope::Settings` and exactly four bindings
+- **AND** their actions are `OpenDetail`, `Back`, `Next`, and `Prev`, and each description
+  names what the key does **in the panel** rather than what it does at a route
+- **AND** the `Pane` group holds five bindings, the fifth `,` → `ToggleSettings`
+- **AND** the seven group titles and their order are asserted by equality against a literal
+  list, so a group inserted or reordered fails rather than passing on a count alone
+
+#### Scenario: The settings group renders at both mandated widths
+
+- **WHEN** the help panel is rendered at 120x40 and at 60x20
+- **THEN** both frames hold the `While settings is open` heading with its `settings panel`
+  suffix, and all four of its rows
+- **AND** no row exceeds the band's width at either, measured by `ui::layout::columns`
+
+### Requirement: The inventory names every action the pane binds, and the sweep's totals and overlay states live in its body
 
 A test in `tests/doc_contract.rs` SHALL **derive** the set of actions the pane binds by
 executing `ui::app::action_for` and `ui::driver::mouse_action`, and SHALL require
@@ -273,8 +314,11 @@ The derivation SHALL be:
 3. `mouse_action` is called for every `MouseEventKind` the crate can receive, at every
    cell of a 120x40 frame and of a 60x20 frame, against a dashboard carrying active
    changes, archived changes, a selected change with several artifact tabs, and a
-   foldable artifact — once with `help.open` false and once with it true. Every
-   returned action's name is collected.
+   foldable artifact — once with `overlay.panel` `None`, once with `Some(Panel::Help)`,
+   and once with `Some(Panel::Settings)`. Every returned action's name is collected.
+   `settings-window` took this from two overlay states to **three**, and the third is not
+   redundant: it is the only state in which `mouse_action` produces
+   `Click(Target::Setting(_))`.
 4. The union of the two sets, less the **closed** exemption set below, SHALL equal the
    set of `action_name(binding.action)` over every binding in `INVENTORY`.
 
@@ -310,19 +354,21 @@ help.
 #### Scenario: The sweep's totals and the exemption set are pinned
 
 - **WHEN** the derivation above is run against the tree at the end of this change
-- **THEN** the swept union holds exactly twenty-five action names — the full `Action`
-  membership after `Select` is added
+- **THEN** the swept union holds exactly twenty-six action names — the full `Action`
+  membership after `ToggleSettings` is added
 - **AND** `FilterPush` and `Ignore` are the only two removed by the exemption set, and
   the exemption set is asserted to hold exactly those two names and to have length two
-- **AND** the remaining twenty-three equal the set `INVENTORY` names, so every action the
+- **AND** the remaining twenty-four equal the set `INVENTORY` names, so every action the
   pane can take from a key or a gesture has a row the reader can find
 
-#### Scenario: The sweep covers the mouse under both overlay states
+#### Scenario: The sweep covers the mouse under all three overlay states
 
-- **WHEN** step 3's sweep is run with `help.open` false and then with it true
+- **WHEN** step 3's sweep is run with `overlay.panel` `None`, then `Some(Panel::Help)`, then
+  `Some(Panel::Settings)`
 - **THEN** the first run yields **eight** names — `SelectNext`, `SelectPrev`, `ScrollDown`,
-  `ScrollUp`, `SelectTab`, `Click`, `Select`, and `Ignore` — and the second yields `ScrollDown`,
-  `ScrollUp`, `ToggleHelp`, and `Ignore`
+  `ScrollUp`, `SelectTab`, `Click`, `Select`, and `Ignore`; the second yields `ScrollDown`,
+  `ScrollUp`, `Back`, and `Ignore`; and the third yields `ScrollDown`, `ScrollUp`, `Back`,
+  `Click`, and `Ignore`
 - **AND** `SelectTab` is in the first set because `mouse_action` maps `Zone::DetailTab` through
   `detail::tab_at` to `Action::SelectTab` (`src/ui/driver.rs:235-245`), which is reachable only
   when the swept dashboard's selected change carries **several artifact tabs**. The fixture
@@ -330,8 +376,13 @@ help.
   yields six names and passes an equality written against six, while silently removing the
   mouse's tab-switching and detail-header coverage from this whole check. A future session
   that finds this assertion red must widen the fixture, never narrow the expected set
-- **AND** the union names `ToggleHelp`, so the click-outside dismissal `mouse-input`
-  adds is bound by this check and not only by its own scenarios
+- **AND** the second and third runs name `Back` and **not** `ToggleHelp`, which pins
+  `mouse-input`'s one correction: with two panels sharing a layer, a click outside the band
+  dismisses with `Back`, where `ToggleHelp` would have swapped panels instead of closing
+- **AND** `ToggleHelp` is still in the overall union, produced by `?` rather than by any
+  gesture, so no mouse row is owed for it
+- **AND** the third run is the only one naming `Click` alongside `Back`, which is the setting
+  row's own selection gesture
 
 #### Scenario: `Action::Select` has a `Mouse` row and no exemption
 
@@ -339,3 +390,12 @@ help.
 - **THEN** `Action::Select` appears in the swept union and in the set `INVENTORY` names
 - **AND** `EXEMPT_ACTIONS` still holds exactly `FilterPush` and `Ignore` and still has length
   two, so the drag gesture is documented rather than exempted
+
+#### Scenario: `ToggleSettings` has a `Pane` row and no exemption
+
+- **WHEN** the sweep is run against the tree at the end of this change
+- **THEN** `ToggleSettings` appears in the swept union and in the set `INVENTORY` names
+- **AND** `EXEMPT_ACTIONS` still holds exactly `FilterPush` and `Ignore` and still has length
+  two, so the new action is documented rather than exempted
+- **AND** deleting the `,` row from `INVENTORY` fails the test with a message naming
+  `ToggleSettings` as bound but not documented
