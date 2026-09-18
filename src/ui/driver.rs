@@ -87,12 +87,13 @@ pub enum LoopError {
 ///    replaced wholesale with it — never merged, independently of step 4,
 ///    so a refresh landing on the same iteration as a poll cannot discard
 ///    the poll (`agent-polling`).
-/// 6. `live.launcher.drain()`, if it answers, folds `Outcome::named` into
-///    `dashboard.agent_names.names` and replaces `dashboard.launch.problems`
-///    wholesale with `Outcome::problem` — `agent-launch`'s addition,
+/// 6. `live.launcher.drain()`, if it answers, hands the `Outcome` to
+///    `Dashboard::adopt_launch_outcome` — `agent-launch`'s addition,
 ///    trailing the iteration so a launch that has just recorded a mapping
 ///    is visible to the very next `attribution()` call, in the frame the
-///    draw below produces.
+///    draw below produces. `settings-window`'s addition: an outcome whose
+///    `picker` is set opens the settings panel on `agent_kind` from inside
+///    that same method.
 ///
 /// Every one of the six steps is non-blocking by the traits' contract, so
 /// the sequence adds no wait to the render path. See
@@ -171,6 +172,11 @@ pub fn run_loop<B: Backend, E: EventSource>(
             // terms — cheap (`Option<String>` clones a short row value), and the one input
             // `maybe_record_kind_commit` needs that `apply` may have just overwritten.
             let before_kind = dashboard.agent_kind_value();
+            // `settings-window`'s addition (the launcher seam group): read before `apply`
+            // runs, on `before_kind`'s own terms — `maybe_resolve_kind` needs the panel's
+            // state as it stood before this event to tell an *opening* `,` apart from one
+            // that closes it or from `,` pressed while it is already open.
+            let before_panel = dashboard.overlay.panel;
             // One action per event, and the quit check is unchanged: a mouse
             // event can neither apply two actions nor bypass it.
             let mouse_kind = match &event {
@@ -224,7 +230,19 @@ pub fn run_loop<B: Backend, E: EventSource>(
                 _ => action_for(&event, dashboard.filter.active),
             };
             dashboard.apply(action);
-            maybe_record_kind_commit(dashboard, before_kind, record_kind);
+            maybe_record_kind_commit(dashboard, before_kind.clone(), record_kind);
+            // `settings-window`'s addition (the launcher seam group): the same commit that
+            // just wrote `settings.toml` above also invalidates the launcher's session cache
+            // — both read `before_kind`, both compare it against `agent_kind_value()` after
+            // `apply`, and both therefore fire on exactly the same event, a commit, never on
+            // a cancelled edit, which never moves the row's value at all.
+            maybe_invalidate_kind_cache(dashboard, before_kind, live.launcher);
+            // `settings-window`'s addition: `,` opening the settings panel — from no panel or
+            // from the help panel, either transition lands on `Some(Panel::Settings)` — sends
+            // `Request::Resolve` so the worker's session cache gets populated (or is read)
+            // without a launch. Reached only on the transition **into** the panel: the
+            // settings panel's own `ToggleSettings` arm, which closes it, transitions out.
+            maybe_resolve_kind(dashboard, before_panel, live.launcher);
             if let Some(kind) = mouse_kind {
                 maybe_copy_selection(dashboard, kind, before_granularity, write);
             }
@@ -264,6 +282,51 @@ fn maybe_record_kind_commit(
     };
     if let Err(e) = record_kind(&kind) {
         dashboard.launch.problems = vec![e];
+    }
+}
+
+/// `settings-window`'s addition (the launcher seam group): call `Launcher::set_kind` exactly
+/// when the event `apply` just processed committed an edit of the `agent_kind` setting — on
+/// `maybe_record_kind_commit`'s own before/after terms, comparing `before` against
+/// `agent_kind_value()` taken again here. An edit that begins and is then cancelled with
+/// `Esc` never changes the row's value at all, so this never fires for it — the same rule
+/// that keeps `maybe_record_kind_commit` from writing `settings.toml` on a cancel keeps this
+/// from invalidating the launcher's cache on one either. See
+/// `specs/agent-launch/spec.md` -> "A committed kind takes effect without restarting the
+/// pane" and "A cancelled edit changes nothing the launcher sees".
+fn maybe_invalidate_kind_cache(
+    dashboard: &Dashboard,
+    before: Option<String>,
+    launcher: &mut dyn crate::launch::Launcher,
+) {
+    let after = dashboard.agent_kind_value();
+    if after == before {
+        return;
+    }
+    let Some(kind) = after else {
+        return;
+    };
+    launcher.set_kind(kind);
+}
+
+/// `settings-window`'s addition (the launcher seam group): send `Request::Resolve` exactly
+/// when the event `apply` just processed opened the settings panel — comparing
+/// `overlay.panel` before and after, on `maybe_record_kind_commit`'s own before/after terms.
+/// `,` opening the panel from no panel (`apply_route_action`) and `,` swapping into it from
+/// the help panel (`apply_help_action`) both transition into `Some(Panel::Settings)` and both
+/// fire this; the settings panel's own `ToggleSettings` arm, which **closes** it, transitions
+/// out of `Some(Panel::Settings)` and therefore never does. See
+/// `specs/agent-launch/spec.md` -> "A committed kind takes effect without restarting the
+/// pane" -> "Opening the panel resolves the kind once and launches nothing".
+fn maybe_resolve_kind(
+    dashboard: &Dashboard,
+    before: Option<crate::ui::app::Panel>,
+    launcher: &mut dyn crate::launch::Launcher,
+) {
+    let opened = before != Some(crate::ui::app::Panel::Settings)
+        && dashboard.overlay.panel == Some(crate::ui::app::Panel::Settings);
+    if opened {
+        launcher.request(crate::launch::Request::Resolve);
     }
 }
 
@@ -676,13 +739,12 @@ fn drive_live_tier(dashboard: &mut Dashboard, live: &mut Live<'_>) {
     // visible to the very next `attribution()` call, in the frame the draw below produces.
     // `seam-resilience`'s addition: `in_flight` is cleared here, whether the outcome is a
     // real answer or the launcher reporting its own worker dead — no further answer will
-    // ever come either way.
+    // ever come either way. `settings-window`'s addition: the fold itself moves to
+    // `Dashboard::adopt_launch_outcome`, a pure method on `Dashboard::adopt`'s own terms, so
+    // an outcome whose `picker` is set can open the settings panel from a unit test that
+    // never touches this loop at all.
     if let Some(outcome) = live.launcher.drain() {
-        dashboard.launch.in_flight = false;
-        if let Some((agent, change)) = outcome.named {
-            dashboard.agent_names.names.insert(agent, change);
-        }
-        dashboard.launch.problems = outcome.problems;
+        dashboard.adopt_launch_outcome(outcome);
     }
 }
 
@@ -3554,10 +3616,16 @@ mod tests {
             Some(crate::launch::Outcome {
                 named: None,
                 problems: vec!["split failed".to_string()],
+
+                picker: false,
+                resolution: None,
             }),
             Some(crate::launch::Outcome {
                 named: Some(("c-2fa-support".to_string(), "2fa-support".to_string())),
                 problems: Vec::new(),
+
+                picker: false,
+                resolution: None,
             }),
         ]);
         let mut live = crate::ui::driver::Live {
@@ -3635,10 +3703,16 @@ mod tests {
                         "/state/dir: Not a directory (os error 20)".to_string(),
                         "herdr agent prompt exited with code 1: agent is blocked".to_string(),
                     ],
+
+                    picker: false,
+                    resolution: None,
                 }),
                 Some(crate::launch::Outcome {
                     named: Some(("c-2fa-support".to_string(), "2fa-support".to_string())),
                     problems: Vec::new(),
+
+                    picker: false,
+                    resolution: None,
                 }),
             ]);
             let mut live = crate::ui::driver::Live {
@@ -3778,6 +3852,9 @@ mod tests {
             Some(crate::launch::Outcome {
                 named: None,
                 problems: vec!["herdr pane split exited with code 1: no space".to_string()],
+
+                picker: false,
+                resolution: None,
             })
         };
         let mut launcher =
@@ -3874,6 +3951,9 @@ mod tests {
             crate::testutil::ScriptedLauncher::new(vec![Some(crate::launch::Outcome {
                 named: Some(("add-auth".to_string(), "add-auth".to_string())),
                 problems: Vec::new(),
+
+                picker: false,
+                resolution: None,
             })]);
         let mut live2 = crate::ui::driver::Live {
             fs: &mut *fs,
@@ -3962,6 +4042,9 @@ mod tests {
             crate::testutil::ScriptedLauncher::new(vec![Some(crate::launch::Outcome {
                 named: None,
                 problems: vec![refusal.to_string()],
+
+                picker: false,
+                resolution: None,
             })]);
         let mut live = crate::ui::driver::Live {
             fs: &mut *fs,
@@ -4041,6 +4124,9 @@ mod tests {
             crate::testutil::ScriptedLauncher::new(vec![Some(crate::launch::Outcome {
                 named: None,
                 problems: vec!["the launcher's worker has stopped answering".to_string()],
+
+                picker: false,
+                resolution: None,
             })]);
         let mut live = crate::ui::driver::Live {
             fs: &mut *fs,
@@ -4066,6 +4152,216 @@ mod tests {
             dashboard.launch.problems,
             vec!["the launcher's worker has stopped answering".to_string()]
         );
+    }
+
+    /// `agent-launch` :: "A cancelled edit changes nothing the launcher sees" — an edit begun,
+    /// stepped to a second candidate, and cancelled with `Esc` must call neither
+    /// `Launcher::set_kind` nor `record_kind`: `maybe_invalidate_kind_cache` and
+    /// `maybe_record_kind_commit` both compare `agent_kind_value()` before and after the
+    /// event, and a cancelled edit never moves that value at all.
+    #[test]
+    fn a_cancelled_edit_changes_nothing_the_launcher_sees() {
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut dashboard = dashboard_with_change("/tmp/demo-repo", "add-auth", 1, 2);
+        dashboard.overlay.panel = Some(crate::ui::app::Panel::Settings);
+        dashboard.settings.rows = vec![
+            crate::settings::Setting {
+                key: "openspec_bin",
+                value: "openspec_bin-value".to_string(),
+                provenance: crate::settings::Provenance::Default,
+                editable: crate::settings::Editable::No {
+                    reason: crate::settings::Reason::SetOnce,
+                },
+            },
+            crate::settings::Setting {
+                key: "agent_kind",
+                value: "claude".to_string(),
+                provenance: crate::settings::Provenance::SoleIntegration,
+                editable: crate::settings::Editable::Kind {
+                    shortlist: vec!["claude".to_string(), "codex".to_string()],
+                },
+            },
+            crate::settings::Setting {
+                key: "prompts",
+                value: "prompts-value".to_string(),
+                provenance: crate::settings::Provenance::Default,
+                editable: crate::settings::Editable::No {
+                    reason: crate::settings::Reason::SetOnce,
+                },
+            },
+        ];
+        dashboard.settings.cursor = 1;
+
+        // `Enter` begins the edit at the committed value's own index (`claude`, index 0);
+        // `j` (`Action::Next`) steps the candidate to `codex`; `Esc` cancels rather than
+        // committing, leaving the panel open with no edit in progress.
+        let mut events = Script::new(vec![
+            Ok(Some(press(KeyCode::Enter, KeyModifiers::NONE))),
+            Ok(Some(press(KeyCode::Char('j'), KeyModifiers::NONE))),
+            Ok(Some(press(KeyCode::Esc, KeyModifiers::NONE))),
+            Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+        ]);
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut agents = crate::agents::none();
+        let mut launcher = crate::testutil::RecordingLauncher::new();
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+            agents: &mut *agents,
+            launcher: &mut launcher,
+        };
+        let record_called = std::cell::Cell::new(false);
+        run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| {
+                    record_called.set(true);
+                    Ok(())
+                },
+            },
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+
+        assert!(
+            launcher.kinds().is_empty(),
+            "set_kind must never be called for a cancelled edit"
+        );
+        assert!(
+            !record_called.get(),
+            "settings.toml must never be written for a cancelled edit"
+        );
+        assert_eq!(
+            dashboard.overlay.panel,
+            Some(crate::ui::app::Panel::Settings),
+            "Esc cancels the edit, not the panel"
+        );
+        assert_eq!(dashboard.overlay.edit, None);
+    }
+
+    /// `settings-window` :: "Opening the panel resolves the kind once and launches nothing" —
+    /// `maybe_resolve_kind`'s own positive case: `,` opening the settings panel sends exactly
+    /// one `Request::Resolve` and nothing else, on `Live<'_>`'s side of the seam.
+    #[test]
+    fn opening_the_settings_panel_sends_a_resolve_request() {
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut dashboard = dashboard_with_change("/tmp/demo-repo", "add-auth", 1, 2);
+        let mut events = Script::new(vec![
+            Ok(Some(press(KeyCode::Char(','), KeyModifiers::NONE))),
+            Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+        ]);
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut agents = crate::agents::none();
+        let mut launcher = crate::testutil::RecordingLauncher::new();
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+            agents: &mut *agents,
+            launcher: &mut launcher,
+        };
+        run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|_: &str| Ok(()),
+            },
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+
+        assert_eq!(
+            launcher.requests(),
+            vec![crate::launch::Request::Resolve],
+            "`,` opening the panel must send exactly one Resolve and nothing else"
+        );
+    }
+
+    /// The commit side of `a_cancelled_edit_changes_nothing_the_launcher_sees`: the same edit,
+    /// carried through with `Enter` instead of cancelled with `Esc`, must call
+    /// `Launcher::set_kind` with the committed value.
+    #[test]
+    fn committing_an_edit_calls_set_kind() {
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut dashboard = dashboard_with_change("/tmp/demo-repo", "add-auth", 1, 2);
+        dashboard.overlay.panel = Some(crate::ui::app::Panel::Settings);
+        dashboard.settings.rows = vec![
+            crate::settings::Setting {
+                key: "openspec_bin",
+                value: "openspec_bin-value".to_string(),
+                provenance: crate::settings::Provenance::Default,
+                editable: crate::settings::Editable::No {
+                    reason: crate::settings::Reason::SetOnce,
+                },
+            },
+            crate::settings::Setting {
+                key: "agent_kind",
+                value: "claude".to_string(),
+                provenance: crate::settings::Provenance::SoleIntegration,
+                editable: crate::settings::Editable::Kind {
+                    shortlist: vec!["claude".to_string(), "codex".to_string()],
+                },
+            },
+            crate::settings::Setting {
+                key: "prompts",
+                value: "prompts-value".to_string(),
+                provenance: crate::settings::Provenance::Default,
+                editable: crate::settings::Editable::No {
+                    reason: crate::settings::Reason::SetOnce,
+                },
+            },
+        ];
+        dashboard.settings.cursor = 1;
+
+        let mut events = Script::new(vec![
+            Ok(Some(press(KeyCode::Enter, KeyModifiers::NONE))),
+            Ok(Some(press(KeyCode::Char('j'), KeyModifiers::NONE))),
+            Ok(Some(press(KeyCode::Enter, KeyModifiers::NONE))),
+            Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+        ]);
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut agents = crate::agents::none();
+        let mut launcher = crate::testutil::RecordingLauncher::new();
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+            agents: &mut *agents,
+            launcher: &mut launcher,
+        };
+        let recorded = std::cell::RefCell::new(Vec::new());
+        run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            crate::ui::app::Seams {
+                read: &|_: &std::path::Path| Ok(String::new()),
+                write: &|_: &str| Ok(()),
+                record_kind: &|kind: &str| {
+                    recorded.borrow_mut().push(kind.to_string());
+                    Ok(())
+                },
+            },
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+
+        assert_eq!(launcher.kinds(), vec!["codex".to_string()]);
+        assert_eq!(recorded.into_inner(), vec!["codex".to_string()]);
     }
 
     #[test]

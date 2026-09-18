@@ -1949,6 +1949,41 @@ impl Dashboard {
         self.refresh.reload = true;
     }
 
+    /// `agent-launch`'s addition, generalised by `settings-window`: fold a `Launcher::drain`
+    /// answer into the dashboard, on `adopt`'s own "one pure method, called from the loop"
+    /// terms — `named` into `agent_names.names`, `problems` replacing `launch.problems`
+    /// wholesale, and `in_flight` cleared, all in the one step `ui::driver::drive_live_tier`
+    /// used to perform inline.
+    ///
+    /// `settings-window`'s addition: an outcome whose `picker` is set opens the settings
+    /// panel on the `agent_kind` row — `overlay.panel` becomes `Some(Panel::Settings)`,
+    /// `overlay.scroll` resets to `0`, and any edit in progress is cancelled, on exactly
+    /// `ToggleSettings`'s own swap terms, whichever panel (if any) was open before. Every
+    /// other outcome — a success, a failed call, a plain refusal, and `Request::Resolve`'s
+    /// own answer, whose `picker` is always unset — leaves `overlay` untouched entirely: not
+    /// only `panel`, but `scroll` and `edit` too. See `specs/agent-launch/spec.md` -> "An
+    /// ambiguous agent kind opens the settings panel instead of picking one".
+    pub fn adopt_launch_outcome(&mut self, outcome: crate::launch::Outcome) {
+        self.launch.in_flight = false;
+        if let Some((agent, change)) = outcome.named {
+            self.agent_names.names.insert(agent, change);
+        }
+        self.launch.problems = outcome.problems;
+        if outcome.picker {
+            self.overlay.panel = Some(Panel::Settings);
+            self.overlay.scroll = 0;
+            self.overlay.edit = None;
+            if let Some(index) = self
+                .settings
+                .rows
+                .iter()
+                .position(|row| row.key == "agent_kind")
+            {
+                self.settings.cursor = index;
+            }
+        }
+    }
+
     /// Resolve the selected tab's content through the injected reader,
     /// re-reading when the `(change directory, tab)` key has changed **or**
     /// `refresh.reload` was set. Total: never panics for any dashboard
@@ -2259,8 +2294,8 @@ mod tests {
     use crate::agents::{Agent, AgentStatus};
     use crate::changes::fixture;
     use crate::ui::app::{
-        Action, ArtifactSection, Dashboard, Detail, Filter, Refresh, Route, Sections, action_for,
-        artifact_section_label, is_spec_shaped, split_headings,
+        Action, ArtifactSection, Dashboard, Detail, Filter, Panel, Refresh, Route, Sections,
+        action_for, artifact_section_label, is_spec_shaped, split_headings,
     };
     use std::collections::BTreeMap;
 
@@ -2853,6 +2888,152 @@ mod tests {
                     assert_eq!(got, intent, "{action:?}")
                 }
                 other => panic!("expected Go(Launch), got {other:?}"),
+            }
+        }
+    }
+
+    /// The three-row fixture `adopt_launch_outcome`'s own tests need, with `agent_kind` at
+    /// index `1` — `settings::settings`'s own fixed order — so
+    /// `adopt_launch_outcome`'s cursor-repositioning has a row to find.
+    fn three_settings_for_launch_tests() -> Vec<crate::settings::Setting> {
+        vec![
+            crate::settings::Setting {
+                key: "openspec_bin",
+                value: "openspec_bin-value".to_string(),
+                provenance: crate::settings::Provenance::Default,
+                editable: crate::settings::Editable::No {
+                    reason: crate::settings::Reason::SetOnce,
+                },
+            },
+            crate::settings::Setting {
+                key: "agent_kind",
+                value: "the agent kind is still resolving".to_string(),
+                provenance: crate::settings::Provenance::Pending,
+                editable: crate::settings::Editable::No {
+                    reason: crate::settings::Reason::Resolving,
+                },
+            },
+            crate::settings::Setting {
+                key: "prompts",
+                value: "prompts-value".to_string(),
+                provenance: crate::settings::Provenance::Default,
+                editable: crate::settings::Editable::No {
+                    reason: crate::settings::Reason::SetOnce,
+                },
+            },
+        ]
+    }
+
+    /// `agent-launch` :: "The ambiguous outcome opens the settings panel on `agent_kind`".
+    #[test]
+    fn the_ambiguous_outcome_opens_the_settings_panel_on_agent_kind() {
+        let mut d = dashboard_for_attribution(
+            vec![fixture::active("add-auth", 1, 2)],
+            Vec::new(),
+            1,
+            Vec::new(),
+            BTreeMap::new(),
+        );
+        d.settings.rows = three_settings_for_launch_tests();
+        d.settings.cursor = 0;
+        d.launch.in_flight = true;
+        d.overlay.panel = None;
+        let before_route = d.route;
+        let before_selected = d.selected;
+        let before_detail = d.detail.clone();
+        let before_sections = d.sections.clone();
+
+        let outcome = crate::launch::Outcome {
+            named: None,
+            problems: vec![
+                "set agent_kind (claude, codex): more than one agent integration is installed"
+                    .to_string(),
+            ],
+            picker: true,
+            resolution: Some(crate::settings::KindResolution {
+                choice: crate::integration::Choice::Ambiguous {
+                    installed: vec!["claude".to_string(), "codex".to_string()],
+                },
+                installed: vec!["claude".to_string(), "codex".to_string()],
+            }),
+        };
+        d.adopt_launch_outcome(outcome);
+
+        assert_eq!(d.overlay.panel, Some(Panel::Settings));
+        assert_eq!(d.settings.cursor, 1, "the agent_kind row's own index");
+        assert_eq!(d.overlay.scroll, 0);
+        assert_eq!(d.overlay.edit, None);
+        assert_eq!(
+            d.launch.problems,
+            vec![
+                "set agent_kind (claude, codex): more than one agent integration is installed"
+                    .to_string()
+            ]
+        );
+        assert!(
+            !d.launch.in_flight,
+            "cleared on every outcome, this one included"
+        );
+        assert_eq!(d.route, before_route);
+        assert_eq!(d.selected, before_selected);
+        assert_eq!(d.detail, before_detail);
+        assert_eq!(d.sections, before_sections);
+    }
+
+    /// `agent-launch` :: "No other outcome touches the overlay" — a successful launch, a
+    /// failed call, a dead-worker-style refusal, and a `LastResort` warning, each adopted
+    /// against a `Dashboard` whose overlay is closed and again against one whose overlay
+    /// shows the help panel.
+    #[test]
+    fn no_other_outcome_touches_the_overlay() {
+        let outcomes = [
+            crate::launch::Outcome {
+                named: Some(("c-add-auth".to_string(), "add-auth".to_string())),
+                problems: Vec::new(),
+                picker: false,
+                resolution: None,
+            },
+            crate::launch::Outcome {
+                named: None,
+                problems: vec!["herdr pane split exited with code 1: no space".to_string()],
+                picker: false,
+                resolution: None,
+            },
+            crate::launch::Outcome {
+                named: None,
+                problems: vec!["the launcher's worker has stopped answering".to_string()],
+                picker: false,
+                resolution: None,
+            },
+            crate::launch::Outcome {
+                named: Some(("c-add-auth".to_string(), "add-auth".to_string())),
+                problems: vec![
+                    "no herdr agent integration is installed and no agent_kind is configured - \
+                     launching claude as a last resort"
+                        .to_string(),
+                ],
+                picker: false,
+                resolution: None,
+            },
+        ];
+        for outcome in outcomes {
+            assert!(!outcome.picker, "only Choice::Ambiguous sets picker");
+            for panel in [None, Some(Panel::Help)] {
+                let mut d = dashboard_for_attribution(
+                    vec![fixture::active("add-auth", 1, 2)],
+                    Vec::new(),
+                    1,
+                    Vec::new(),
+                    BTreeMap::new(),
+                );
+                d.settings.rows = three_settings_for_launch_tests();
+                d.overlay.panel = panel;
+                let before_overlay = d.overlay.clone();
+                d.adopt_launch_outcome(outcome.clone());
+                assert_eq!(
+                    d.overlay, before_overlay,
+                    "outcome {outcome:?} must not touch the overlay when it started at {panel:?}"
+                );
             }
         }
     }
