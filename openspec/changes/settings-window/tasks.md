@@ -378,14 +378,14 @@ establish (design.md → Test Strategy).
 ## 14. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 14.1 CHECK: Inspect the intended verification commands and affected tiers — unit, view,
+- [x] 14.1 CHECK: Inspect the intended verification commands and affected tiers — unit, view,
       run-time, contract, and gate are all touched by this change.
-- [ ] 14.2 VERIFY: `cargo fmt --all -- --check` — clean.
-- [ ] 14.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
-- [ ] 14.4 VERIFY: `make gates` — every gate green.
-- [ ] 14.5 VERIFY: `cargo test --all-features` — green, and the count is at or above the
+- [x] 14.2 VERIFY: `cargo fmt --all -- --check` — clean.
+- [x] 14.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
+- [x] 14.4 VERIFY: `make gates` — every gate green.
+- [x] 14.5 VERIFY: `cargo test --all-features` — green, and the count is at or above the
       baseline recorded in 1.1.
-- [ ] 14.6 VERIFY: `cargo llvm-cov --fail-under-lines 80`, and the production-slice floor from
+- [x] 14.6 VERIFY: `cargo llvm-cov --fail-under-lines 80`, and the production-slice floor from
       `scripts/coverage-prod.py` — both green. Never lower a floor; add tests instead.
-- [ ] 14.7 VERIFY: `make check` as the single gate, naming the failing sub-command if it fails.
-- [ ] 14.8 VERIFY: `openspec validate settings-window --strict`.
+- [x] 14.7 VERIFY: `make check` as the single gate, naming the failing sub-command if it fails.
+- [x] 14.8 VERIFY: `openspec validate settings-window --strict`.
