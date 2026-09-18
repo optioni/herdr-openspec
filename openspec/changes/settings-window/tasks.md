@@ -325,7 +325,7 @@ establish (design.md → Test Strategy).
 <!-- kind: operational -->
 
 - [ ] 12.1 CHECK: Dispatch an independent reviewer — not a fork of this session — against
-      proposal.md, all nine delta specs, design.md, and the diff.
+      proposal.md, all eleven delta specs, design.md, and the diff.
 - [ ] 12.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
       one-line reason, note SUGGESTIONs, and re-run affected tests.
 - [ ] 12.3 VERIFY: Confirm no blocking or unowned finding remains.

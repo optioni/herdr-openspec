@@ -142,7 +142,9 @@ The floor SHALL therefore be the measured number of `src/ui/help.rs` tests that 
 #### Scenario: Both panels are centred by the one function
 
 - **WHEN** `overlay_band` is called with a 120x40 frame's body — `x` 0, `y` 0, `width` 120,
-  `height` 39 — and `content_rows` of `42` (the help panel's inventory), and again with
+  `height` 39 — and `content_rows` of `42` (a scenario-local figure exceeding the body's own
+  height, to prove the overflow leg below — not the help panel's own inventory count, which
+  is `50`), and again with
   `content_rows` of `7` (the settings panel's heading row plus its **three** settings' six
   rows)
 - **THEN** the first returns `height` 39 and `y` 0, filling the body it cannot fit in

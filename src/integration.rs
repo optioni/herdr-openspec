@@ -11,8 +11,8 @@
 //! this module only classifies the text that call returns.
 //!
 //! It lives outside `src/ui/` deliberately, for the reason `crate::specs`
-//! does: a new pure-view file would move `NOIO-VIEW`'s "ten pure files" and
-//! `COLWIDTH`'s "nine pure view files", two counts four documents carry. The
+//! does: a new pure-view file would move `NOIO-VIEW`'s "eleven pure files" and
+//! `COLWIDTH`'s "ten pure view files", two counts four documents carry. The
 //! cost is that no `make gates` script sweeps this file at all, so its
 //! freedom from I/O — and from the view layer, which `LAUNCHSEAM` does not
 //! cover here — is a `tests/doc_contract.rs` claim over its production slice

@@ -2264,7 +2264,7 @@ pub fn matches(name: &str, query: &str) -> bool {
     name.to_lowercase().contains(query.to_lowercase().as_str())
 }
 
-/// Map a terminal event and the current filter mode to one of the twenty-four
+/// Map a terminal event and the current filter mode to one of the twenty-six
 /// actions. Total: every `Event` value maps to something, under either
 /// mode, and nothing panics. Acts only on key events whose `kind` is
 /// `KeyEventKind::Press` — a `Repeat` or `Release` maps to `Ignore` under

@@ -719,9 +719,9 @@ Only **structs** may join a `TYPES` list. `scripts/gates/nodefault-ui.sh`'s posi
 `grep -qE "struct[[:space:]]+$T[[:space:]]*\{"` against the `HOMEFILE`, so naming an enum there
 fails the control outright. `Overlay` and `Edit` are structs and join; `Panel` is an **enum**
 and SHALL NOT be added to any `TYPES` list. It is covered instead by an exhaustive `match` with
-no wildcard arm in the compile-time companions, on exactly `launch::Intent`'s terms. The reason is `Binding`'s: it is thirty-two `'static` literals, which is
+no wildcard arm in the compile-time companions, on exactly `launch::Intent`'s terms. The reason is `Binding`'s: `INVENTORY` holds thirty-seven `'static` literals, which is
 exactly the shape a `..Default::default()` rest is tempting in, and a field added to it later
-would otherwise silently become the empty string at thirty-two sites at once.
+would otherwise silently become the empty string at thirty-seven sites at once.
 `change-model`'s existing gate does not reach any of these thirteen types: that gate is
 stated over `Change`, `ChangeSet`, `ArtifactRef`, and `Origin` in `src/changes.rs`, and none of
 these is one of those nor there.
