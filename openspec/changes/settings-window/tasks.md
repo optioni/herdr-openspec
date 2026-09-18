@@ -232,15 +232,15 @@ establish (design.md → Test Strategy).
 ## 8. Mouse
 <!-- kind: behavior -->
 
-- [ ] 8.1 RED: Write failing tests for `mouse-input` :: "A click on a setting row selects it and
+- [x] 8.1 RED: Write failing tests for `mouse-input` :: "A click on a setting row selects it and
       begins no edit", "A click outside the band dismisses whichever panel is open", "A click
       outside cancels an edit rather than closing the panel". Both mandated widths.
-- [ ] 8.2 GREEN: Add `Target::Setting(usize)` and resolve a click inside the band against the
+- [x] 8.2 GREEN: Add `Target::Setting(usize)` and resolve a click inside the band against the
       setting rows; heading, rule, and blank rows resolve to `Ignore`.
-- [ ] 8.3 GREEN: Change the click-outside row from `Action::ToggleHelp` to `Action::Back`
+- [x] 8.3 GREEN: Change the click-outside row from `Action::ToggleHelp` to `Action::Back`
       (design.md → Decisions 8) and update the help panel's own click-outside tests, which
       assert the old action.
-- [ ] 8.4 Run the group tests — `cargo test -- ui::driver ui::app` — no regressions.
+- [x] 8.4 Run the group tests — `cargo test -- ui::driver ui::app` — no regressions.
 
 ## 9. The binding inventory
 <!-- kind: behavior -->
