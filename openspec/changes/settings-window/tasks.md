@@ -264,49 +264,49 @@ establish (design.md → Test Strategy).
 ## 10. Gates and the counts they pin
 <!-- kind: operational -->
 
-- [ ] 10.1 CHECK: `make gates` is **green** with `src/ui/settings.rs` present and unlisted —
+- [x] 10.1 CHECK: `make gates` is **green** with `src/ui/settings.rs` present and unlisted —
       both `PURE` lists are fixed literals, so an unlisted file is simply unswept. Prove the gap
       instead of assuming it: plant `use std::fs;` and `.chars().count()` in
       `src/ui/settings.rs`, run `noio-view.sh` and `colwidth.sh`, and record exit 0 with counts
       10 and 9 — the file is invisible to both. Leave the plants in place for 10.2.
-- [ ] 10.2 CHANGE: Add `src/ui/settings.rs` to `noio-view.sh`'s `PURE` (10 → 11) and
+- [x] 10.2 CHANGE: Add `src/ui/settings.rs` to `noio-view.sh`'s `PURE` (10 → 11) and
       `colwidth.sh`'s `PURE` (9 → 10). Each gate's count is a **hardcoded string**, not a
       computed one — `noio-view.sh:63` says "10 pure files", `colwidth.sh:46` says "the nine
       pure view files", and `noio-view.sh:3,33` says "PURE is NINE files" and "from nine files
       to TEN" — so edit all four literals too, or the messages stay wrong while the gates pass.
       With the 10.1 plants still in place both gates must now exit 1 naming the file; remove the
       plants and confirm exit 0 with counts 11 and 10.
-- [ ] 10.3 CHANGE: Add `scripts/gates/settingswidths.sh` on **`helpwidths.sh`**'s pattern — a
+- [x] 10.3 CHANGE: Add `scripts/gates/settingswidths.sh` on **`helpwidths.sh`**'s pattern — a
       count against a floor (`HELP_MIN`'s shape, `scripts/gates/helpwidths.sh:23`) plus the
       vacuity leg, measured from `src/ui/settings.rs`'s own tests. Not `detailwidths.sh`, which
       requires *every* `#[test]` to name both widths; `specs/responsive-layout/spec.md` specifies
       the count-against-a-floor shape.
-- [ ] 10.4 CHANGE: Add `HOMEFILE=src/settings.rs TYPES='Setting KindResolution PanelState'` as
+- [x] 10.4 CHANGE: Add `HOMEFILE=src/settings.rs TYPES='Setting KindResolution PanelState'` as
       `NODEFAULT-UI`'s **ninth** scanned set (`grep -c nodefault-ui.sh Makefile` is 8 at HEAD),
       on its own recipe line with its own measured `SCAN_MIN`, recorded in
       `notes/gate-floors.md`. Only **structs** may be named: the gate's positive control is
       `grep -qE "struct[[:space:]]+$T[[:space:]]*\{"`, so `Provenance`, `Editable`, `Reason`,
       and `Panel` cannot join and are covered by exhaustive `match` instead.
-- [ ] 10.5 CHANGE: Update the existing first `NODEFAULT-UI` line (`Makefile:46`) from
+- [x] 10.5 CHANGE: Update the existing first `NODEFAULT-UI` line (`Makefile:46`) from
       `TYPES='Dashboard Filter Detail Sections Help Selection'` to
       `'Dashboard Filter Detail Sections Overlay Selection Edit'`, and re-measure its
       `SCAN_MIN` from 333. That gate's positive control is anchored on the name, so the
       `Help` → `Overlay` rename fails it until this lands — which is what the anchoring is for.
-- [ ] 10.6 CHANGE: Bind `settingswidths.sh` to a planted defect in `tests/gate-controls.toml`,
+- [x] 10.6 CHANGE: Bind `settingswidths.sh` to a planted defect in `tests/gate-controls.toml`,
       **and add the three controls `help-overlay` set as precedent for a new pure view file** —
       mirroring its `noio-view-help-hit`, `colwidth-sweep-help`, and `palette-help-unswept`
       entries — and widen `scripts/gates/palette.sh:37-41` from two hard-coded names to three so
       it requires `src/ui/settings.rs` in both `PURE` lists. Without these, the file silently
       dropping out of either list is invisible.
-- [ ] 10.7 CHANGE: Bind `settingswidths.sh` into `tests/ci_workflow.rs`' recipe enumeration,
+- [x] 10.7 CHANGE: Bind `settingswidths.sh` into `tests/ci_workflow.rs`' recipe enumeration,
       and raise `STATED_GATE_SCRIPT_COUNT` in `tests/ci_workflow.rs:688` from 31 to 32. The
       matching figure moves through `specs/quality-gates/spec.md`, this change's own delta —
       **never** by editing `openspec/specs/` in place, which `OPENSPEC-UNTOUCHED`'s tracked-diff
       leg exists to refuse.
-- [ ] 10.8 VERIFY: Run `/bin/sh scripts/gates/settingswidths.sh` against a copy of the tree with
+- [x] 10.8 VERIFY: Run `/bin/sh scripts/gates/settingswidths.sh` against a copy of the tree with
       a both-widths test narrowed to 120 alone, confirm non-zero; restore, confirm zero. Record
       the count it reports on each run.
-- [ ] 10.9 VERIFY: `make gates` — every gate green, and each printed count matches the figure
+- [x] 10.9 VERIFY: `make gates` — every gate green, and each printed count matches the figure
       this group set.
 
 ## 11. Acceptance Test — Outer Loop GREEN
