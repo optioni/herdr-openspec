@@ -131,7 +131,7 @@ does moves — so there is no client-visible wiring for an outer loop to drive. 
 - [x] 2.8 CHANGE: `README.md:123-124`'s prose enumeration — add `covers-check`.
 - [x] 2.9 CHANGE: `openspec/config.yaml`'s context block — add `make covers-check`.
       `unrepresented_check_targets` reads `check:`'s prerequisites from the `Makefile`.
-- [ ] 2.10 VERIFY: Prove the gate reports while the suite is red. Plant a failing unit test that
+- [x] 2.10 VERIFY: Prove the gate reports while the suite is red. Plant a failing unit test that
       clippy accepts — `assert_eq!(1 + 1, 3);`, measured; `assert!(false)` trips
       `clippy::assertions-on-constants` under `-D warnings` and would abort `make check` at lint
       two steps early — run
@@ -141,7 +141,7 @@ does moves — so there is no client-visible wiring for an outer loop to drive. 
       Strategy), and it is run only after 2.6-2.9, since before them `make check` cannot be
       green for unrelated reasons; then additionally plant a struct-fields range and confirm it exits non-zero at
       `covers-check` instead. Remove both and confirm `make check` returns to exit 0.
-- [ ] 2.11 VERIFY: Prove the floors did not move, on a tree that can tell the two apart. Build a
+- [x] 2.11 VERIFY: Prove the floors did not move, on a tree that can tell the two apart. Build a
       scratch tree whose production-slice coverage is **below** its floor (delete a test that
       drives a well-covered module), then run both targets: `make covers-check` exits 0 and
       leaves `target/llvm-cov.json` absent, `make coverage` exits non-zero naming the floor. On
