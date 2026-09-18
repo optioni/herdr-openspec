@@ -683,9 +683,9 @@ agent editing `tasks.md` in another pane.
 
 | Key | Action |
 |---|---|
-| `j` / `k`, arrows | At the list route: move the list selection, clamped at both ends rather than wrapping; the list scrolls to keep it visible (`list-view`). At the detail route: scroll the detail content by one line, clamped so the stored offset cannot run away (`markdown-viewer`). While filtering, the arrows still navigate whichever the current route uses them for, but `j` and `k` type themselves into the query instead |
-| `Enter` | Open change detail, or — while filtering — accept the query without opening detail |
-| `Esc` | Dismiss one layer: filter mode with its query when active, else a non-empty query alone, else back to list, else nothing |
+| `j` / `k`, arrows | At the list route: move the list selection, clamped at both ends rather than wrapping; the list scrolls to keep it visible (`list-view`). At the detail route: scroll the detail content by one line, clamped so the stored offset cannot run away (`markdown-viewer`). While filtering, the arrows still navigate whichever the current route uses them for, but `j` and `k` type themselves into the query instead. While the settings panel is open: step the candidate of the edit in progress, or, with no edit in progress, move the row cursor (`settings-window`) |
+| `Enter` | Open change detail, or — while filtering — accept the query without opening detail. While the settings panel is open: begin an edit on the setting under the cursor, or commit the edit in progress (`settings-window`) |
+| `Esc` | Dismiss one layer: filter mode with its query when active, else a non-empty query alone, else back to list, else nothing. While the settings panel is open, this is an *additional* innermost layer ahead of the panel itself: cancel the edit in progress, or, with none, close the panel (`settings-window`) |
 | `1`–`9`, `[`, `]` | Switch artifact tab, at **both** routes — the wide layout draws the detail region at the list route too, so a tab press there is immediately visible (`detail-view`). `0` is inert: tab addressing is 1-based. While filtering, all of them type themselves into the query like any other printable key |
 | `/` | Start filter mode from either route, moving to the list: printable keys type into the query, `Backspace` deletes, `Enter` accepts, `Esc` cancels, and `Ctrl-C` still quits |
 | `Backspace` | While filtering, delete the last character of the query; on an already-empty query it is inert and filter mode stays on. Outside filter mode it is inert |

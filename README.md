@@ -44,9 +44,9 @@ actions to appear — Herdr re-reads the manifest only then.
 
 | Key | Action |
 |---|---|
-| `j` / `k`, arrows | In the list, move the selection; in the detail content, scroll a line. Clamped at both ends rather than wrapping |
-| `Enter` | Open change detail |
-| `Esc` | Dismiss one layer: filter mode, then a leftover query, then detail. At the list root it does nothing |
+| `j` / `k`, arrows | In the list, move the selection; in the detail content, scroll a line. Clamped at both ends rather than wrapping. In the settings panel: step the candidate while editing, or move the row cursor |
+| `Enter` | Open change detail. In the settings panel: begin editing the setting under the cursor, or commit the edit in progress |
+| `Esc` | Dismiss one layer: filter mode, then a leftover query, then detail. At the list root it does nothing. In the settings panel: cancel the edit in progress, or close the panel |
 | `1`–`9`, `[`, `]` | Switch artifact tab, from either the list or the detail. `0` is inert — tabs are 1-based |
 | `/` | Filter changes |
 | `Backspace` | While filtering, delete the last character of the query. Inert outside filter mode, and on an already-empty query |
