@@ -112,6 +112,13 @@ defect buried in a 1600-test run into a named gate that fails in seconds, before
 | The hygiene gates fail before the test and coverage runs | existing test, unchanged | unit | `Makefile` text | `cargo test --test ci_workflow` |
 | The command table names the gates tier that exists | existing test extended: six prerequisites, each named in `SPEC.md` → Gates | unit | `SPEC.md`, `Makefile` | `cargo test --test ci_workflow` |
 | The binding check runs although the suite is red | manual, once, at apply time (task 2.10), for the same recursion reason | integration (manual) | real `make`, working tree | task 2.10 |
+| All five gates run on each runner | existing `ci_workflow` test extended: the `check` job's step list names `make covers-check` between `make gates` and `make test` | unit | `ci.yml` text | `cargo test --test ci_workflow` |
+| The matrix names both runners and no others | existing test, unchanged — carried by the REMOVED+ADDED pair, not altered by it | unit | `ci.yml` text | `cargo test --test ci_workflow` |
+| A failing gate fails the run rather than being skipped | existing test, unchanged | unit | `ci.yml` text | `cargo test --test ci_workflow` |
+| One runner's failure does not cancel the other | existing test, unchanged (`fail-fast: false`) | unit | `ci.yml` text | `cargo test --test ci_workflow` |
+| The coverage job is Linux-only and runs the gate once | existing test, unchanged — the MODIFIED block moves one prose count, no behaviour | unit | `ci.yml` text | `cargo test --test ci_workflow` |
+| The coverage job installs what `make coverage` needs | existing test, unchanged | unit | `ci.yml` text | `cargo test --test ci_workflow` |
+| The production floor reaches CI without a workflow edit | existing test, unchanged | unit | `ci.yml` text | `cargo test --test ci_workflow` |
 | The floors are not moved ahead of the suite | manual, once, at apply time (task 2.11): a below-floor tree, `make covers-check` exits 0 leaving no report, `make coverage` exits non-zero | integration (manual) | real `make` | task 2.11 |
 
 ## Decisions
