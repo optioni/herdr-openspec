@@ -189,25 +189,32 @@ does moves — so there is no client-visible wiring for an outer loop to drive. 
 ## 4. Documentation
 <!-- kind: operational -->
 
-- [ ] 4.1 CHECK: Confirm the two prose sites still say five, so the edits below are corrections
+*Group 2 already carried 4.2-4.4's edits (tasks 2.6-2.9) and 4.5's workflow step (2.3b),
+because `make check` could not be green for unrelated reasons while the prose and config
+sites still enumerated five gates — the planning review moved them there for exactly that
+reason. 4.1's check was made before those edits: `SPEC.md:1388` read "composes **five**
+gates" and `AGENTS.md:278` "**Five** are enforced in CI", so each edit is a correction. This
+group's remaining work is 4.5's confirmation and 4.6's verification, both recorded below.*
+
+- [x] 4.1 CHECK: Confirm the two prose sites still say five, so the edits below are corrections
       rather than additions: `SPEC.md:1387` and `AGENTS.md:278`.
-- [ ] 4.2 CHANGE: `SPEC.md` → Gates — "composes five gates" → six, and add the `covers-check`
+- [x] 4.2 CHANGE: `SPEC.md` → Gates — "composes five gates" → six, and add the `covers-check`
       row to its table in the `Makefile`'s own order. `tests/ci_workflow.rs` binds this table to
       `check:`'s prerequisites **by name**, so it is red until this lands.
-- [ ] 4.3 CHANGE: `AGENTS.md:278` "Five are enforced in CI" → six, and add the row to its gate
+- [x] 4.3 CHANGE: `AGENTS.md:278` "Five are enforced in CI" → six, and add the row to its gate
       table. `CLAUDE.md` is a symlink to `AGENTS.md`, so this is one file.
-- [ ] 4.3b CHANGE: `README.md:123-124` enumerates the gates in prose — "format, lint, the
+- [x] 4.3b CHANGE: `README.md:123-124` enumerates the gates in prose — "format, lint, the
       hygiene-gate tier, tests, and the 80% coverage floor". Add `covers-check` to it.
-- [ ] 4.4 CHANGE: `openspec/config.yaml` — add `make covers-check` to the commands its context
+- [x] 4.4 CHANGE: `openspec/config.yaml` — add `make covers-check` to the commands its context
       block lists. `tests/doc_contract.rs`' `unrepresented_check_targets` reads `check:`'s
       prerequisites from the `Makefile` and requires each to be named there, so this goes red
       inside `cargo test` the moment 2.2 lands. This is the change's only edit inside
       `openspec/` outside its own directory.
-- [ ] 4.5 CHANGE: `.github/workflows/ci.yml`'s `check` job — the delta for `ci-workflow` retitles
+- [x] 4.5 CHANGE: `.github/workflows/ci.yml`'s `check` job — the delta for `ci-workflow` retitles
       its requirement and reworders its step list; confirm the workflow matches the ADDED
       requirement's scenario, `make covers-check` between `make gates` and `make test` on both
       runners.
-- [ ] 4.6 VERIFY: `cargo test --all-features --test ci_workflow --test doc_contract` — green,
+- [x] 4.6 VERIFY: `cargo test --all-features --test ci_workflow --test doc_contract` — green,
       including the leg requiring every `check:` prerequisite to be named in `SPEC.md` → Gates
       and the leg requiring it in `openspec/config.yaml`'s context block.
 
