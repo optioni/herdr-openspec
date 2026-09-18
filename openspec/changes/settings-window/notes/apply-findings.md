@@ -79,3 +79,24 @@ to compile.
 Neither is machine-bound, which is why both drifted. `Dashboard`'s own field count **is**
 bound, by the compile-time companion `dashboard-loop` names, and that one is correct at
 sixteen today and must reach seventeen here.
+
+### Reversed by task 12.2 (change-review CRITICAL 2) — for the compile-companion bullet only
+
+The "carries three, not four" drift named above turned out to sit in a **second** location
+too: the compile-time-companion bullet at `specs/dashboard-loop/spec.md:833-843` — "a fourth
+destructures a `Refresh` naming all **three**" and "an eighth destructures an `AgentSnapshot`
+naming all **three**" — independently said the same wrong count, alongside four more wrong
+counts in that same bullet (`Dashboard` sixteen not seventeen, `Detail` five not seven,
+`Launch` "both" not three, and `launch::Outcome` "two"/"both" not four). The reasoning above
+— "repairing them would widen its diff into two landed capabilities" — does not hold for
+*that* bullet: an `## ADDED Requirements` block is written into `openspec/specs/` verbatim on
+archive, and the bullet is exactly what a future change reads to learn which compile-time
+companion breaks the build when it adds a field to one of these types. Leaving it wrong there
+is not neutral the way leaving a landed capability's own prose alone is — it plants a false
+instruction in the requirement `settings-window` itself is authoring. All six counts in that
+one bullet, plus its `:1073-1074` duplicate ("naming all sixteen fields ... so a seventeenth
+breaks the build", corrected to seventeen/eighteenth), are fixed as of task 12.2. The two
+descriptive `SHALL carry exactly **three** fields` sentences quoted above are **unaffected by
+this reversal** and remain open: they describe `live-refresh`'s and `agent-polling`'s own
+historical additions, not a build-breaking compile-time check, and fixing them would still
+widen the diff into those two capabilities' own text for no reader-facing gain here.

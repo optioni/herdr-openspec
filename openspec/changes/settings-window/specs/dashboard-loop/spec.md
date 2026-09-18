@@ -831,16 +831,16 @@ its merge key; its subject is unchanged and only the type list and the field cou
   same-line grep with the brace-matching pass named above. The companion is kept for what it
   genuinely does, below
 - **AND** a compile-time companion exists: a test destructures a `Dashboard` with an
-  exhaustive pattern naming all **sixteen** fields and no `..`, a companion destructures a
+  exhaustive pattern naming all **seventeen** fields and no `..`, a companion destructures a
   `Sections` naming its one field and no `..`, a second destructures a `Filter`
-  naming both, a third destructures a `Detail` naming all five and no `..`, a fourth
-  destructures a `Refresh` naming all **three** and no `..`, a fifth destructures a `Launch`
-  naming both and no `..` — `launch::Outcome`'s companion below naming its two fields after
-  `agent-launch`'s `problem` becomes `problems` — a sixth destructures an `Agent`
+  naming both, a third destructures a `Detail` naming all **seven** and no `..`, a fourth
+  destructures a `Refresh` naming all **four** and no `..`, a fifth destructures a `Launch`
+  naming all **three** and no `..` — `launch::Outcome`'s companion below naming its **four**
+  fields after `agent-launch`'s `problem` becomes `problems` — a sixth destructures an `Agent`
   naming all **eight**, a seventh destructures a `Listed` naming both, an eighth destructures
-  an `AgentSnapshot` naming all **three**, a ninth destructures an `Attribution` naming all
-  **three**, and a tenth destructures a `launch::Outcome` naming both, so adding a field breaks
-  the build at that site rather than passing a source grep that never saw it
+  an `AgentSnapshot` naming all **four**, a ninth destructures an `Attribution` naming all
+  **three**, and a tenth destructures a `launch::Outcome` naming all **four**, so adding a
+  field breaks the build at that site rather than passing a source grep that never saw it
 - **AND** two further compile-time companions cover the enums the sweep cannot reach: one
   matches a `launch::Intent` exhaustively over `Apply`, `Continue`, `Archive`, and `Focus` with
   no wildcard arm, and one matches a `launch::Request` exhaustively over `Launch` and `Focus`
@@ -1071,8 +1071,8 @@ its merge key; its subject is unchanged and only the type list and the field cou
 - **WHEN** every `*.rs` file under `src/` is searched for a `..` inside a `Dashboard { … }` or
   a `Sections { … }` literal or pattern, brace-matched from the opening `{` to its partner
 - **THEN** there is no match, so no construction site elides `file_mode` or `sections`
-- **AND** the compile-time companion destructures a `Dashboard` naming all **sixteen** fields
-  with no `..`, so a seventeenth breaks the build at that site, and a further companion
+- **AND** the compile-time companion destructures a `Dashboard` naming all **seventeen** fields
+  with no `..`, so an eighteenth breaks the build at that site, and a further companion
   destructures a `Sections` naming its one field
 - **AND** `impl Default for Dashboard` and `impl Default for Sections` appear nowhere in the
   crate, derived or hand-written
