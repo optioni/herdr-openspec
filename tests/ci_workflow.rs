@@ -685,7 +685,7 @@ fn every_gate_script_the_recipe_names_exists_and_every_script_is_named() {
     // and direction 1 names it ("exists but is not named anywhere in the gates: recipe").
     // Asserting the count first would meet the same intruder with "bump the literal and edit
     // the spec", which is the wrong remedy. Filtering it out instead would let it in silently.
-    const STATED_GATE_SCRIPT_COUNT: usize = 31;
+    const STATED_GATE_SCRIPT_COUNT: usize = 32;
     let found = on_disk.len();
     assert_eq!(
         found, STATED_GATE_SCRIPT_COUNT,
