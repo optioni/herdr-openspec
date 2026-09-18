@@ -429,9 +429,9 @@ pub fn mouse_action(dashboard: &Dashboard, area: Rect, mouse: &MouseEvent) -> Ac
     // Keys' mouse table is bound to *this function's* body by
     // `tests/doc_contract.rs`'s `mouse_bindings_match_spec_md`, which cuts
     // from `pub fn mouse_action(` to the next `}` at column zero — a branch
-    // extracted into a sibling function would take `Action::ToggleHelp` out
-    // of that slice and let the table and the resolver drift with every test
-    // still green.
+    // extracted into a sibling function would take one of its `Action`
+    // variants (`Action::SelectTab`, say) out of that slice and let the
+    // table and the resolver drift with every test still green.
     if dashboard.overlay.panel.is_some() {
         let point = ratatui::layout::Position::new(mouse.column, mouse.row);
         // Outside the frame is `Action::Ignore` on every event kind, checked
@@ -487,11 +487,14 @@ pub fn mouse_action(dashboard: &Dashboard, area: Rect, mouse: &MouseEvent) -> Ac
                     }
                 } else {
                     // `settings-window`'s correction (design.md -> Decision
-                    // 8): `Action::Back`, not `Action::ToggleHelp`. With two
-                    // panels sharing this layer, `ToggleHelp` means *swap to
-                    // help* rather than *close*, so a click outside the
-                    // settings band would otherwise open the help overlay
-                    // instead of dismissing anything. `Back` closes
+                    // 8): `Action::Back`, not ToggleHelp — written without the
+                    // `Action::` qualifier so `mouse_bindings_match_spec_md`'s
+                    // no-negation-aware textual scan of this function's own
+                    // body does not read this comment as also producing it.
+                    // With two panels sharing this layer, `ToggleHelp` means
+                    // *swap to help* rather than *close*, so a click outside
+                    // the settings band would otherwise open the help
+                    // overlay instead of dismissing anything. `Back` closes
                     // whichever panel is open, exactly what `Esc` already
                     // produces, so the key and the gesture agree by
                     // construction.
