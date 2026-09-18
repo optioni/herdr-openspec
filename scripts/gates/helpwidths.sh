@@ -5,11 +5,12 @@
 # every other width gate carries (missing file, or zero #[test] functions at all).
 #
 # See openspec/changes/help-overlay/specs/responsive-layout/spec.md -> "The overlay's
-# both-widths rule is counted, not just stated". Four of help.rs's twelve tests assert
+# both-widths rule is counted, not just stated". Several of help.rs's tests assert
 # INVENTORY as data and name no width because there is no width in what they assert; two —
 # "The grammar renders at 120 columns" and "at 60 columns" — are a deliberate one-width pair,
 # because the spec states them as two scenarios; one drives `apply` and renders nothing at
-# all. The remaining three assert at both widths, which is HELP_MIN's measured floor.
+# all. `settings-window`'s "The settings group renders at both mandated widths" raised the
+# remaining both-width count from three to four — HELP_MIN's measured floor.
 #
 # Script shape copied from DETAILWIDTHS: the same #[test]-splitting scan, the same
 # doc-comment stripping, the same unsuffixed-literal limit (a `78u16` is invisible to
@@ -20,7 +21,7 @@
 # fails it is a both-width test NARROWED to one width alone — the defect
 # `tests/gate-controls.toml`'s "helpwidths-narrowed" control plants.
 [ -f src/ui/help.rs ] || { echo "HELPWIDTHS FAIL: src/ui/help.rs missing" >&2; exit 1; }
-HELP_MIN="${HELP_MIN:-3}" python3 - <<'PY'
+HELP_MIN="${HELP_MIN:-4}" python3 - <<'PY'
 import re, sys, os
 raw = open("src/ui/help.rs").read()
 src = "\n".join(l for l in raw.splitlines()

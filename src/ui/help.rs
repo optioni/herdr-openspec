@@ -756,7 +756,10 @@ mod tests {
     /// mandated widths".
     #[test]
     fn the_settings_group_renders_at_both_mandated_widths() {
-        for width in [60u16, 120u16] {
+        // Both mandated widths, written unsuffixed: `HELPWIDTHS`' number scan
+        // is `\b(\d+)\b` and does not see `60u16`.
+        let widths: [u16; 2] = [60, 120];
+        for width in widths {
             let content = rows(width);
             let heading = format!(
                 "While settings is open ({})",
