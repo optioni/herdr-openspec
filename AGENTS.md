@@ -333,16 +333,18 @@ check, a width assertion, a dependency argument, a build-graph snapshot, and a c
 checker among them. **A gate's floor is its own script default** — every line in the
 recipe runs the script bare, with no `MIN`/`SCAN_MIN` override, because the default is
 kept at the gate's true measured floor rather than a value someone must remember to pass.
-The one stated exception is a **multi-subject gate**: `NODEFAULT-UI` scans eight distinct
+The one stated exception is a **multi-subject gate**: `NODEFAULT-UI` scans nine distinct
 type sets across the codebase (the view-layer dashboard types, `Refresh`, `Launch`,
 `src/agents.rs`'s set, `src/launch.rs`'s `Outcome`, `ArtifactSection`,
-`src/ui/help.rs`'s `Binding`/`Group`, and `src/launch.rs`'s `Settings`), and one shared
+`src/ui/help.rs`'s `Binding`/`Group`, `src/launch.rs`'s `Settings`, and `src/settings.rs`'s
+`Setting`/`KindResolution`/`PanelState`), and one shared
 default would
 either pass vacuously for the smallest set or fail legitimately for the largest — so each
-of its eight recipe lines carries its own explicit `SCAN_MIN`, the only floors that live on
+of its nine recipe lines carries its own explicit `SCAN_MIN`, the only floors that live on
 the `Makefile` line rather than the script default (`notes/gate-floors.md` in the
-`degraded-states` change records how the first seven were measured, and the same file in
-`agent-client-choice` records the eighth). Every gate is executed against a
+`degraded-states` change records how the first seven were measured, the same file in
+`agent-client-choice` records the eighth, and the same file in `settings-window` records
+the ninth). Every gate is executed against a
 recorded planted defect, not merely attested to catch one: `tests/gate-controls.toml`
 binds each script under `scripts/gates/` to a plant, and `tests/gate_controls.rs` copies
 the tree to a scratch directory, applies it, and requires that gate to exit non-zero — so
@@ -400,7 +402,7 @@ unreachable and the tests become integration tests by accident.
   precedence. All three live outside
   `src/ui/` — `specs` and `integration` deliberately, so that adding either moves
   neither `NOIO-VIEW`'s
-  "ten pure files" nor `COLWIDTH`'s "nine pure view files", counts four documents
+  "eleven pure files" nor `COLWIDTH`'s "ten pure view files", counts four documents
   carry. The cost of that placement is that **no `make gates` script sweeps
   `src/specs.rs` or `src/integration.rs` at all**, so each one's freedom from I/O
   is its own `tests/doc_contract.rs` claim over its production slice instead —
@@ -443,9 +445,9 @@ unreachable and the tests become integration tests by accident.
   `serde_json` must never appear in `src/cli.rs`, checked the same way.
 - **Views do no I/O.** They are pure functions from state to a ratatui frame, tested
   by rendering into a `TestBackend` buffer at 60 and 120 columns. The pure set is
-  **ten** files — `src/ui/app.rs`, `src/ui/detail.rs`, `src/ui/help.rs`,
+  **eleven** files — `src/ui/app.rs`, `src/ui/detail.rs`, `src/ui/help.rs`,
   `src/ui/layout.rs`, `src/ui/list.rs`, `src/ui/markdown.rs`,
-  `src/ui/palette.rs`, `src/ui/tasks.rs`, `src/ui/view.rs`, and
+  `src/ui/palette.rs`, `src/ui/settings.rs`, `src/ui/tasks.rs`, `src/ui/view.rs`, and
   `src/ui/driver.rs` — none of which names a filesystem, process, environment,
   network, or standard-I/O API (`src/ui/tasks.rs` calls `tasks::parse`, a pure
   function over `&str`, and never `tasks::read`, the filesystem edge, which the
@@ -510,10 +512,10 @@ unreachable and the tests become integration tests by accident.
 - **Every width computation under `src/ui/` is measured in terminal display columns, never
   a `char` count.** `ui::layout::columns`/`truncate_columns` are the crate's only measure,
   agreeing by construction with what `Buffer::set_string` itself consumes; `COLWIDTH` sweeps
-  the other nine pure view files for `.chars().count()`/`.chars().take(`/a `Vec<char>`
+  the other ten pure view files for `.chars().count()`/`.chars().take(`/a `Vec<char>`
   collect, because a `chars().count()` written later is silently correct against this
   project's own ASCII fixtures and wrong against anything else.
-- **Under `src/ui/`, where a pure helper lives decides which gates it must satisfy.** The six
+- **Under `src/ui/`, where a pure helper lives decides which gates it must satisfy.** The seven
   `*WIDTHS` gates carry no exemption list — `DETAILWIDTHS` requires every `#[test]` in
   `src/ui/detail.rs` to name both `58` and `78` — so a width-free function's tests belong in a
   file they do not sweep, and a new module moves the pure-view count two capability specs bind.
@@ -542,8 +544,8 @@ unreachable and the tests become integration tests by accident.
 - **The write boundary is the process, not the tree.** `herdr agent start`
   launches a process that will itself write inside `openspec/` — an agent
   editing `tasks.md` is the point of launching it, and that write is not
-  this plugin's. The plugin's own writes stay exactly `agent-names.toml`
-  under `HERDR_PLUGIN_STATE_DIR`, launched agent or not.
+  this plugin's. The plugin's own writes stay exactly `agent-names.toml` and
+  `settings.toml` under `HERDR_PLUGIN_STATE_DIR`, launched agent or not.
 
 Further invariants from `SPEC.md`:
 
@@ -551,7 +553,8 @@ Further invariants from `SPEC.md`:
   unreachable Herdr socket degrades the view. It never replaces it with an error screen.
 - **The plugin's own writes are scoped to its state directory.** The dashboard reads
   `openspec/` and never writes there — an agent may be editing `tasks.md` in another
-  pane. The one thing the plugin itself writes, the agent-name mapping, goes under
+  pane. The two things the plugin itself writes, the agent-name mapping and the
+  settings panel's recorded `agent_kind`, go under
   `HERDR_PLUGIN_STATE_DIR` and nowhere else — never into the repository, and never
   into the configuration directory the user hand-edits.
 - **Checkbox counting follows the OpenSpec CLI's rule exactly**, fenced and commented
