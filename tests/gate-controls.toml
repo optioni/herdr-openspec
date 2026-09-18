@@ -131,6 +131,18 @@ expect = "COLWIDTH FAIL: src/ui/help.rs has"
 why = "help-overlay: src/ui/help.rs joins COLWIDTH's PURE list as its ninth file, and a .chars().count() reintroduced there must fail the sweep on the same terms as every other pure view file"
 
 [[control]]
+id = "colwidth-sweep-settings"
+script = "colwidth.sh"
+plant_file = "src/ui/settings.rs"
+plant_find = "//! The settings panel's row grammar and render function. See"
+plant_replace = '''//! The settings panel's row grammar and render function. See
+fn planted_colwidth_settings_violation(s: &str) -> usize {
+    s.chars().count()
+}'''
+expect = "COLWIDTH FAIL: src/ui/settings.rs has"
+why = "settings-window: src/ui/settings.rs joins COLWIDTH's PURE list as its tenth file, and a .chars().count() reintroduced there must fail the sweep on the same terms as every other pure view file"
+
+[[control]]
 id = "deps-features"
 script = "deps.sh"
 cargo = true
@@ -201,6 +213,26 @@ plant_find = '''
 plant_replace = "\n    }"
 expect = "HELPWIDTHS FAIL: only 3 src/ui/help.rs tests name both 60 and 120 columns"
 why = "help-overlay: helpwidths.sh is a count against a floor, not an every-test rule, so its own control must be a both-width test NARROWED to one width rather than a new single-width test added - the spec's own worked example of the distinction"
+
+[[control]]
+id = "settingswidths-narrowed"
+script = "settingswidths.sh"
+plant_file = "src/ui/settings.rs"
+# Narrows a both-width test to 120 alone by dropping its 60x20 Rect from the loop, rather
+# than adding a new single-width test - settingswidths.sh's own header comment states the
+# same distinction helpwidths-narrowed proves: a new single-width test raises the total
+# without lowering the both-width count, so narrowing is the only plant that can drop it
+# below SETTINGS_MIN. This drops the both-width count from 5 to 4, below the floor of 5.
+plant_find = '''        let settings_rows = fixture_rows();
+        for total in [Rect::new(0, 0, 120, 40), Rect::new(0, 0, 60, 20)] {
+            assert_panel_renders(total, &settings_rows);
+        }'''
+plant_replace = '''        let settings_rows = fixture_rows();
+        for total in [Rect::new(0, 0, 120, 40)] {
+            assert_panel_renders(total, &settings_rows);
+        }'''
+expect = "SETTINGSWIDTHS FAIL: only 4 src/ui/settings.rs tests name both 60 and 120 columns"
+why = "settings-window: settingswidths.sh is a count against a floor, not an every-test rule (on exactly helpwidths.sh's terms), so its own control must be a both-width test NARROWED to one width rather than a new single-width test added"
 
 [[control]]
 id = "launchseam-spawn"
@@ -459,6 +491,16 @@ expect = "NOIO-VIEW FAIL: I/O API in a pure view file"
 why = "help-overlay: src/ui/help.rs joins NOIO-VIEW's PURE list as its tenth file, and std::fs named there must fail the sweep on the same terms as every other pure view file"
 
 [[control]]
+id = "noio-view-settings-hit"
+script = "noio-view.sh"
+plant_file = "src/ui/settings.rs"
+plant_find = "//! The settings panel's row grammar and render function. See"
+plant_replace = '''//! The settings panel's row grammar and render function. See
+use std::fs;'''
+expect = "NOIO-VIEW FAIL: I/O API in a pure view file"
+why = "settings-window: src/ui/settings.rs joins NOIO-VIEW's PURE list as its eleventh file, and std::fs named there must fail the sweep on the same terms as every other pure view file"
+
+[[control]]
 id = "nojson-seam-hit"
 script = "nojson-seam.sh"
 plant_file = "src/cli.rs"
@@ -635,6 +677,16 @@ plant_find = "src/ui/help.rs src/ui/layout.rs"
 plant_replace = "src/ui/layout.rs"
 expect = "does not list src/ui/help.rs in its PURE set"
 why = "help-overlay: the same third leg, one module on - src/ui/help.rs struck from noio-view.sh's PURE list must fail on the same terms palette-unswept proves for src/ui/palette.rs, since neither standing view gate can see its own PURE list quietly drop the new module"
+
+[[control]]
+id = "palette-settings-unswept"
+script = "palette.sh"
+env = ""
+plant_file = "scripts/gates/noio-view.sh"
+plant_find = "src/ui/settings.rs src/ui/tasks.rs"
+plant_replace = "src/ui/tasks.rs"
+expect = "does not list src/ui/settings.rs in its PURE set"
+why = "settings-window: the same third leg, two modules on - src/ui/settings.rs struck from noio-view.sh's PURE list must fail on the same terms palette-unswept/palette-help-unswept prove for src/ui/palette.rs and src/ui/help.rs, since neither standing view gate can see its own PURE list quietly drop the new module"
 
 [[control]]
 id = "palette-outside"
