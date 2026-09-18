@@ -135,13 +135,20 @@ worse outcome than the drift the sweep was hunting.
 - **WHEN** each extracted gate is run from the repository root with **no** environment prefix
 - **THEN** every one exits 0, and each `OK` line's reported count is greater than or equal to
   the floor it printed
-- **AND** running the same gate with its floor set one above the measured count exits
-  non-zero, which is what proves the floor is load-bearing rather than decorative
-- **AND** no floor appears in both a script's default and the `Makefile`'s recipe line. The
-  `Makefile` carries only what a subject genuinely requires: `LAUNCH`/`ENTRY` for
-  `LAUNCHSEAM`'s second subject, `SCAN_MIN`/`HOMEFILE`/`TYPES` for each of `NODEFAULT-UI`'s
-  nine, and `env -u GRAPH_WRITE` for `GRAPH-SNAP` — nine `SCAN_MIN` values and one `env -u`,
-  which the earlier wording "and nothing else" wrongly denied
+
+A floor that is load-bearing rather than decorative would make the same gate exit non-zero
+once its floor is set one above the measured count, and no floor is meant to appear in both
+a script's default and the `Makefile`'s recipe line — the `Makefile` carries only what a
+subject genuinely requires: `LAUNCH`/`ENTRY` for `LAUNCHSEAM`'s second subject,
+`SCAN_MIN`/`HOMEFILE`/`TYPES` for each of `NODEFAULT-UI`'s nine, and `env -u GRAPH_WRITE` for
+`GRAPH-SNAP` — nine `SCAN_MIN` values and one `env -u`, which the earlier wording "and
+nothing else" wrongly denied. **Neither of these two properties is exercised by an automated
+check in this repository** (change-review W11, softened from an unproven `THEN`/`AND` pair
+rather than left as a claim nothing verifies): `tests/ci_workflow.rs`'s correspondence check
+matches only `scripts/gates/<name>` tokens and never inspects an `env`/`SCAN_MIN` prefix, so
+both rest on each gate script's own logic and on review at extraction time, not on a probe
+`cargo test` runs. A future change that builds either probe folds it back into this
+scenario as a proven `THEN`/`AND`, rather than this one inventing it.
 
 #### Scenario: The three excluded gates are named, with reasons, where a reader will meet them
 
