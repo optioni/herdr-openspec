@@ -19,7 +19,7 @@
 # fails it is a both-width test NARROWED to one width alone — the defect
 # `tests/gate-controls.toml`'s "settingswidths-narrowed" control plants.
 [ -f src/ui/settings.rs ] || { echo "SETTINGSWIDTHS FAIL: src/ui/settings.rs missing" >&2; exit 1; }
-SETTINGS_MIN="${SETTINGS_MIN:-5}" python3 - <<'PY'
+SETTINGS_MIN="${SETTINGS_MIN:-6}" python3 - <<'PY'
 import re, sys, os
 raw = open("src/ui/settings.rs").read()
 src = "\n".join(l for l in raw.splitlines()

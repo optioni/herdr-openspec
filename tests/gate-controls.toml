@@ -222,7 +222,9 @@ plant_file = "src/ui/settings.rs"
 # than adding a new single-width test - settingswidths.sh's own header comment states the
 # same distinction helpwidths-narrowed proves: a new single-width test raises the total
 # without lowering the both-width count, so narrowing is the only plant that can drop it
-# below SETTINGS_MIN. This drops the both-width count from 5 to 4, below the floor of 5.
+# below SETTINGS_MIN. This drops the both-width count from 6 to 5, below the floor of 6
+# (change-review W12 added a sixth both-width test, `the_panel_draws_before_the_kind_has_
+# resolved`, raising SETTINGS_MIN from 5 to 6 in step).
 plant_find = '''        let settings_rows = fixture_rows();
         for total in [Rect::new(0, 0, 120, 40), Rect::new(0, 0, 60, 20)] {
             assert_panel_renders(total, &settings_rows);
@@ -231,7 +233,7 @@ plant_replace = '''        let settings_rows = fixture_rows();
         for total in [Rect::new(0, 0, 120, 40)] {
             assert_panel_renders(total, &settings_rows);
         }'''
-expect = "SETTINGSWIDTHS FAIL: only 4 src/ui/settings.rs tests name both 60 and 120 columns"
+expect = "SETTINGSWIDTHS FAIL: only 5 src/ui/settings.rs tests name both 60 and 120 columns"
 why = "settings-window: settingswidths.sh is a count against a floor, not an every-test rule (on exactly helpwidths.sh's terms), so its own control must be a both-width test NARROWED to one width rather than a new single-width test added"
 
 [[control]]

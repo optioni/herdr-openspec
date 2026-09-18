@@ -234,7 +234,7 @@ mod tests {
     use crate::config;
     use crate::integration::{Choice, Source};
     use crate::resolve;
-    use crate::settings::{self, KindResolution};
+    use crate::settings::{self, Editable, KindResolution, Provenance, Reason};
     use crate::testutil::{cell, row_text};
     use crate::ui::layout::{columns, overlay_band, split_frame};
     use ratatui::backend::TestBackend;
@@ -275,6 +275,25 @@ mod tests {
             installed: vec!["codex".to_string()],
         };
         settings::settings(&cfg, &binary, Some(&kind))
+    }
+
+    /// `fixture_rows()`'s own `openspec_bin`/`prompts` shape, with `kind: None` — the
+    /// launcher's worker has not answered yet — so `agent_kind` renders `Pending` and is not
+    /// editable. This is the state a real reader sees for the first frames after `,`, and
+    /// change-review W12 found no view test at either mandated width ever drew it: every
+    /// fixture in this file (`fixture_rows`, `a_long_path_is_truncated_...`'s own inline one,
+    /// and `fixture_rows_with_agent_kind`) builds `settings::settings` with a **resolved**
+    /// kind.
+    fn fixture_rows_pending() -> Vec<settings::Setting> {
+        let cfg = config::Config::default();
+        let binary = resolve::BinResolution {
+            found: Some(resolve::FoundBin {
+                path: PathBuf::from("/usr/bin/openspec"),
+                source: resolve::BinSource::Path,
+            }),
+            problems: Vec::new(),
+        };
+        settings::settings(&cfg, &binary, None)
     }
 
     fn draw(total: Rect, settings_rows: &[settings::Setting]) -> ratatui::buffer::Buffer {
@@ -379,6 +398,42 @@ mod tests {
             assert!(!value_text(setting, None).contains("archived_count"));
             assert!(!source_text(setting).contains("archived_count"));
         }
+    }
+
+    /// `settings-window` -> `specs/settings-window/spec.md`:129 "The panel draws before the
+    /// kind has resolved". Change-review W12: this state — `agent_kind` `Pending`, not
+    /// editable — reaches a real reader for the first frames after `,`, and until this test
+    /// no view test in this file ever drew it at either mandated width; only the model half
+    /// (`src/settings.rs:600`) and the request half (`src/ui/driver.rs:4328`) had coverage.
+    #[test]
+    fn the_panel_draws_before_the_kind_has_resolved() {
+        let settings_rows = fixture_rows_pending();
+        for total in [Rect::new(0, 0, 120, 40), Rect::new(0, 0, 60, 20)] {
+            assert_panel_renders(total, &settings_rows);
+        }
+
+        assert_eq!(settings_rows.len(), 3);
+        let agent_kind = &settings_rows[1];
+        assert_eq!(agent_kind.key, "agent_kind");
+        assert_eq!(agent_kind.provenance, Provenance::Pending);
+        assert_eq!(
+            agent_kind.editable,
+            Editable::No {
+                reason: Reason::Resolving
+            },
+            "a Pending row is not editable"
+        );
+        assert!(
+            !matches!(agent_kind.editable, Editable::Kind { .. }),
+            "the value row must not render bracketed, editable-looking text: {}",
+            value_text(agent_kind, None)
+        );
+        assert_eq!(
+            source_text(agent_kind),
+            "resolving",
+            "Provenance::Pending's own label, unembellished by source_text: {}",
+            source_text(agent_kind)
+        );
     }
 
     /// `settings-window` :: "A long path is truncated rather than wrapped or
