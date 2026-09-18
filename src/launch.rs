@@ -3359,6 +3359,28 @@ mod tests {
             );
         }
 
+        /// `agent-launch` :: "File mode answers both additions inertly" — the `src/launch.rs`
+        /// half of that scenario (`mod wiring::file_mode_answers_both_additions_inertly`, in
+        /// `src/ui/mod.rs`, is the run-time + view half). `NoLauncher::set_kind` is a second
+        /// **production** implementation, not a test double — every file-mode install runs it
+        /// — and until this test, `set_kind` was exercised only against the real `Launcher`
+        /// (above) and `RecordingLauncher` (`src/ui/driver.rs`), never against `NoLauncher`
+        /// itself (change-review CRITICAL 1).
+        #[test]
+        fn the_inert_launcher_ignores_set_kind() {
+            let mut launcher = super::super::none();
+            // Before any request, and interleaved with one: neither ordering panics, and
+            // `drain` stays `None` throughout, exactly as `the_inert_launcher_answers_nothing`
+            // already proves for `request`/`drain` alone.
+            launcher.set_kind("codex".to_string());
+            assert_eq!(launcher.drain(), None);
+            launcher.request(Request::Resolve);
+            launcher.set_kind("claude".to_string());
+            for _ in 0..10 {
+                assert_eq!(launcher.drain(), None);
+            }
+        }
+
         /// A `HerdrCli` whose first call blocks until the test releases it, on a channel it
         /// owns — the only synchronisation this change's tests own, and the reason none of
         /// them sleeps. Every call after the first proceeds immediately, since `.take()`

@@ -3244,7 +3244,7 @@ apply:
         use crate::testutil::{
             ScratchDir, UntilReady, canonical, render_at, row_text, snapshot, write_with_mode,
         };
-        use crate::ui::app::{Dashboard, Route};
+        use crate::ui::app::{Dashboard, Panel, Route};
         use crate::ui::{StartError, Startup};
 
         /// Drive `run_wired` at `width`x20 over a real `TestBackend`, with
@@ -5291,6 +5291,90 @@ esac
             let (result2, _buf2) = run_wired_at(120, root, &config, &herdr, None, &predicate);
             let dashboard2 = result2.expect("a configured usable binary is a supported state");
             assert!(!dashboard2.file_mode);
+        }
+
+        /// `agent-launch` :: "File mode answers both additions inertly" — the run-time + view
+        /// half; `launch::tests::seam::the_inert_launcher_ignores_set_kind` is the `src/launch.rs`
+        /// half design.md's row names alongside this one. Unlike
+        /// `run_wired_sets_file_mode_from_the_probe`, above — a repository *is* found there, so
+        /// `start_collaborators` wires the real `Launcher` even though no binary answers it —
+        /// this scratch directory holds no `openspec/` anywhere above it, so
+        /// `resolve::find_repo` is `NotFound`, `probed_repo` is `None`, and
+        /// `start_collaborators` hands out `crate::launch::none()`: the two file-mode shapes
+        /// this crate has are not the same collaborator (change-review CRITICAL 1; the scenario
+        /// itself had no test at all before this one).
+        #[test]
+        fn file_mode_answers_both_additions_inertly() {
+            let scratch = ScratchDir::new();
+            let root = scratch.path();
+            let herdr = root.join("does-not-exist-herdr");
+
+            let opened = || true;
+            let stages: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> =
+                vec![(&opened, key(',')), (&opened, key('q'))];
+            let (result, _rows) =
+                run_wired_staged(120, root, &Config::default(), &herdr, None, stages);
+            let dashboard = result.expect("no repository at all is a supported state");
+
+            assert!(
+                dashboard.file_mode,
+                "no binary resolves and no repository is found"
+            );
+            assert_eq!(
+                dashboard.overlay.panel,
+                Some(Panel::Settings),
+                "`,` still opens the panel in file mode"
+            );
+
+            let agent_kind = &dashboard.settings.rows[1];
+            assert_eq!(agent_kind.key, "agent_kind");
+            assert_eq!(
+                agent_kind.provenance,
+                crate::settings::Provenance::Pending,
+                "the row stays Pending: `NoLauncher::drain` never answers, so nothing ever \
+                 adopts a resolution"
+            );
+            assert_eq!(
+                agent_kind.editable,
+                crate::settings::Editable::No {
+                    reason: crate::settings::Reason::Resolving
+                },
+                "a Pending row is not editable"
+            );
+
+            assert!(
+                dashboard.launch.problems.is_empty(),
+                "no Outcome was ever produced, so nothing was refused either: {:?}",
+                dashboard.launch.problems
+            );
+            assert!(!dashboard.launch.in_flight, "no launch was ever requested");
+
+            // `openspec_bin` and `prompts` carry their real values and provenance even with no
+            // repository at all — the panel is still useful in the mode where the dashboard has
+            // no CLI.
+            let openspec_bin = &dashboard.settings.rows[0];
+            assert_eq!(openspec_bin.key, "openspec_bin");
+            assert_eq!(
+                openspec_bin.provenance,
+                crate::settings::Provenance::Unresolved
+            );
+            let prompts = &dashboard.settings.rows[2];
+            assert_eq!(prompts.key, "prompts");
+
+            // The panel renders at both mandated widths (`src/ui/settings.rs`'s own Rects,
+            // `SETTINGSWIDTHS`' terms) without panicking and without losing the Pending row.
+            for (width, height) in [(120u16, 40u16), (60u16, 20u16)] {
+                let buffer = render_at(width, height, &dashboard);
+                let text: String = (0..height).map(|y| row_text(&buffer, y)).collect();
+                assert!(
+                    text.contains("Settings"),
+                    "the panel's own heading row must draw at {width}x{height}: {text}"
+                );
+                assert!(
+                    text.contains("agent_kind"),
+                    "the agent_kind row must draw at {width}x{height}: {text}"
+                );
+            }
         }
 
         // --- seam-resilience group 3: the composition root supplies the resolved root as
