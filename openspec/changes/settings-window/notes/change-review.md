@@ -183,3 +183,42 @@ All fixed in `f423f9a`:
   actually is. The literal `42` is untouched.
 - `specs/dashboard-loop/spec.md:723` — "thirty-two `'static` literals ... at thirty-two
   sites"; `INVENTORY` now holds thirty-seven.
+
+## One root cause behind three findings
+
+W5, the missing `Target::Setting` row, and the vacuous-by-construction failure that row hit
+when it was finally written all have the same cause, and the next reviewer is better served
+meeting it as one fact than as three.
+
+**`tests/doc_contract.rs`' mouse guard reasons about backticked `Action::` tokens and nothing
+else.** It reads the outcome column by scanning for them, and it compares against an observed
+claim set built by executing `mouse_action` over a fixture axis. Three different things fall
+through that:
+
+1. **It over-credits a negation.** `qualified_names(text, "Action::")` has no negation
+   awareness, so a row ending "**Not** `Action::ToggleHelp`" declares `ToggleHelp` as an
+   outcome it covers. Had the outside-band click regressed to `ToggleHelp` — the exact
+   regression design.md Decision 8 corrects — that row would already have covered it and the
+   undocumented leg would have stayed silent. Fixed by writing the disclaimer without the
+   qualifier (`cfd549b`).
+2. **It under-detects a payload.** `outcome_name` matched three `Target` variants and fell
+   through a wildcard, so `Click(Target::Setting(_))` collapsed to a bare `Click` — which the
+   `Target::Change` row already claimed. A whole binding could therefore have no row and no
+   leg would fire. Fixed by making the `Target` match exhaustive with no wildcard arm, so the
+   next variant is a compile error rather than a silent collapse (`380de1f`).
+3. **It cannot observe a state its fixture axis never builds.** The `Claim` axis was
+   `help_open: bool` and `sweep_dashboard` built `Some(Panel::Help)` or `None`, so the
+   settings pass did not exist in the observed set at all. The row documenting it failed as
+   **vacuous** rather than passing — a strictly better failure than 1 and 2, but only because
+   someone wrote the row. Until then the gap was invisible from both directions. Fixed by
+   widening the axis to `OverlayPass { Closed, Help, Settings }` (`380de1f`, task 13.7).
+
+The shared shape: **the guard's strength is bounded by what its fixture axis can build and by
+how literally it reads the table.** Neither bound announces itself — both fail by passing. A
+future change that adds an overlay state, an `Action` payload, or a table convention the
+scanner does not model should assume it has moved one of those bounds, and check by planting
+the defect rather than by reading the guard.
+
+Finding 3 is also the answer to why 2 survived review: the reviewer correctly identified that
+`settings_mouse_action_names()` unions bare names only, but a bare-name union cannot reveal a
+missing payload constituency either — the same blindness, one level up.
