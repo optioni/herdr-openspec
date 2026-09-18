@@ -315,10 +315,10 @@ establish (design.md → Test Strategy).
 ## 11. Acceptance Test — Outer Loop GREEN
 <!-- kind: behavior -->
 
-- [ ] 11.1 VERIFY: Confirm the group 0 tests now pass end to end — the commit reaches
+- [x] 11.1 VERIFY: Confirm the group 0 tests now pass end to end — the commit reaches
       `settings.toml`, the next launch carries `--kind`, and the invocation log holds no second
       `integration status`.
-- [ ] 11.2 REFACTOR: Fold any harness setup duplicated between group 0 and groups 6 and 7 into
+- [x] 11.2 REFACTOR: Fold any harness setup duplicated between group 0 and groups 6 and 7 into
       one helper, or state that none was.
 
 ## 12. Change Review
