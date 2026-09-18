@@ -1,7 +1,8 @@
 # NOIO-VIEW — the PURE files of the render seam name no I/O API at all.
 # Carried forward from detail-view, which added src/ui/tasks.rs, and then from
 # color-palette (design.md -> Boundaries), which adds the colour table: PURE is NINE files
-# rather than eight. The palette belongs in the swept set rather than exempted from it —
+# rather than eight (further widened by help-overlay and settings-window, below, to ELEVEN).
+# The palette belongs in the swept set rather than exempted from it —
 # it is a constant table, so it never reads NO_COLOR, never probes the terminal, and never
 # branches on a colour capability, and this is the gate that proves it.
 # Three files under src/ui/ are still deliberately NOT searched, each for a stated reason:
@@ -30,10 +31,13 @@
 # `palette-help-unswept` controls strike the name from PURE and require PALETTE to fail, so a
 # stray comment mention turns up as a RED `cargo test --test gate_controls` — but the message
 # names PALETTE, not the comment that broke it, which is why the rule is written down here.
-# help-overlay adds the overlay's module below, taking PURE from nine files to TEN: its
-# bindings and rendering are pure data and a pure draw function, on exactly the same terms as
-# every other file already swept here.
-PURE="src/ui/app.rs src/ui/detail.rs src/ui/help.rs src/ui/layout.rs src/ui/list.rs src/ui/markdown.rs src/ui/palette.rs src/ui/tasks.rs src/ui/view.rs src/ui/driver.rs"
+# help-overlay adds the overlay's module below, taking PURE from nine files to TEN (further
+# widened to ELEVEN by settings-window, below): its bindings and rendering are pure data and
+# a pure draw function, on exactly the same terms as every other file already swept here.
+# settings-window adds the settings panel's module, taking PURE from TEN files to ELEVEN: its
+# row grammar and render function are pure, on exactly the same terms every other file here
+# already is.
+PURE="src/ui/app.rs src/ui/detail.rs src/ui/help.rs src/ui/layout.rs src/ui/list.rs src/ui/markdown.rs src/ui/palette.rs src/ui/settings.rs src/ui/tasks.rs src/ui/view.rs src/ui/driver.rs"
 # `tasks::read` is NEW in the pattern, and it is the second deliberate edit this change makes
 # to this block. crate::tasks::read is the filesystem edge of the module ui::tasks renders
 # from, and it matches NONE of the other alternatives - not `std::fs` (the call site writes
@@ -60,4 +64,4 @@ grep -qE 'std::io' src/ui/terminal.rs \
 hits=$(grep -nE "$IO_RE" $PURE || true)
 [ -z "$hits" ] || { echo "NOIO-VIEW FAIL: I/O API in a pure view file:" >&2
                     echo "$hits" >&2; exit 1; }
-echo "NOIO-VIEW OK: 10 pure files carry no I/O API; positive control matched"
+echo "NOIO-VIEW OK: 11 pure files carry no I/O API; positive control matched"

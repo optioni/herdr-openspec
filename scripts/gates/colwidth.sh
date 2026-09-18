@@ -9,10 +9,14 @@ set -u
 # `palette-help-unswept` controls strike the name from PURE and require PALETTE to fail, so a
 # stray comment mention turns up as a RED `cargo test --test gate_controls` — but the message
 # names PALETTE, not the comment that broke it, which is why the rule is written down here.
-# help-overlay adds the overlay's module below, taking PURE from eight files to NINE: it uses
-# ui::layout::columns/truncate_columns for its key column and its truncation, on exactly the
-# same terms every other pure view file already does.
-PURE="src/ui/app.rs src/ui/detail.rs src/ui/help.rs src/ui/list.rs src/ui/markdown.rs src/ui/palette.rs src/ui/tasks.rs src/ui/view.rs src/ui/driver.rs"
+# help-overlay adds the overlay's module below, taking PURE from eight files to NINE (further
+# widened to TEN by settings-window, below): it uses ui::layout::columns/truncate_columns for
+# its key column and its truncation, on exactly the same terms every other pure view file
+# already does.
+# settings-window adds the settings panel's module, taking PURE from NINE files to TEN: it too
+# uses ui::layout::columns/truncate_columns for its key column and its truncation, on exactly
+# the same terms every other pure view file already does.
+PURE="src/ui/app.rs src/ui/detail.rs src/ui/help.rs src/ui/list.rs src/ui/markdown.rs src/ui/palette.rs src/ui/settings.rs src/ui/tasks.rs src/ui/view.rs src/ui/driver.rs"
 PAT='\.chars\(\)\.count\(\)|\.chars\(\)\.take\(|Vec<char>'
 # Control 1: the sweep's OWN pattern must independently match EACH of the three
 # alternatives, one probe per form. A single combined probe line holding all three
@@ -43,4 +47,4 @@ for f in $PURE; do
   fi
 done
 [ "$bad" = "0" ] || exit 1
-echo "COLWIDTH OK: no char-count measurement in the nine pure view files"
+echo "COLWIDTH OK: no char-count measurement in the ten pure view files"
