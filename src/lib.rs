@@ -526,18 +526,28 @@ pub(crate) mod testutil {
     /// request vector, never on an outcome. Synchronous and thread-free.
     pub(crate) struct RecordingLauncher {
         requests: std::cell::RefCell<Vec<crate::launch::Request>>,
+        /// `settings-window`'s addition: every `kind` passed to `set_kind`, in call order —
+        /// `requests`'s own sibling, since a commit reaches this double through a second
+        /// method rather than through `request`.
+        kinds: std::cell::RefCell<Vec<String>>,
     }
 
     impl RecordingLauncher {
         pub(crate) fn new() -> Self {
             Self {
                 requests: std::cell::RefCell::new(Vec::new()),
+                kinds: std::cell::RefCell::new(Vec::new()),
             }
         }
 
         /// Every `Request` passed to `request`, in call order.
         pub(crate) fn requests(&self) -> Vec<crate::launch::Request> {
             self.requests.borrow().clone()
+        }
+
+        /// Every `kind` passed to `set_kind`, in call order.
+        pub(crate) fn kinds(&self) -> Vec<String> {
+            self.kinds.borrow().clone()
         }
     }
 
@@ -548,6 +558,10 @@ pub(crate) mod testutil {
 
         fn drain(&mut self) -> Option<crate::launch::Outcome> {
             None
+        }
+
+        fn set_kind(&mut self, kind: String) {
+            self.kinds.borrow_mut().push(kind);
         }
     }
 
@@ -573,6 +587,8 @@ pub(crate) mod testutil {
         fn drain(&mut self) -> Option<crate::launch::Outcome> {
             self.drain_queue.borrow_mut().pop_front().unwrap_or(None)
         }
+
+        fn set_kind(&mut self, _kind: String) {}
     }
 
     /// An `EventSource` whose wait is a predicate poll, not a fixed sleep: it

@@ -31,6 +31,12 @@ pub enum Intent {
 /// already running. Plain data — no trait, no channel, no handle — so it stays `Clone`,
 /// `PartialEq`, and comparable in a test with no thread. See `agents::attribute`'s `Attribution`
 /// for the same shape of plain-data contract.
+/// `settings-window`'s addition: `Resolve`, sent when `,` opens the settings panel. It starts
+/// no pane and starts no agent — it asks the worker for the agent-kind choice and the
+/// installed list, the same values a `Choice::Ambiguous` refusal already carries, so the panel
+/// can render something other than `Provenance::Pending` as soon as the worker has answered
+/// once. See `specs/agent-launch/spec.md` -> "A committed kind takes effect without
+/// restarting the pane".
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
     Launch {
@@ -41,6 +47,7 @@ pub enum Request {
     Focus {
         pane_id: String,
     },
+    Resolve,
 }
 
 /// `decide`'s answer: do nothing, refuse with a reason, or go ahead with a `Request`.
@@ -62,12 +69,26 @@ pub enum Decision {
 /// chosen — and the record failure and the prompt failure are the only other pair that can
 /// co-occur. Never more, since every earlier failure point returns immediately with exactly
 /// what it has accumulated. Never `Default`,
-/// anywhere in the crate; every construction and destructuring names both fields, with no
+/// anywhere in the crate; every construction and destructuring names all four fields, with no
 /// `..` rest — on exactly `agents::AgentSnapshot`'s and `agents::Attribution`'s terms.
+///
+/// `settings-window`'s addition: `picker` and `resolution`, taking the type from two fields to
+/// four. `picker` is set **only** by a `Request::Launch` whose kind resolves
+/// `Choice::Ambiguous` — the one outcome kind that has an answer the reader can act on without
+/// leaving the pane — and is unset on every other outcome, `Request::Resolve`'s own answer
+/// included, because the panel it would open is already open when that answer arrives.
+/// `resolution` carries the `settings::KindResolution` the worker just computed whenever one
+/// was computed at all: on the `Ambiguous` stop, and on every `Request::Resolve` answer,
+/// `None` everywhere else — a successful or failed launch, a plain refusal, and `Focus` never
+/// touch the kind at all. See `specs/agent-launch/spec.md` -> "An ambiguous agent kind opens
+/// the settings panel instead of picking one" and "A committed kind takes effect without
+/// restarting the pane".
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Outcome {
     pub named: Option<(String, String)>,
     pub problems: Vec<String>,
+    pub picker: bool,
+    pub resolution: Option<crate::settings::KindResolution>,
 }
 
 /// The whole launch policy, a pure total function of its seven arguments. Performs no
@@ -344,6 +365,13 @@ fn run_request(
     request: Request,
 ) -> Outcome {
     match request {
+        // `settings-window`: `handle` answers `Request::Resolve` itself, before this function
+        // is ever reached — it starts no pane and needs none of `run_request`'s three calls.
+        // Matched explicitly, on `Request::Focus`'s own reasoning above, rather than folded
+        // into a wildcard: `Request` gaining a fourth variant later must fail here too.
+        Request::Resolve => {
+            unreachable!("`handle` answers `Request::Resolve` before it reaches `run_request`")
+        }
         Request::Focus { pane_id } => {
             let args = focus_args(&pane_id);
             let refs: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -351,10 +379,14 @@ fn run_request(
                 Ok(_) => Outcome {
                     named: None,
                     problems: Vec::new(),
+                    picker: false,
+                    resolution: None,
                 },
                 Err(err) => Outcome {
                     named: None,
                     problems: vec![herdr_reason(&err)],
+                    picker: false,
+                    resolution: None,
                 },
             }
         }
@@ -371,6 +403,8 @@ fn run_request(
                     return Outcome {
                         named: None,
                         problems: vec![herdr_reason(&err)],
+                        picker: false,
+                        resolution: None,
                     };
                 }
             };
@@ -380,6 +414,8 @@ fn run_request(
                     return Outcome {
                         named: None,
                         problems: vec![reason],
+                        picker: false,
+                        resolution: None,
                     };
                 }
             };
@@ -393,6 +429,8 @@ fn run_request(
                         "{} (agent {agent}, pane {pane})",
                         herdr_reason(&err)
                     )],
+                    picker: false,
+                    resolution: None,
                 };
             }
 
@@ -415,6 +453,8 @@ fn run_request(
             Outcome {
                 named: Some((agent, change)),
                 problems,
+                picker: false,
+                resolution: None,
             }
         }
     }
@@ -457,10 +497,21 @@ pub trait Launcher: Send {
     fn request(&mut self, request: Request);
     /// Take the worker's next answer, if one is ready. Never blocks.
     fn drain(&mut self) -> Option<Outcome>;
+    /// `settings-window`'s addition: replace the worker's session cache of the resolved kind
+    /// with `Choice::Use { kind, source: Source::Recorded }`, so the next launch needs no
+    /// `integration status` call and no pane restart. Never blocks: it stores into a cache
+    /// the worker shares rather than reaching the worker through the request channel — see
+    /// `KindCache`'s own doc comment for the hold discipline that makes this true.
+    fn set_kind(&mut self, kind: String);
 }
 
 /// The inert implementation: `request` discards, `drain` is always `None`, no thread and no
-/// process. What `start_collaborators` uses when no repository was found.
+/// process. What `start_collaborators` uses when no repository was found. A second
+/// **production** implementation rather than a test double — file mode is real — so
+/// `settings-window`'s two additions answer it inertly too: `set_kind` does nothing and
+/// `Request::Resolve` (handed to `request`, which already discards everything) produces no
+/// `Outcome`, deliberately, since a launch in file mode is refused before any kind is ever
+/// consulted.
 struct NoLauncher;
 
 impl Launcher for NoLauncher {
@@ -469,12 +520,34 @@ impl Launcher for NoLauncher {
     fn drain(&mut self) -> Option<Outcome> {
         None
     }
+
+    fn set_kind(&mut self, _kind: String) {}
 }
 
 /// The inert `Launcher`. See [`NoLauncher`].
 pub fn none() -> Box<dyn Launcher> {
     Box::new(NoLauncher)
 }
+
+/// `settings-window`'s addition: the launcher's session cache of the resolved kind, shared
+/// between the worker thread and `RealLauncher::set_kind` — `Arc` so both sides own a handle
+/// with no channel and no request in between, `Mutex` so a concurrent read and a concurrent
+/// replace serialise rather than race. Caches the whole `KindResolution`, not the bare
+/// `Choice`, so a cache hit answers a later `Request::Resolve` with the same installed list
+/// the first resolution carried, not a guess reconstructed from the `Choice` alone.
+///
+/// **Hold discipline** (design.md -> Decision 14): the lock is taken only to read or replace
+/// the cached value — never across `resolve_kind`'s own `HerdrCli` call, and never across
+/// `run_request`'s. Every acquisition here is a `lock()`, a clone or a replace, and a drop,
+/// with no `HerdrCli` call between the lock and the unlock. That bound is what makes
+/// `set_kind` — a plain replace under the same lock — return without ever queuing behind a
+/// launch already parked inside a thirty-second `agent start`; see
+/// `mod seam::set_kind_returns_while_the_worker_is_blocked_mid_launch` for the scenario that
+/// would deadlock or misorder against a broken implementation. Lives in this module and is
+/// named from nowhere under `src/ui/` — `NOBLOCK`'s lock-naming leg does not cover it (it is
+/// scoped to `src/ui/`), which is deliberate and is why this comment, not that gate, is the
+/// evidence.
+type KindCache = std::sync::Arc<std::sync::Mutex<Option<crate::settings::KindResolution>>>;
 
 /// The real implementation, private on exactly `refresh::RealRefresher`'s and
 /// `agents::RealAgentPoll`'s terms: nothing outside this module names it, since every consumer
@@ -493,6 +566,9 @@ struct RealLauncher {
     /// separate from `dead` because `request` can detect the death before any `drain` runs,
     /// and the one report must still happen on a `drain` call, not a `request` call.
     pending_death: bool,
+    /// `settings-window`'s addition: the handle `set_kind` writes through. See `KindCache`'s
+    /// own doc comment for the hold discipline.
+    cache: KindCache,
 }
 
 impl Launcher for RealLauncher {
@@ -523,6 +599,27 @@ impl Launcher for RealLauncher {
             }
         }
     }
+
+    fn set_kind(&mut self, kind: String) {
+        let mut guard = self
+            .cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // A commit carries over whatever installed list the cache already held, if any —
+        // `set_kind` never talks to Herdr, so it has none of its own to offer, and a stale
+        // shortlist beats an empty one for a panel reopened after the commit.
+        let installed = guard
+            .as_ref()
+            .map(|resolution| resolution.installed.clone())
+            .unwrap_or_default();
+        *guard = Some(crate::settings::KindResolution {
+            choice: crate::integration::Choice::Use {
+                kind,
+                source: crate::integration::Source::Recorded,
+            },
+            installed,
+        });
+    }
 }
 
 /// The `Outcome` reported exactly once when the launcher's worker has stopped answering, on
@@ -532,6 +629,8 @@ fn dead_worker_outcome() -> Outcome {
     Outcome {
         named: None,
         problems: vec!["the launcher's worker has stopped answering".to_string()],
+        picker: false,
+        resolution: None,
     }
 }
 
@@ -546,12 +645,17 @@ pub fn start(
 ) -> Box<dyn Launcher> {
     let (request_tx, request_rx) = std::sync::mpsc::channel();
     let (result_tx, result_rx) = std::sync::mpsc::channel::<Outcome>();
-    std::thread::spawn(move || worker_body(cli, settings, request_rx, result_tx));
+    // `settings-window`'s addition: the two handles to the one `KindCache`, one moved into
+    // the worker, one kept here for `set_kind` — see that type's own doc comment.
+    let cache: KindCache = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let worker_cache = std::sync::Arc::clone(&cache);
+    std::thread::spawn(move || worker_body(cli, settings, request_rx, result_tx, worker_cache));
     Box::new(RealLauncher {
         request_tx,
         result_rx,
         dead: false,
         pending_death: false,
+        cache,
     })
 }
 
@@ -571,7 +675,8 @@ pub const SETTLE_BUDGET: std::time::Duration = std::time::Duration::from_secs(35
 /// A `while Instant::now() < deadline` poll, never a fixed sleep, on exactly `NOSLEEP` leg 1's
 /// terms; declared here, below `start`'s single `thread::spawn`, so `NOBLOCK` leg 3's cut of
 /// `src/launch.rs`'s production slice already excludes it — no gate is edited to admit it. The
-/// `Launcher` trait still carries exactly two non-blocking methods; this free function is the
+/// `Launcher` trait's three methods are all still non-blocking — `settings-window`'s
+/// `set_kind` included, see `KindCache`'s own doc comment — and this free function is the
 /// only place in the crate that waits on one. `seam-resilience` -> design.md -> Decision 6.
 pub fn settle(launcher: &mut dyn Launcher, budget: std::time::Duration) -> Option<Outcome> {
     let deadline = std::time::Instant::now() + budget;
@@ -592,26 +697,22 @@ pub fn settle(launcher: &mut dyn Launcher, budget: std::time::Duration) -> Optio
 /// The worker's whole body: consumes every request and runs it through `run_request`, sending
 /// its `Outcome` back. Returns when the request channel disconnects, on exactly
 /// `refresh::worker_body`'s and `agents::worker_body`'s lifecycle.
+///
+/// `settings-window`'s addition: `cache` replaces the former local `Option<Choice>` — the
+/// resolved kind now lives behind the shared `KindCache` so `RealLauncher::set_kind` can
+/// replace it from the render thread between two requests, not only `handle` from in here.
 fn worker_body(
     cli: std::sync::Arc<dyn crate::cli::HerdrCli>,
     settings: Settings,
     request_rx: std::sync::mpsc::Receiver<Request>,
     result_tx: std::sync::mpsc::Sender<Outcome>,
+    cache: KindCache,
 ) {
-    // The resolved kind, cached for the rest of the process the first time a
-    // `Request::Launch` is handled. A pane whose reader never presses a launch
-    // key issues no `integration status` call at all, and a second launch
-    // reuses this rather than reading the status again. Deliberately not
-    // invalidated mid-session: "Configuration SHALL be read once per process"
-    // already holds for every other value, and restarting the pane is the
-    // existing remedy.
-    let mut cached: Option<crate::integration::Choice> = None;
-
     loop {
         let Ok(request) = request_rx.recv() else {
             return; // the launcher was dropped
         };
-        let outcome = handle(cli.as_ref(), &settings, &mut cached, request);
+        let outcome = handle(cli.as_ref(), &settings, &cache, request);
         if result_tx.send(outcome).is_err() {
             return; // nobody reads the result any more
         }
@@ -623,10 +724,14 @@ fn worker_body(
 /// [`run_request`]'s three calls with the resolution's own problems leading the
 /// outcome's. Free to block — it is reached only from inside the
 /// `thread::spawn` closure above.
+///
+/// `settings-window`'s addition: `Request::Resolve`, answered from `cached_or_resolve` on
+/// exactly the terms a `Request::Launch` already used it, but returning before `run_request`
+/// is ever reached — no pane split, no agent start, on any path.
 fn handle(
     cli: &dyn crate::cli::HerdrCli,
     settings: &Settings,
-    cached: &mut Option<crate::integration::Choice>,
+    cache: &KindCache,
     request: Request,
 ) -> Outcome {
     // `Focus` needs no kind and no binary: it focuses an agent that is already
@@ -646,6 +751,20 @@ fn handle(
         );
     }
 
+    // `settings-window`: a read, never an invalidation — the panel wants the same resolution
+    // a `Choice::Ambiguous` refusal already carries, and wants it without starting anything.
+    // `picker` stays unset: the panel that would open it is already open, since this is only
+    // ever sent on the transition into it.
+    if matches!(request, Request::Resolve) {
+        let (resolution, problems) = cached_or_resolve(cli, settings, cache);
+        return Outcome {
+            named: None,
+            problems,
+            picker: false,
+            resolution: Some(resolution),
+        };
+    }
+
     // `agent-prompts`: a launch carrying no resolved binary is refused before
     // resolution and before any Herdr call. `Collaborators::file_mode` is
     // computed from the CLI handle, **not** from `Settings`, so the two are
@@ -659,6 +778,8 @@ fn handle(
                  an agent would be sent"
                     .to_string(),
             ],
+            picker: false,
+            resolution: None,
         };
     };
 
@@ -672,15 +793,9 @@ fn handle(
     // succeeded. `Choice::Ambiguous` below is not an exception to this: its
     // problem is re-derived from the cached choice on every press, because it
     // is the refusal itself rather than a warning beside a working action.
-    let mut problems = Vec::new();
-    if cached.is_none() {
-        let (choice, resolution_problems) = resolve_kind(cli, settings);
-        *cached = Some(choice);
-        problems = resolution_problems;
-    }
-    let choice = cached.as_ref().expect("the choice was just cached");
+    let (resolution, mut problems) = cached_or_resolve(cli, settings, cache);
 
-    let kind = match choice {
+    let kind = match &resolution.choice {
         crate::integration::Choice::Use { kind, .. } => kind.clone(),
         // The one resolution outcome that stops a launch: the evidence exists
         // and points two ways at once, so no `--kind` value can be produced and
@@ -699,9 +814,13 @@ fn handle(
                 "set agent_kind ({}): more than one agent integration is installed",
                 installed.join(", ")
             ));
+            // `settings-window`: the one place `picker` is set, and the resolution the panel
+            // it opens renders instead of `Provenance::Pending`.
             return Outcome {
                 named: None,
                 problems,
+                picker: true,
+                resolution: Some(resolution),
             };
         }
     };
@@ -721,7 +840,37 @@ fn handle(
     Outcome {
         named: outcome.named,
         problems,
+        picker: false,
+        resolution: None,
     }
+}
+
+/// `settings-window`'s addition: the once-per-session gate every `Request::Launch` and
+/// `Request::Resolve` shares. A populated cache is cloned out and returned with no further
+/// call — the lock is dropped before this function returns in that branch, let alone before
+/// `resolve_kind`'s `HerdrCli` call, which a cache hit never reaches at all. A miss resolves
+/// through Herdr, on exactly the terms `handle` used to run inline, and then writes the
+/// result back under a second, equally short acquisition — never the same one a `set_kind`
+/// racing it would have to wait behind. See `KindCache`'s own doc comment for the discipline
+/// this keeps.
+fn cached_or_resolve(
+    cli: &dyn crate::cli::HerdrCli,
+    settings: &Settings,
+    cache: &KindCache,
+) -> (crate::settings::KindResolution, Vec<String>) {
+    let hit = cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    if let Some(resolution) = hit {
+        return (resolution, Vec::new());
+    }
+    let (choice, installed, problems) = resolve_kind(cli, settings);
+    let resolution = crate::settings::KindResolution { choice, installed };
+    *cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(resolution.clone());
+    (resolution, problems)
 }
 
 /// Read `herdr integration status` once and fold it into the five-step
@@ -733,10 +882,14 @@ fn handle(
 /// rather than forwarded one per line, so a seventeen-line status whose format
 /// changed degrades the explanation rather than putting eighteen `! ` rows above
 /// the change list.
+///
+/// `settings-window`'s addition: the installed list travels back beside the choice, so
+/// `cached_or_resolve` can build a `KindResolution` the panel can render — before this change
+/// the list was computed and then discarded, since only `Choice::Ambiguous` carried it.
 fn resolve_kind(
     cli: &dyn crate::cli::HerdrCli,
     settings: &Settings,
-) -> (crate::integration::Choice, Vec<String>) {
+) -> (crate::integration::Choice, Vec<String>, Vec<String>) {
     let mut problems = Vec::new();
     let integrations = match cli.run(&["integration", "status"]) {
         Ok(text) => {
@@ -778,7 +931,13 @@ fn resolve_kind(
         problems.extend(resolved.problems);
     }
 
-    (resolved.choice, problems)
+    let installed: Vec<String> = integrations
+        .into_iter()
+        .filter(|i| i.installed)
+        .map(|i| i.kind)
+        .collect();
+
+    (resolved.choice, installed, problems)
 }
 
 #[cfg(test)]
@@ -1570,6 +1729,8 @@ mod tests {
                 Outcome {
                     named: Some(("c-2fa-support".to_string(), "2fa-support".to_string())),
                     problems: Vec::new(),
+                    picker: false,
+                    resolution: None,
                 }
             );
 
@@ -1616,7 +1777,12 @@ mod tests {
             );
 
             assert_eq!(fake.calls().len(), 1);
-            let Outcome { named, problems } = outcome;
+            let Outcome {
+                named,
+                problems,
+                picker: _,
+                resolution: _,
+            } = outcome;
             assert_eq!(named, None);
             assert_eq!(problems.len(), 1, "a reason must be present");
             let problem = &problems[0];
@@ -1663,7 +1829,12 @@ mod tests {
             );
 
             assert_eq!(fake.calls().len(), 1);
-            let Outcome { named, problems } = outcome;
+            let Outcome {
+                named,
+                problems,
+                picker: _,
+                resolution: _,
+            } = outcome;
             assert_eq!(problems.len(), 1, "a reason must be present");
             let problem = &problems[0];
             assert!(problem.contains("pane_split_failed"), "{problem}");
@@ -1707,7 +1878,12 @@ mod tests {
                         && args.get(1).map(String::as_str) == Some("close")),
                 "the plugin must never issue pane close"
             );
-            let Outcome { named, problems } = outcome;
+            let Outcome {
+                named,
+                problems,
+                picker: _,
+                resolution: _,
+            } = outcome;
             assert_eq!(problems.len(), 1, "a reason must be present");
             let problem = &problems[0];
             assert!(problem.contains("agent_pane_not_found"), "{problem}");
@@ -1751,7 +1927,12 @@ mod tests {
                 mapping.names.get("c-2fa-support"),
                 Some(&"2fa-support".to_string())
             );
-            let Outcome { named, problems } = outcome;
+            let Outcome {
+                named,
+                problems,
+                picker: _,
+                resolution: _,
+            } = outcome;
             assert_eq!(
                 named,
                 Some(("c-2fa-support".to_string(), "2fa-support".to_string())),
@@ -1795,7 +1976,12 @@ mod tests {
                 3,
                 "the prompt must still be sent despite the recording failure"
             );
-            let Outcome { named, problems } = outcome;
+            let Outcome {
+                named,
+                problems,
+                picker: _,
+                resolution: _,
+            } = outcome;
             assert_eq!(
                 named,
                 Some(("c-2fa-support".to_string(), "2fa-support".to_string()))
@@ -1849,7 +2035,12 @@ mod tests {
             );
 
             assert_eq!(fake.calls().len(), 3);
-            let Outcome { named, problems } = outcome;
+            let Outcome {
+                named,
+                problems,
+                picker: _,
+                resolution: _,
+            } = outcome;
             assert_eq!(
                 named,
                 Some(("c-2fa-support".to_string(), "2fa-support".to_string())),
@@ -1922,6 +2113,8 @@ mod tests {
                 Outcome {
                     named: Some((derived, change.to_string())),
                     problems: Vec::new(),
+                    picker: false,
+                    resolution: None,
                 }
             );
         }
@@ -1960,6 +2153,8 @@ mod tests {
                 Outcome {
                     named: Some((derived, change.to_string())),
                     problems: Vec::new(),
+                    picker: false,
+                    resolution: None,
                 }
             );
         }
@@ -1993,6 +2188,8 @@ mod tests {
                 Outcome {
                     named: Some(("add-auth".to_string(), "add-auth".to_string())),
                     problems: Vec::new(),
+                    picker: false,
+                    resolution: None,
                 }
             );
         }
@@ -2031,7 +2228,12 @@ mod tests {
                     .any(|(_, args)| args.get(1).map(String::as_str) == Some("close")),
                 "no pane close entry"
             );
-            let Outcome { named: _, problems } = outcome;
+            let Outcome {
+                named: _,
+                problems,
+                picker: _,
+                resolution: _,
+            } = outcome;
             assert_eq!(problems.len(), 1, "a reason must be present");
             let problem = &problems[0];
             assert!(problem.contains("agent_name_taken"), "{problem}");
@@ -2115,6 +2317,8 @@ mod tests {
                 Outcome {
                     named: None,
                     problems: Vec::new(),
+                    picker: false,
+                    resolution: None,
                 }
             );
         }
@@ -2145,7 +2349,12 @@ mod tests {
                 },
             );
 
-            let Outcome { named, problems } = outcome;
+            let Outcome {
+                named,
+                problems,
+                picker: _,
+                resolution: _,
+            } = outcome;
             assert_eq!(named, None);
             assert_eq!(problems.len(), 1, "a reason must be present");
             let problem = &problems[0];
@@ -2277,12 +2486,12 @@ mod tests {
             );
 
             let settings = settings(&state, None, None);
-            let mut cached = None;
+            let cache: crate::launch::KindCache = std::sync::Arc::new(std::sync::Mutex::new(None));
             for _ in 0..2 {
                 handle(
                     &fake,
                     &settings,
-                    &mut cached,
+                    &cache,
                     launch("2fa-support", Intent::Apply),
                 );
             }
@@ -2312,18 +2521,21 @@ mod tests {
             let fake = FakeCli::new();
             fake.register_herdr(&["agent", "focus", "wD:pJ"], Ok(String::new()));
 
-            let mut cached = None;
+            let cache: crate::launch::KindCache = std::sync::Arc::new(std::sync::Mutex::new(None));
             handle(
                 &fake,
                 &settings(&state, None, None),
-                &mut cached,
+                &cache,
                 Request::Focus {
                     pane_id: "wD:pJ".to_string(),
                 },
             );
 
             assert_eq!(log(&fake), vec!["agent focus wD:pJ".to_string()]);
-            assert!(cached.is_none(), "g costs no resolution at all");
+            assert!(
+                cache.lock().expect("cache mutex poisoned").is_none(),
+                "g costs no resolution at all"
+            );
         }
 
         #[test]
@@ -2334,11 +2546,11 @@ mod tests {
 
             let mut with_none = settings(&state, None, None);
             with_none.openspec_bin = None;
-            let mut cached = None;
+            let cache: crate::launch::KindCache = std::sync::Arc::new(std::sync::Mutex::new(None));
             let outcome = handle(
                 &fake,
                 &with_none,
-                &mut cached,
+                &cache,
                 Request::Focus {
                     pane_id: "wD:pJ".to_string(),
                 },
@@ -2348,7 +2560,7 @@ mod tests {
             assert_eq!(outcome.problems, Vec::<String>::new());
 
             // The same settings refuse a launch before any Herdr call at all.
-            let refused = handle(&fake, &with_none, &mut cached, launch("x", Intent::Apply));
+            let refused = handle(&fake, &with_none, &cache, launch("x", Intent::Apply));
             assert_eq!(refused.named, None);
             assert_eq!(refused.problems.len(), 1, "{:?}", refused.problems);
             assert!(
@@ -2376,11 +2588,12 @@ mod tests {
                     &built_in(Intent::Apply, "2fa-support"),
                 );
 
-                let mut cached = None;
+                let cache: crate::launch::KindCache =
+                    std::sync::Arc::new(std::sync::Mutex::new(None));
                 let outcome = handle(
                     &fake,
                     &settings(&state, configured, recorded),
-                    &mut cached,
+                    &cache,
                     launch("2fa-support", Intent::Apply),
                 );
 
@@ -2424,11 +2637,11 @@ mod tests {
                 &built_in(Intent::Apply, "2fa-support"),
             );
 
-            let mut cached = None;
+            let cache: crate::launch::KindCache = std::sync::Arc::new(std::sync::Mutex::new(None));
             let outcome = handle(
                 &fake,
                 &settings(&state, None, None),
-                &mut cached,
+                &cache,
                 launch("2fa-support", Intent::Apply),
             );
 
@@ -2465,16 +2678,21 @@ mod tests {
                     &built_in(Intent::Apply, "2fa-support"),
                 );
 
-                let mut cached = None;
+                let cache: crate::launch::KindCache =
+                    std::sync::Arc::new(std::sync::Mutex::new(None));
                 let outcome = handle(
                     &fake,
                     &settings(&state, None, None),
-                    &mut cached,
+                    &cache,
                     launch("2fa-support", Intent::Apply),
                 );
 
                 assert_eq!(
-                    cached,
+                    cache
+                        .lock()
+                        .expect("cache mutex poisoned")
+                        .as_ref()
+                        .map(|resolution| resolution.choice.clone()),
                     Some(Choice::Use {
                         kind: "claude".to_string(),
                         source: Source::LastResort,
@@ -2510,11 +2728,11 @@ mod tests {
 
             let mut with_state = settings(&state, None, None);
             with_state.state_dir = Some(state.path().to_path_buf());
-            let mut cached = None;
+            let cache: crate::launch::KindCache = std::sync::Arc::new(std::sync::Mutex::new(None));
             let outcome = handle(
                 &fake,
                 &with_state,
-                &mut cached,
+                &cache,
                 launch("2fa-support", Intent::Apply),
             );
 
@@ -2526,6 +2744,19 @@ mod tests {
             assert!(problem.contains("codex"), "{problem}");
             assert!(problem.contains("agent_kind"), "{problem}");
             assert_eq!(before, snapshot(state.path()));
+            // `settings-window`: the two fields `Outcome` gained — `picker` is the signal the
+            // `drain` that adopts this outcome opens the settings panel on, and `resolution`
+            // is what that panel renders instead of `Provenance::Pending`.
+            assert!(outcome.picker, "an ambiguous stop sets picker");
+            assert_eq!(
+                outcome.resolution,
+                Some(crate::settings::KindResolution {
+                    choice: Choice::Ambiguous {
+                        installed: vec!["claude".to_string(), "codex".to_string()],
+                    },
+                    installed: vec!["claude".to_string(), "codex".to_string()],
+                })
+            );
 
             // A second press answers identically. The ambiguous problem is
             // **re-derived** from the cached `Choice` rather than replayed from
@@ -2536,7 +2767,7 @@ mod tests {
             let again = handle(
                 &fake,
                 &with_state,
-                &mut cached,
+                &cache,
                 launch("2fa-support", Intent::Apply),
             );
             assert_eq!(again, outcome, "the second press answers identically");
@@ -2560,11 +2791,11 @@ mod tests {
                 &built_in(Intent::Apply, "2fa-support"),
             );
 
-            let mut cached = None;
+            let cache: crate::launch::KindCache = std::sync::Arc::new(std::sync::Mutex::new(None));
             let outcome = handle(
                 &fake,
                 &settings(&state, Some("codex"), None),
-                &mut cached,
+                &cache,
                 launch("2fa-support", Intent::Apply),
             );
 
@@ -2585,11 +2816,11 @@ mod tests {
                 &built_in(Intent::Apply, "2fa-support"),
             );
 
-            let mut cached = None;
+            let cache: crate::launch::KindCache = std::sync::Arc::new(std::sync::Mutex::new(None));
             handle(
                 &fake,
                 &settings(&state, Some("codex"), None),
-                &mut cached,
+                &cache,
                 launch("2fa-support", Intent::Apply),
             );
 
@@ -2623,9 +2854,9 @@ mod tests {
             }
 
             let settings = settings(&state, None, None);
-            let mut cached = None;
+            let cache: crate::launch::KindCache = std::sync::Arc::new(std::sync::Mutex::new(None));
             for intent in [Intent::Apply, Intent::Continue, Intent::Archive] {
-                handle(&fake, &settings, &mut cached, launch("add-auth", intent));
+                handle(&fake, &settings, &cache, launch("add-auth", intent));
             }
 
             let log = log(&fake);
@@ -2687,11 +2918,12 @@ mod tests {
                     &built_in(Intent::Apply, "2fa-support"),
                 );
 
-                let mut cached = None;
+                let cache: crate::launch::KindCache =
+                    std::sync::Arc::new(std::sync::Mutex::new(None));
                 handle(
                     &fake,
                     &settings(&state, Some(kind), None),
-                    &mut cached,
+                    &cache,
                     launch("2fa-support", Intent::Apply),
                 );
 
@@ -2737,11 +2969,11 @@ mod tests {
                 .into_iter()
                 .collect(),
             );
-            let mut cached = None;
+            let cache: crate::launch::KindCache = std::sync::Arc::new(std::sync::Mutex::new(None));
             handle(
                 &fake,
                 &with_override,
-                &mut cached,
+                &cache,
                 launch("2fa-support", Intent::Apply),
             );
 
@@ -2803,11 +3035,11 @@ mod tests {
 
             let mut with_state = settings(&state, None, None);
             with_state.state_dir = Some(blocked.clone());
-            let mut cached = None;
+            let cache: crate::launch::KindCache = std::sync::Arc::new(std::sync::Mutex::new(None));
             let outcome = handle(
                 &fake,
                 &with_state,
-                &mut cached,
+                &cache,
                 launch("2fa-support", Intent::Apply),
             );
 
@@ -2878,11 +3110,11 @@ mod tests {
 
             let mut with_state = settings(&scratch, None, None);
             with_state.state_dir = Some(blocked.clone());
-            let mut cached = None;
+            let cache: crate::launch::KindCache = std::sync::Arc::new(std::sync::Mutex::new(None));
             let first = handle(
                 &fake,
                 &with_state,
-                &mut cached,
+                &cache,
                 launch("2fa-support", Intent::Apply),
             );
             assert_eq!(first.problems.len(), 4, "{:?}", first.problems);
@@ -2898,7 +3130,7 @@ mod tests {
             let second = handle(
                 &fake,
                 &with_state,
-                &mut cached,
+                &cache,
                 launch("2fa-support", Intent::Apply),
             );
             assert_eq!(
@@ -2906,6 +3138,8 @@ mod tests {
                 Outcome {
                     named: Some(("c-2fa-support".to_string(), "2fa-support".to_string())),
                     problems: Vec::new(),
+                    picker: false,
+                    resolution: None,
                 }
             );
             assert!(
@@ -2930,11 +3164,11 @@ mod tests {
                 &built_in(Intent::Apply, "2fa-support"),
             );
 
-            let mut cached = None;
+            let cache: crate::launch::KindCache = std::sync::Arc::new(std::sync::Mutex::new(None));
             let outcome = handle(
                 &fake,
                 &settings(&state, None, Some("gemini")),
-                &mut cached,
+                &cache,
                 launch("2fa-support", Intent::Apply),
             );
 
@@ -2958,11 +3192,11 @@ mod tests {
             start_ok(&fake, "add-auth", "codex", "wD:pJ");
             prompt_ok(&fake, "add-auth", &built_in(Intent::Apply, "add-auth"));
 
-            let mut cached = None;
+            let cache: crate::launch::KindCache = std::sync::Arc::new(std::sync::Mutex::new(None));
             let outcome = handle(
                 &fake,
                 &settings(&state, None, None),
-                &mut cached,
+                &cache,
                 launch("add-auth", Intent::Apply),
             );
 
@@ -3004,11 +3238,11 @@ mod tests {
 
             let mut with_root = settings(&state, None, None);
             with_root.repo = root;
-            let mut cached = None;
+            let cache: crate::launch::KindCache = std::sync::Arc::new(std::sync::Mutex::new(None));
             handle(
                 &fake,
                 &with_root,
-                &mut cached,
+                &cache,
                 launch("2fa-support", Intent::Apply),
             );
 
@@ -3067,6 +3301,7 @@ mod tests {
             let (request_tx, request_rx) = std::sync::mpsc::channel::<Request>();
             let (result_tx, result_rx) = std::sync::mpsc::channel::<Outcome>();
             let (exit_tx, exit_rx) = std::sync::mpsc::channel::<()>();
+            let cache: super::super::KindCache = std::sync::Arc::new(std::sync::Mutex::new(None));
             std::thread::spawn(move || {
                 let _exit_tx = exit_tx;
                 super::super::worker_body(
@@ -3074,6 +3309,7 @@ mod tests {
                     settings_for_test(PathBuf::from("/repo"), None),
                     request_rx,
                     result_tx,
+                    cache,
                 );
             });
             (Box::new(TestLauncher { request_tx }), result_rx, exit_rx)
@@ -3091,6 +3327,8 @@ mod tests {
             fn drain(&mut self) -> Option<Outcome> {
                 None
             }
+
+            fn set_kind(&mut self, _kind: String) {}
         }
 
         #[test]
@@ -3207,6 +3445,7 @@ mod tests {
                 result_rx,
                 dead: false,
                 pending_death: false,
+                cache: std::sync::Arc::new(std::sync::Mutex::new(None)),
             });
 
             let request = || Request::Launch {
@@ -3217,7 +3456,12 @@ mod tests {
 
             launcher.request(request());
             match launcher.drain() {
-                Some(Outcome { named, problems }) => {
+                Some(Outcome {
+                    named,
+                    problems,
+                    picker: _,
+                    resolution: _,
+                }) => {
                     assert_eq!(named, None);
                     assert_eq!(problems.len(), 1, "a reason must be present: {problems:?}");
                     assert!(problems[0].contains("launch"), "{}", problems[0]);
@@ -3250,10 +3494,16 @@ mod tests {
                 result_rx,
                 dead: false,
                 pending_death: false,
+                cache: std::sync::Arc::new(std::sync::Mutex::new(None)),
             });
 
             match launcher.drain() {
-                Some(Outcome { named, problems }) => {
+                Some(Outcome {
+                    named,
+                    problems,
+                    picker: _,
+                    resolution: _,
+                }) => {
                     assert_eq!(named, None);
                     assert_eq!(problems.len(), 1, "a reason must be present: {problems:?}");
                     assert!(problems[0].contains("launch"), "{}", problems[0]);
@@ -3294,6 +3544,8 @@ mod tests {
                 Outcome {
                     named: None,
                     problems: Vec::new(),
+                    picker: false,
+                    resolution: None,
                 }
             );
         }
@@ -3390,8 +3642,15 @@ mod tests {
             let outcome = Outcome {
                 named: None,
                 problems: Vec::new(),
+                picker: false,
+                resolution: None,
             };
-            let Outcome { named, problems } = outcome;
+            let Outcome {
+                named,
+                problems,
+                picker: _,
+                resolution: _,
+            } = outcome;
             assert_eq!(named, None);
             assert_eq!(problems, Vec::<String>::new());
         }
@@ -3428,6 +3687,7 @@ mod tests {
                         intent: _,
                     } => {}
                     Request::Focus { pane_id: _ } => {}
+                    Request::Resolve => {}
                 }
             }
             assert_known(&Request::Launch {
@@ -3438,6 +3698,249 @@ mod tests {
             assert_known(&Request::Focus {
                 pane_id: "x".to_string(),
             });
+            assert_known(&Request::Resolve);
+        }
+
+        /// A `Settings` for the seam tests that need an *unresolved* kind — no configured or
+        /// recorded value, so the precedence reaches step 3/4 (sole integration or ambiguous)
+        /// rather than `settings_for_test`'s own step 1. `state_dir: None` is safe here
+        /// because every launch below names `change == agent`, and `state::record` is a
+        /// same-name no-op regardless of the directory (`state.rs` -> `record`).
+        fn settings_ambiguous_for_test(repo: PathBuf) -> crate::launch::Settings {
+            crate::launch::Settings {
+                repo,
+                configured_kind: None,
+                recorded_kind: None,
+                prompts: std::collections::BTreeMap::new(),
+                openspec_bin: Some(PathBuf::from(OPENSPEC)),
+                state_dir: None,
+            }
+        }
+
+        const OPENSPEC: &str = "/opt/bin/openspec";
+
+        /// Poll `launcher.drain()` to a deadline, on `settle`'s own shape but local to this
+        /// module's tests so each one states its own budget rather than importing the
+        /// production constant. Never a fixed sleep — `std::thread::yield_now()` has no
+        /// duration, so `NOSLEEP` does not need to see a deadline around it.
+        fn drain_within(launcher: &mut dyn Launcher, budget: Duration) -> Option<Outcome> {
+            let deadline = Instant::now() + budget;
+            while Instant::now() < deadline {
+                if let Some(outcome) = launcher.drain() {
+                    return Some(outcome);
+                }
+                std::thread::yield_now();
+            }
+            None
+        }
+
+        /// `agent-launch` :: "The next launch uses the committed kind and issues no status
+        /// call" — the real threaded `Launcher`, a real ambiguous stop, a real `set_kind`
+        /// commit, and a real second launch, asserted against the fake's own invocation log
+        /// rather than against `handle`'s return value directly, so the worker's session
+        /// cache — not a test double standing in for it — is what is under test.
+        #[test]
+        fn the_next_launch_uses_the_committed_kind_and_issues_no_status_call() {
+            let repo = PathBuf::from("/repo");
+            let openspec = PathBuf::from(OPENSPEC);
+            let fake = std::sync::Arc::new(FakeCli::new());
+            status_ok(&fake);
+            fake.register_herdr(
+                &[
+                    "pane", "split", "--cwd", "/repo", "--direction", "right", "--no-focus",
+                ],
+                Ok(r#"{"id":"cli:pane:split","result":{"pane":{"pane_id":"wD:pJ"}},"type":"pane_info"}"#
+                    .to_string()),
+            );
+            fake.register_herdr(
+                &[
+                    "agent", "start", "add-auth", "--kind", "codex", "--pane", "wD:pJ",
+                ],
+                Ok(r#"{"id":"cli:agent:start","result":{"type":"agent_started"}}"#.to_string()),
+            );
+            let prompt = crate::launch::prompt_text(
+                Intent::Apply,
+                "add-auth",
+                &openspec,
+                &std::collections::BTreeMap::new(),
+            );
+            fake.register_herdr(&["agent", "prompt", "add-auth", &prompt], Ok(String::new()));
+
+            let cli: std::sync::Arc<dyn crate::cli::HerdrCli> = fake.clone();
+            let mut launcher = super::super::start(cli, settings_ambiguous_for_test(repo));
+
+            let request = || Request::Launch {
+                change: "add-auth".to_string(),
+                agent: "add-auth".to_string(),
+                intent: Intent::Apply,
+            };
+
+            launcher.request(request());
+            let ambiguous = drain_within(launcher.as_mut(), Duration::from_secs(10))
+                .expect("the first launch must answer within 10s");
+            assert!(ambiguous.picker, "an ambiguous stop sets picker");
+            assert_eq!(
+                fake.calls().len(),
+                1,
+                "one integration status call, no pane"
+            );
+
+            launcher.set_kind("codex".to_string());
+
+            launcher.request(request());
+            let committed = drain_within(launcher.as_mut(), Duration::from_secs(10))
+                .expect("the second launch must answer within 10s");
+            assert_eq!(committed.problems, Vec::<String>::new());
+            assert!(!committed.picker);
+
+            let calls = fake.calls();
+            assert_eq!(
+                calls.len(),
+                4,
+                "one status plus pane split, agent start, agent prompt: {calls:?}"
+            );
+            assert_eq!(calls[0].1[0], "integration");
+            assert_eq!(calls[1].1[0], "pane");
+            assert_eq!(
+                calls[2].1,
+                vec![
+                    "agent", "start", "add-auth", "--kind", "codex", "--pane", "wD:pJ"
+                ]
+            );
+            assert_eq!(calls[3].1[0], "agent");
+            assert!(
+                calls[1..]
+                    .iter()
+                    .all(|(_, args)| args.first().map(String::as_str) != Some("integration")),
+                "no second status call: {calls:?}"
+            );
+        }
+
+        /// `agent-launch` :: "Opening the panel resolves the kind once and launches nothing" —
+        /// three `Request::Resolve`s against the real threaded `Launcher`; only the first
+        /// reaches `integration status`, and none of the three issues `pane split`, `agent
+        /// start`, or `agent prompt`.
+        #[test]
+        fn opening_the_panel_resolves_the_kind_once_and_launches_nothing() {
+            let fake = std::sync::Arc::new(FakeCli::new());
+            status_ok(&fake);
+            let cli: std::sync::Arc<dyn crate::cli::HerdrCli> = fake.clone();
+            let mut launcher =
+                super::super::start(cli, settings_ambiguous_for_test(PathBuf::from("/repo")));
+
+            launcher.request(Request::Resolve);
+            let first = drain_within(launcher.as_mut(), Duration::from_secs(10))
+                .expect("the first Resolve must answer within 10s");
+            assert_eq!(first.named, None);
+            assert!(
+                !first.picker,
+                "the panel is already open; Resolve never opens it"
+            );
+            assert_eq!(
+                first.resolution,
+                Some(crate::settings::KindResolution {
+                    choice: crate::integration::Choice::Ambiguous {
+                        installed: vec!["claude".to_string(), "codex".to_string()],
+                    },
+                    installed: vec!["claude".to_string(), "codex".to_string()],
+                })
+            );
+
+            for _ in 0..2 {
+                launcher.request(Request::Resolve);
+                let again = drain_within(launcher.as_mut(), Duration::from_secs(10))
+                    .expect("a later Resolve must answer within 10s");
+                assert_eq!(again, first, "answered from the cache, byte-identical");
+            }
+
+            let calls = fake.calls();
+            assert_eq!(
+                calls.len(),
+                1,
+                "exactly one integration status call for three opens: {calls:?}"
+            );
+            assert_eq!(
+                calls[0].1,
+                vec!["integration".to_string(), "status".to_string()]
+            );
+        }
+
+        /// A `HerdrCli` whose `agent start` call blocks until the test releases it, signalling
+        /// its own arrival first — the FIFO-ordering technique `GatedCli` above already
+        /// established, specialised to gate the *second* call rather than the first, since
+        /// `settings-window` :: "`set_kind` returns while the worker is blocked mid-launch"
+        /// needs the worker parked inside `agent start` specifically, past a real
+        /// `integration status` resolution.
+        struct GatedOnAgentStart {
+            reached_tx: std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>>,
+            release_rx: std::sync::Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+        }
+
+        impl crate::cli::HerdrCli for GatedOnAgentStart {
+            fn run(&self, args: &[&str]) -> Result<String, crate::cli::CliError> {
+                if args.first().copied() == Some("agent") && args.get(1).copied() == Some("start") {
+                    if let Some(tx) = self.reached_tx.lock().expect("gate mutex poisoned").take() {
+                        let _ = tx.send(());
+                    }
+                    if let Some(rx) = self.release_rx.lock().expect("gate mutex poisoned").take() {
+                        let _ = rx.recv();
+                    }
+                }
+                match (args.first().copied(), args.get(1).copied()) {
+                    (Some("integration"), Some("status")) => {
+                        Ok(crate::integration::tests::MEASURED.to_string())
+                    }
+                    (Some("pane"), Some("split")) => Ok(
+                        r#"{"id":"cli:pane:split","result":{"pane":{"pane_id":"wD:pJ"}},"type":"pane_info"}"#
+                            .to_string(),
+                    ),
+                    _ => Ok(String::new()),
+                }
+            }
+        }
+
+        /// `agent-launch` :: "`set_kind` returns while the worker is blocked mid-launch"
+        /// (design.md -> Decisions 14). `set_kind` runs on its own thread so a broken
+        /// implementation that holds the cache's lock across `agent start` hangs *that*
+        /// thread rather than the test thread — the `recv_timeout` below is what turns that
+        /// hang into a failed assertion instead of a wedged `cargo test`, on `NOSLEEP`'s
+        /// deadline-bounded-poll terms. No clock names the ordering itself: the evidence is
+        /// that `done_rx` receives at all within the bound, not how long it took.
+        #[test]
+        fn set_kind_returns_while_the_worker_is_blocked_mid_launch() {
+            let (reached_tx, reached_rx) = std::sync::mpsc::channel::<()>();
+            let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+            let cli: std::sync::Arc<dyn crate::cli::HerdrCli> =
+                std::sync::Arc::new(GatedOnAgentStart {
+                    reached_tx: std::sync::Mutex::new(Some(reached_tx)),
+                    release_rx: std::sync::Mutex::new(Some(release_rx)),
+                });
+            let mut launcher =
+                super::super::start(cli, settings_for_test(PathBuf::from("/repo"), None));
+            launcher.request(Request::Launch {
+                change: "add-auth".to_string(),
+                agent: "add-auth".to_string(),
+                intent: Intent::Apply,
+            });
+
+            reached_rx
+                .recv_timeout(Duration::from_secs(10))
+                .expect("the worker must reach agent start within 10s");
+
+            let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+            let handle = std::thread::spawn(move || {
+                launcher.set_kind("codex".to_string());
+                let _ = done_tx.send(());
+                launcher
+            });
+
+            done_rx.recv_timeout(Duration::from_secs(2)).expect(
+                "set_kind must return before the gate is released; a lock held across \
+                 `agent start` would hang this call instead",
+            );
+
+            release_tx.send(()).expect("release the gate");
+            let _ = handle.join();
         }
     }
 }
