@@ -305,7 +305,7 @@ triangle — a `herdr-plugin.toml`, `README.md`, or binary-name edit that drifts
 against another fails it, deliberately asserting nothing about `target/release/`, which
 `make check` never builds), `tests/degraded_coverage.rs` (`SPEC.md`'s degraded-states
 table bound to a named, passing proving test per row), and `tests/doc_contract.rs`
-(fifteen further claims — the module map, the tested-modules list, the worker-thread
+(sixteen further claims — the module map, the tested-modules list, the worker-thread
 count, the MSRV, the gate-path programs, the manifest transcription, the injected
 OpenSpec context, the documented mouse bindings (`SPEC.md` → Keys' mouse table
 bound **row by row** by *executing* `mouse_action` at every cell of the swept
@@ -316,7 +316,8 @@ table alone is not safe, and `mouse-text-selection`'s four false statements woul
 not survive it twice), the documented key bindings
 (`SPEC.md` → Keys and `README.md` → Keys against `ui::help::INVENTORY`), the
 confined terminal-seam
-names, `src/specs.rs`'s production slice carrying no I/O or schema name, the
+names, `src/specs.rs`'s production slice carrying no I/O or schema name,
+`src/settings.rs`'s production slice carrying no I/O, clock, or `ratatui` name, the
 OSC 52 introducer confined to `src/ui/terminal.rs`, and the documented
 drag-to-select bypass naming what `notes/measurements.md` actually measured — each
 bound to the repository file that determines it; see `SPEC.md`

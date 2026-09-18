@@ -1378,6 +1378,7 @@ own such test lives in `ui::tests::load::`, never in a view module.
 - The documented drag-to-select bypass paragraph ↔ `notes/measurements.md` (names `Shift`, names the terminal it was measured on, and never claims `Option` as a working bypass) (`mouse-text-selection`).
 - `src/integration.rs`'s production slice ↔ carries no filesystem, process, environment, network, or standard-I/O name, and no view-layer type either — the render crate joins the needle set because `LAUNCHSEAM` covers only the Herdr handle and **no** `make gates` script sweeps this file at all (`agent-client-choice`).
 - Every production slice under `src/` ↔ holds no `/opsx:` literal, so the three Claude Code slash-command prompts cannot come back unnoticed (`agent-client-choice`).
+- `src/settings.rs`'s production slice ↔ carries no filesystem, process, environment, network, standard-I/O, or clock name, and no `ratatui` type either — the render crate joins the needle set on `src/integration.rs`'s own terms, and **no** `make gates` script sweeps this file at all (`settings-window`).
 - A claim with no second site is argued in review, not checked.
 
 ### Gates

@@ -4734,11 +4734,11 @@ fn no_production_file_still_produces_an_opsx_prompt() {
 // this claim's own further addition: `src/settings.rs` runs on the render path's terms
 // even though it lives outside `src/ui/`, and `NOBLOCK` does not sweep it.
 //
-// `CLAIM_COUNT` below stays at 15 here on purpose: raising it, and its three sibling
-// sites (`CLAIM_COUNT_WORDS`, `AGENTS.md`'s "further claims" marker, and `SPEC.md`'s
-// "### Doc-conformance checks" bullet list), is `settings-window`'s task 13.6, done
-// together in one commit so `cargo test --test doc_contract` is never red in between.
-// This claim's own test passes on its own regardless of that count.
+// `CLAIM_COUNT` below moves to 16 together with its three sibling sites
+// (`CLAIM_COUNT_WORDS`, `AGENTS.md`'s "further claims" marker, and `SPEC.md`'s
+// "### Doc-conformance checks" bullet list) in the same commit as this claim's own
+// test — `settings-window`'s task 13.6 — so `cargo test --test doc_contract` is never
+// red in between. This claim's own test passes on its own regardless of that count.
 // ---------------------------------------------------------------------------
 
 /// The names forbidden anywhere in `src/settings.rs`'s production slice: filesystem,
@@ -4885,18 +4885,19 @@ fn the_production_slice_of_src_settings_rs_carries_no_io_clock_or_view_name() {
 /// The single source of truth both `AGENTS.md` and `SPEC.md` are checked against below —
 /// a documented number is never trusted on its own, only compared to this. Bump it, and
 /// both prose sites, in the same commit that adds a sixteenth claim.
-const CLAIM_COUNT: usize = 15;
+const CLAIM_COUNT: usize = 16;
 
 /// The number words `agents_md_claim_count` accepts. `ten` is kept alongside the three
 /// values this repository has actually used so the negative-control test below has a
 /// fourth, distinct value to assert is parsed correctly without yet being correct.
-const CLAIM_COUNT_WORDS: [(&str, usize); 6] = [
+const CLAIM_COUNT_WORDS: [(&str, usize); 7] = [
     ("ten", 10),
     ("eleven", 11),
     ("twelve", 12),
     ("thirteen", 13),
     ("fourteen", 14),
     ("fifteen", 15),
+    ("sixteen", 16),
 ];
 
 /// Parse `AGENTS.md`'s "(<number-word> further claims" marker — the sentence naming how
