@@ -486,7 +486,16 @@ pub fn mouse_action(dashboard: &Dashboard, area: Rect, mouse: &MouseEvent) -> Ac
                         }
                     }
                 } else {
-                    Action::ToggleHelp
+                    // `settings-window`'s correction (design.md -> Decision
+                    // 8): `Action::Back`, not `Action::ToggleHelp`. With two
+                    // panels sharing this layer, `ToggleHelp` means *swap to
+                    // help* rather than *close*, so a click outside the
+                    // settings band would otherwise open the help overlay
+                    // instead of dismissing anything. `Back` closes
+                    // whichever panel is open, exactly what `Esc` already
+                    // produces, so the key and the gesture agree by
+                    // construction.
+                    Action::Back
                 }
             }
             // Both horizontal wheel directions, right and middle presses,
@@ -8483,7 +8492,10 @@ mod tests {
     #[test]
     fn a_click_outside_the_band_dismisses_it_and_selects_nothing() {
         // `mouse-input`: "A click outside the band dismisses it and selects
-        // nothing".
+        // nothing" — repaired by `settings-window` (design.md -> Decision
+        // 8) to `Action::Back`, not `Action::ToggleHelp`: with two panels
+        // sharing the overlay layer, `ToggleHelp` means *swap to help*
+        // rather than *close*.
         let mut dashboard = overlay_open(2, Route::List);
         dashboard.overlay.scroll = 3;
         let band = band_for(TALL);
@@ -8494,7 +8506,7 @@ mod tests {
         for (column, row) in [(5u16, 4u16), (5, 55), (5, 59)] {
             assert_eq!(
                 mouse_action(&dashboard, TALL, &left(column, row)),
-                Action::ToggleHelp,
+                Action::Back,
                 "a press at ({column}, {row}) is outside the band and inside the frame"
             );
         }
@@ -8509,7 +8521,8 @@ mod tests {
 
         // A second identical click, now that the overlay is closed, resolves
         // through the click table this requirement took precedence over — so
-        // the precedence is conditional on `help.open`, not permanent.
+        // the precedence is conditional on `overlay.panel` being `Some`, not
+        // permanent.
         assert!(
             matches!(
                 mouse_action(&dismissed, TALL, &left(5, 4)),
@@ -8518,27 +8531,29 @@ mod tests {
             "with the overlay closed the same press names the row under it"
         );
 
-        // Past the frame's right edge: `Ignore`, and **not** `ToggleHelp` — a
+        // Past the frame's right edge: `Ignore`, and **not** `Back` — a
         // click the pane never received does not dismiss the overlay.
         let outside = mouse_action(&dashboard, TALL, &left(200, 4));
-        assert_ne!(outside, Action::ToggleHelp);
+        assert_ne!(outside, Action::Back);
         assert_eq!(outside, Action::Ignore);
     }
 
     #[test]
     fn the_band_s_edges_are_inside_it() {
         // `mouse-input`: "The band's edges are inside it" — both rule rows
-        // belong to the band, pinned from both sides.
+        // belong to the band, pinned from both sides. The outside-the-band
+        // action is `Action::Back` since `settings-window`'s correction
+        // (design.md -> Decision 8).
         let dashboard = overlay_open(2, Route::List);
         let band = band_for(TALL);
         assert_eq!((band.y, band.height), (6, 46));
         let first = band.y;
         let last = band.y + band.height - 1;
         for (row, want) in [
-            (first - 1, Action::ToggleHelp),
+            (first - 1, Action::Back),
             (first, Action::Ignore),
             (last, Action::Ignore),
-            (last + 1, Action::ToggleHelp),
+            (last + 1, Action::Back),
         ] {
             assert_eq!(
                 mouse_action(&dashboard, TALL, &left(60, row)),
@@ -8625,11 +8640,12 @@ mod tests {
         }
         assert_eq!(
             reachable,
-            ["ScrollDown", "ScrollUp", "ToggleHelp"]
+            ["Back", "ScrollDown", "ScrollUp"]
                 .iter()
                 .map(|s| s.to_string())
                 .collect::<std::collections::BTreeSet<String>>(),
-            "exactly the wheel's two directions and the dismissing click"
+            "exactly the wheel's two directions and the dismissing click — `Back`, not \
+             `ToggleHelp`, since `settings-window`'s correction (design.md -> Decision 8)"
         );
 
         // Each has a key that does the same thing.
@@ -8649,7 +8665,12 @@ mod tests {
                 ],
             ),
             (
-                Action::ToggleHelp,
+                // `Esc` produces `Action::Back` directly; `?` produces
+                // `Action::ToggleHelp`, a different value that closes the
+                // overlay on the same terms while the help panel is the one
+                // open — both reach the same dashboard the dismissing click
+                // does.
+                Action::Back,
                 vec![
                     (KeyCode::Esc, KeyModifiers::NONE),
                     (KeyCode::Char('?'), KeyModifiers::NONE),
