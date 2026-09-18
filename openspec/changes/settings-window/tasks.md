@@ -200,34 +200,34 @@ establish (design.md → Test Strategy).
 ## 7. The launcher seam
 <!-- kind: behavior -->
 
-- [ ] 7.1 RED: Write failing tests for `agent-launch` :: "The ambiguous outcome opens the
+- [x] 7.1 RED: Write failing tests for `agent-launch` :: "The ambiguous outcome opens the
       settings panel on `agent_kind`", "No other outcome touches the overlay", "The next launch
       uses the committed kind and issues no status call", "A cancelled edit changes nothing the
       launcher sees", "`set_kind` returns without blocking".
-- [ ] 7.2 GREEN: Take `launch::Outcome` from two fields to **four** — adding `picker: bool`,
+- [x] 7.2 GREEN: Take `launch::Outcome` from two fields to **four** — adding `picker: bool`,
       set only by `Choice::Ambiguous`, and `resolution: Option<KindResolution>` — and add
       `Request::Resolve`, sent when `,` opens the panel and answered from the worker's session
       cache when it has one. Open the settings panel on the `agent_kind` row when `drain` adopts
       an outcome whose `picker` is set.
-- [ ] 7.3 GREEN: Add `Launcher::set_kind(&mut self, kind: String)` and `Request::Resolve`,
+- [x] 7.3 GREEN: Add `Launcher::set_kind(&mut self, kind: String)` and `Request::Resolve`,
       replacing the session cache with `Choice::Use { kind, source: Source::Recorded }`. There
       are **five** `impl Launcher` sites across **two** files — `NoLauncher`, `RealLauncher`,
       `TestLauncher` in `src/launch.rs`; `RecordingLauncher`, `ScriptedLauncher` in
       `src/lib.rs`; none in `src/ui/mod.rs`. `NoLauncher` is a second **production** impl, not
       a double — it is what file mode gets — so `set_kind` there is a no-op and `Resolve`
       answers nothing.
-- [ ] 7.4 CHECK: Contract gate — `Launcher` gains a method and `Request` a variant, which
+- [x] 7.4 CHECK: Contract gate — `Launcher` gains a method and `Request` a variant, which
       breaks every implementor. Confirm by compiling that all **five** named in 7.3 are
       updated, and that `NoLauncher`'s no-op is deliberate rather than inherited.
-- [ ] 7.5 VERIFY: `make gates` — `NOBLOCK` must still pass and no file under `src/ui/` names the
+- [x] 7.5 VERIFY: `make gates` — `NOBLOCK` must still pass and no file under `src/ui/` names the
       lock type. Do **not** treat this as evidence that `set_kind` is non-blocking:
       `noblock.sh`'s `BLOCK3_RE` (`:105`) names no `Mutex`, `RwLock`, or `lock()`, and its
       lock-naming leg is scoped to `src/ui/`, so it is green either way. The FIFO-ordering test
       in 7.1 is that evidence (design.md → Decisions 14).
-- [ ] 7.6 CHECK: Persistence gate — this is the group that performs the cache invalidation, so
+- [x] 7.6 CHECK: Persistence gate — this is the group that performs the cache invalidation, so
       confirm here that `set_kind` and `Request::Resolve` need no migration, backfill, or index
       rebuild, per design.md → Persistence and Rollout.
-- [ ] 7.7 Run the group tests — `cargo test -- launch:: ui::app` — no regressions.
+- [x] 7.7 Run the group tests — `cargo test -- launch:: ui::app` — no regressions.
 
 ## 8. Mouse
 <!-- kind: behavior -->
