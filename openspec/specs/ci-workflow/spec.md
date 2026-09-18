@@ -55,58 +55,6 @@ obsolete while a `main` run always completes.
 - **AND** `cancel-in-progress` is an expression that evaluates false when
   `github.ref` is `refs/heads/main` and true otherwise, rather than a bare `true`
 
-### Requirement: Both supported platforms run the format, lint, hygiene, and test gates
-
-The workflow SHALL define a `check` job running on a matrix of exactly
-`ubuntu-latest` and `macos-latest` — the two platforms `herdr-plugin.toml` declares in
-`platforms` — and SHALL run the format, lint, hygiene-gate, and test gates on each. The
-hygiene gates run on **both** runners rather than once, because their subject is precisely
-what differs between the two: `build-graph.sh` asserts the macOS-only and Linux-only halves
-of the resolved dependency graph, and a gate about a platform difference that runs on one
-platform proves half of what it claims. The matrix SHALL
-set `fail-fast: false`, so a failure on one runner does not cancel the other and hide a
-second, independent failure. The job SHALL declare a `timeout-minutes` bound rather than
-inheriting GitHub's 360-minute default, so a hung run cannot bill six hours of
-`macos-latest` minutes or hold the concurrency group open. No Windows runner SHALL be
-declared: Windows is a PRD non-goal.
-
-#### Scenario: The matrix names both runners and no others
-
-- **WHEN** the `check` job's `strategy.matrix` is read
-- **THEN** its runner list is exactly `ubuntu-latest` and `macos-latest`
-- **AND** `runs-on` for the job is the matrix value, not a hard-coded label
-- **AND** `fail-fast: false` is set
-- **AND** the job declares `timeout-minutes`
-- **AND** the string `windows` appears nowhere in the workflow
-
-#### Scenario: All four gates run on each runner
-
-- **WHEN** the `check` job's steps are read
-- **THEN** they invoke `make fmt-check`, then `make lint`, then `make gates`, then
-  `make test`, in that order — the same order `make check` composes locally
-- **AND** each is a separate, named step, so the workflow log names the gate that
-  failed rather than reporting one opaque failure
-- **AND** no step is marked `continue-on-error`, so a failing gate fails the job
-
-#### Scenario: A failing gate fails the run rather than being skipped
-
-- **WHEN** any gate step in the workflow is examined for an `if:` condition
-- **THEN** no gate step is guarded by a condition that could skip it — a gate that
-  cannot run is a failure, never a silent pass
-- **AND** the only `if:` keys in the workflow are on the aggregate job; the
-  `save-if` input passed to the cache action is an input name, not a step condition, and
-  does not count
-
-#### Scenario: One runner's failure does not cancel the other
-
-- **WHEN** a gate fails on the `ubuntu-latest` leg while the `macos-latest` leg is still
-  running
-- **THEN** the `macos-latest` leg runs to completion and reports its own result, because
-  `fail-fast` is disabled
-- **AND** the aggregate job fails, because `needs.check.result` is `failure`
-- **AND** the run therefore reports both legs' outcomes rather than only the first
-  failure
-
 ### Requirement: CI invokes every gate through `make`, so no command is written twice
 
 Every gate the workflow runs SHALL be invoked as `make <target>` against the
@@ -168,7 +116,7 @@ The workflow SHALL define a `coverage` job with `runs-on: ubuntu-latest` — not
 matrix — whose only gate step is `make coverage`. `make coverage` SHALL NOT appear in
 the `check` job. The job SHALL declare a `timeout-minutes` bound. Coverage is measured
 once because the figure is platform-independent and `cargo-llvm-cov` is slowest of the
-five gates; Linux is chosen because `cargo-llvm-cov` is least reliable on Apple Silicon,
+six gates; Linux is chosen because `cargo-llvm-cov` is least reliable on Apple Silicon,
 which is the reason SPEC.md gives for preferring it over `tarpaulin` in the first place.
 
 `make coverage` now runs two commands — the total floor and the production-slice floor — and
@@ -197,7 +145,6 @@ every runner, so the job installs nothing new.
   step
 - **AND** with both present the `Makefile`'s `coverage` guard does not fire, and the job
   reports a coverage figure rather than skipping the gate
-
 
 #### Scenario: The production floor reaches CI without a workflow edit
 
@@ -375,3 +322,61 @@ positive control fires only under GNU `grep` is exactly the platform-dependent a
   produces it, and the workflow runs
 - **THEN** the `check` job on `macos-latest` reports a failure while `ubuntu-latest` passes
 - **AND** the aggregate `ci` job reports failure, because it fails when any needed job does
+
+### Requirement: Both supported platforms run the format, lint, hygiene, covers, and test gates
+
+The workflow SHALL define a `check` job running on a matrix of exactly
+`ubuntu-latest` and `macos-latest` — the two platforms `herdr-plugin.toml` declares in
+`platforms` — and SHALL run the format, lint, hygiene-gate, covers-check, and test gates
+on each. The
+hygiene gates run on **both** runners rather than once, because their subject is precisely
+what differs between the two: `build-graph.sh` asserts the macOS-only and Linux-only halves
+of the resolved dependency graph, and a gate about a platform difference that runs on one
+platform proves half of what it claims. The matrix SHALL
+set `fail-fast: false`, so a failure on one runner does not cancel the other and hide a
+second, independent failure. The job SHALL declare a `timeout-minutes` bound rather than
+inheriting GitHub's 360-minute default, so a hung run cannot bill six hours of
+`macos-latest` minutes or hold the concurrency group open. No Windows runner SHALL be
+declared: Windows is a PRD non-goal.
+
+#### Scenario: The matrix names both runners and no others
+
+- **WHEN** the `check` job's `strategy.matrix` is read
+- **THEN** its runner list is exactly `ubuntu-latest` and `macos-latest`
+- **AND** `runs-on` for the job is the matrix value, not a hard-coded label
+- **AND** `fail-fast: false` is set
+- **AND** the job declares `timeout-minutes`
+- **AND** the string `windows` appears nowhere in the workflow
+
+#### Scenario: All five gates run on each runner
+
+- **WHEN** the `check` job's steps are read
+- **THEN** they invoke `make fmt-check`, then `make lint`, then `make gates`, then
+  `make covers-check`, then `make test`, in that order — the same order `make check`
+  composes locally
+- **AND** `make covers-check` sits **before** `make test`, which is the whole of its
+  purpose: it is the one member of the coverage tier that needs no green suite, so a
+  mis-bound `covers` range is named on a runner whose test step is about to fail rather
+  than being hidden behind it
+- **AND** each is a separate, named step, so the workflow log names the gate that
+  failed rather than reporting one opaque failure
+- **AND** no step is marked `continue-on-error`, so a failing gate fails the job
+
+#### Scenario: A failing gate fails the run rather than being skipped
+
+- **WHEN** any gate step in the workflow is examined for an `if:` condition
+- **THEN** no gate step is guarded by a condition that could skip it — a gate that
+  cannot run is a failure, never a silent pass
+- **AND** the only `if:` keys in the workflow are on the aggregate job; the
+  `save-if` input passed to the cache action is an input name, not a step condition, and
+  does not count
+
+#### Scenario: One runner's failure does not cancel the other
+
+- **WHEN** a gate fails on the `ubuntu-latest` leg while the `macos-latest` leg is still
+  running
+- **THEN** the `macos-latest` leg runs to completion and reports its own result, because
+  `fail-fast` is disabled
+- **AND** the aggregate job fails, because `needs.check.result` is `failure`
+- **AND** the run therefore reports both legs' outcomes rather than only the first
+  failure

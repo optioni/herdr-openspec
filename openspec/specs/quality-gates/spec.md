@@ -18,17 +18,26 @@ by a test inside `cargo test` rather than left to periodic hand-running.
 
 ### Requirement: `make check` is the single gate and runs every check
 
-
 The repository SHALL provide a `Makefile` with phony targets `fmt`, `fmt-check`,
-`lint`, `test`, `coverage`, `gates`, `gates-full`, `build`, and `check`. `check` SHALL be
-composed from `fmt-check`, `lint`, `gates`, `test`, and `coverage` in that order, so that no
-gate is defined twice. `gates` sits third because it is the cheapest composed gate that can
+`lint`, `test`, `coverage`, `gates`, `gates-full`, `covers-check`, `build`, and `check`.
+`check` SHALL be composed from `fmt-check`, `lint`, `gates`, `covers-check`, `test`, and
+`coverage` in that order, so that no gate is defined twice. `gates` sits third because it is the cheapest composed gate that can
 fail — a few seconds, one debug-profile `cargo build --locked` and no release build — and a
 stale dependency want-list reported before the test and coverage runs rather than after them
-is the difference between a several-second failure and a multi-minute one. `check` is the
+is the difference between a several-second failure and a multi-minute one. `covers-check`
+sits fourth for the same reason carried one step further, and for a second reason the `gates`
+argument does not have: it is the only member of the coverage tier that does **not** need the
+suite to pass. `coverage` runs the suite itself, so a red test aborts `check` before the
+coverage tier is reached at all — and on an outside-in change a red acceptance test is the
+normal state from the first task to the last, which made the whole tier unreachable for a
+change's entire duration rather than for a moment. `covers-check` SHALL therefore validate
+what can be validated without a coverage report — that every `covers` range in
+`tests/degraded-coverage.toml` resolves and holds real statements — and SHALL NOT assert
+coverage percentages or line hotness, which only a completed run can measure and which a
+partial run would report against paths that legitimately did not execute. `check` is the
 single local entry point; CI invokes the same targets
-individually rather than the composite — `fmt-check`, `lint`, `gates`, and `test` on both
-supported runners and `coverage` once, on Linux — so every command below is still
+individually rather than the composite — `fmt-check`, `lint`, `gates`, `covers-check`, and
+`test` on both supported runners and `coverage` once, on Linux — so every command below is still
 written in exactly one place, but the composite itself is a local convenience and not
 the thing CI runs. `gates-full` SHALL NOT be composed into `check`: it rebuilds the crate
 several times over, and its own CI job is what forces it to run. The commands SHALL be
@@ -43,6 +52,7 @@ exactly:
 | `coverage` | `cargo llvm-cov --fail-under-lines 80` writing a JSON export, then the production-slice floor over it |
 | `gates` | one invocation line per file under `scripts/gates/`, per the rule below |
 | `gates-full` | `DEPS_FULL=1 /bin/sh scripts/gates/deps.sh` |
+| `covers-check` | `cargo test --all-features --test degraded_coverage` |
 | `build` | `/bin/sh scripts/build.sh` |
 
 The `gates` row is a **rule**, not a literal, and that is a correction rather than a
@@ -53,7 +63,7 @@ it sits above. The rule is enforceable where a stale list was not: the recipe SH
 `/bin/sh scripts/gates/<name>` (or `python3` for `GATE-MECH1`) once for **every** file under
 `scripts/gates/` and for no path that is not such a file, which
 `tests/ci_workflow.rs` already asserts in both directions. A gate needing a subject-selecting
-variable — `LAUNCHSEAM` over `src/open.rs`, `NODEFAULT-UI` over each of its five type sets —
+variable — `LAUNCHSEAM` over `src/open.rs`, `NODEFAULT-UI` over each of its nine type sets —
 contributes one line per subject, so the count of lines exceeds the count of files by
 design.
 
@@ -69,7 +79,8 @@ recipe and not a second definition of the first.
 - **THEN** it runs `cargo fmt --all -- --check`, then
   `cargo clippy --all-targets --all-features -- -D warnings`, then **every** script under
   `scripts/gates/` in the recipe's order — not `deps.sh` and `build-graph.sh` alone, which is
-  what this scenario said while twenty-six others ran beside them — then
+  what this scenario said while thirty others ran beside them — then
+  the structural `covers` check, then
   `cargo test --all-features`, then `cargo llvm-cov --fail-under-lines 80` followed by the
   production-slice floor
 - **AND** it exits 0
@@ -81,7 +92,7 @@ recipe and not a second definition of the first.
 - **WHEN** a copy of a `src/*.rs` file is set aside, the original is deliberately
   misformatted (an extra blank line inside a function body), and `make check` is run
 - **THEN** it exits non-zero at `cargo fmt --all -- --check`
-- **AND** the lint, gates, test, and coverage commands are not run
+- **AND** the lint, gates, covers-check, test, and coverage commands are not run
 - **AND** restoring the file from the set-aside copy returns `make check` to exit 0
 
 #### Scenario: Lint gate fails on a clippy warning
@@ -107,17 +118,38 @@ recipe and not a second definition of the first.
 #### Scenario: The command table names the gates tier that exists
 
 - **WHEN** this requirement's command table and `SPEC.md` → Gates are read at HEAD
-- **THEN** neither describes `make check` as running "all four" gates, and each lists five —
-  format, lint, hygiene gates, test, coverage — in the `Makefile`'s own order
-- **AND** the `gates` row names no fixed pair of scripts, so extracting a twenty-ninth gate
+- **THEN** neither describes `make check` as running "all four" gates, and each lists six —
+  format, lint, hygiene gates, covers-check, test, coverage — in the `Makefile`'s own order
+- **AND** the `gates` row names no fixed pair of scripts, so extracting a thirty-third gate
   cannot make the table stale again
 - **AND** a test inside `cargo test` reads `SPEC.md` → Gates and fails unless its gate table
   names **each** of `check`'s prerequisites in the `Makefile`, by name. A count comparison is
   not sufficient: five unrelated rows would satisfy it, and renaming a row would leave it
   green — the same weakness as the stale literal this requirement is replacing
 
-### Requirement: The repository's hygiene gates are files in the repository
+#### Scenario: The binding check runs although the suite is red
 
+- **WHEN** a test under `src/` is edited to fail — `assert_eq!(1 + 1, 3);` in one unit test,
+  standing in for the red acceptance test an outside-in change carries for most of its life —
+  and `make check` is run. The plant SHALL be a shape clippy accepts: `assert!(false)` trips
+  `clippy::assertions-on-constants`, which is `-D warnings` here, so `make check` would exit at
+  **lint** two steps before `covers-check` and the scenario would prove nothing
+- **THEN** it exits non-zero at `cargo test --all-features`
+- **AND** `covers-check` has already run and reported, because it sits **before** `test`
+- **AND** with the same red suite, a `covers` range edited to name `src/tasks.rs:193-196` —
+  three doc-comment lines and a bare `pub fn` signature — makes `make check` exit non-zero at
+  `covers-check` rather than at `test`, naming the row's `condition`
+- **AND** restoring both files returns `make check` to exit 0
+
+#### Scenario: The floors are not moved ahead of the suite
+
+- **WHEN** `make covers-check` is run on a tree whose production-slice coverage is below its
+  floor, with no coverage report present
+- **THEN** it exits 0, because line percentages are not its subject and it reads no report
+- **AND** `make coverage` on the same tree exits non-zero, so the floor is enforced in exactly
+  one place and `covers-check` has not become a second, weaker definition of it
+
+### Requirement: The repository's hygiene gates are files in the repository
 
 Every gate that guards a repository-wide invariant SHALL exist as a script under
 `scripts/gates/`, checked in and reviewable, and SHALL be invoked by a `Makefile` target
@@ -337,7 +369,6 @@ scenario contradict its own neighbour.
 
 ### Requirement: The declared dependency set is checked against the argued set
 
-
 `scripts/gates/deps.sh` SHALL read the crate's resolved manifest through
 `cargo metadata --no-deps` and SHALL assert that the set of normal dependencies is exactly
 the set `plugin-build`'s "The crate produces one binary from an argued dependency set"
@@ -376,7 +407,6 @@ the first five. Those experiments rebuild the crate once per dependency and SHAL
 - **AND** the run exits 0 only when all six removals fail to build
 
 ### Requirement: The build graph is pinned per triple and its platform difference named per direction
-
 
 `scripts/gates/build-graph.sh` SHALL resolve the normal build graph for each of the four
 supported triples — `aarch64-apple-darwin`, `x86_64-apple-darwin`,
@@ -420,7 +450,6 @@ a name belongs to, so a package migrating from one platform to the other would p
 
 ### Requirement: The dependency gates close the three clauses left parked
 
-
 `spec-purposes` found three clauses of `plugin-build`'s dependency requirement true and
 deliberately did not add them, recording them in `HANDOFF.md` as a follow-up. There is no
 follow-up: `degraded-states` is the last change in the roadmap, so the three SHALL be closed
@@ -448,7 +477,6 @@ violation in a copied manifest or a copied graph, show the leg fire, remove the 
 - **AND** removing each plant returns both to exit 0
 
 ### Requirement: Every capability spec carries a Purpose someone wrote
-
 
 Every `openspec/specs/<capability>/spec.md` SHALL open with a `## Purpose` section whose body
 describes what that capability is for, derived from that capability's own requirements. The
@@ -488,7 +516,6 @@ capability directory, so it cannot go green by finding nothing to check.
 - **AND** the failure names the count it found and the minimum it requires
 
 ### Requirement: The coverage floor is 80% of lines, enforced and never waived
-
 
 `make coverage` SHALL run `cargo llvm-cov --fail-under-lines 80`, with no
 `--ignore-filename-regex` or other flag narrowing what is measured. The threshold SHALL
@@ -547,7 +574,6 @@ vacuity this change exists to remove.
 
 ### Requirement: Missing one-time tools fail with the install command named
 
-
 `lint` and `coverage` SHALL each check that their own tool is resolvable before running,
 and SHALL fail with a message naming the one-time install command when it is not. The
 guard is for the developer whose Rust toolchain is present but whose component or
@@ -570,7 +596,6 @@ subcommand is not.
 
 ### Requirement: Formatting configuration is checked in and the tree is formatted
 
-
 `rustfmt.toml` SHALL exist at the repository root and SHALL declare the same edition as
 `Cargo.toml`, so that a bare `rustfmt` — which, unlike `cargo fmt`, is passed no
 `--edition` flag and would otherwise default to edition 2015 — agrees with the gate.
@@ -592,7 +617,6 @@ subcommand is not.
 
 ### Requirement: The gates do not depend on Herdr
 
-
 No target in `check` SHALL invoke the `herdr` binary or reach the Herdr socket, so the
 crate remains buildable and verifiable on a machine where Herdr is not installed.
 
@@ -606,7 +630,6 @@ crate remains buildable and verifiable on a machine where Herdr is not installed
   gate can acquire a dependency on it without the search finding it
 
 ### Requirement: View behaviour is verified against a `TestBackend` buffer at both widths
-
 
 Every test of a `ui` view SHALL render into a `ratatui::backend::TestBackend` buffer and
 SHALL assert on the content of named cells — an exact character at an exact column and row,
@@ -714,7 +737,6 @@ the help hint is now the footer's leading one.
 
 ### Requirement: The coverage floor is measured against production code
 
-
 `cargo llvm-cov --fail-under-lines 80` is dominated by test-module lines. Re-measured for
 gate-integrity's own Change Review (task 9.3), because the figures below had drifted from an
 earlier estimate as the tree grew — the corrected finding is what SHALL be recorded, per the
@@ -817,7 +839,6 @@ nothing.
 
 ### Requirement: A seam grep resists an import alias
 
-
 `NOSPAWN-GREP`, `AGENTSEAM`, `LAUNCHSEAM`, and `WATCHSEAM` each search for the literal
 spellings `process::Command`, `Command::new`, and `Stdio`. All four are defeated by an
 alias: `use std::process::{Child, Command as Proc};` produces neither
@@ -904,7 +925,6 @@ on the same terms `WIRED` leg 2 records its keyword-based one, not engineered ar
 
 ### Requirement: The read-only sweep matches the write type, not the convenience function
 
-
 `READONLY-UI` searches for `fs::write`, `File::create`, and `OpenOptions` among others, and
 misses two stable ways to open a file for writing: `File::options()`, the inherent alias for
 `OpenOptions::new()`, and `DirBuilder::new().create(...)`. Measured — an appending write
@@ -941,7 +961,6 @@ a pattern with no control is a pattern that can silently stop matching.
   unmatched string
 
 ### Requirement: The non-blocking sweep covers every file under `src/ui/`
-
 
 `NOBLOCK` claims that no file under `src/ui/` names a blocking-wait API. Its clock leg
 sweeps the directory; its **blocking-wait leg scans `src/ui/driver.rs` alone**. Measured — a
@@ -986,7 +1005,6 @@ prevent.
   cheaper plant would be a control asserting on the harness rather than on the repair
 
 ### Requirement: `WIRED` reads code, and the panic hook is one of the names it requires
-
 
 `WIRED` strips `//` line comments before searching, then looks for twelve required names as
 plain substrings. Two consequences, both measured:
@@ -1065,7 +1083,6 @@ more.
   stripper reduced to the identity function cannot pass
 
 ### Requirement: Every gate's positive control is executed, not attested
-
 
 `tests/ci_workflow.rs` proves the file set under `scripts/gates/` equals the set the `gates:`
 recipe names, in both directions — a real anti-drop check. What no test does is **run** a
