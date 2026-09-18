@@ -38,12 +38,13 @@ gates:
 	/bin/sh scripts/gates/colwidth.sh
 	/bin/sh scripts/gates/detailwidths.sh
 	/bin/sh scripts/gates/helpwidths.sh
+	/bin/sh scripts/gates/settingswidths.sh
 	/bin/sh scripts/gates/listwidths.sh
 	/bin/sh scripts/gates/mdseam.sh
 	/bin/sh scripts/gates/mdwidths.sh
 	/bin/sh scripts/gates/noblock.sh
 	/bin/sh scripts/gates/nocli-shell.sh
-	SCAN_MIN=350 TYPES='Dashboard Filter Detail Sections Overlay Selection Edit' /bin/sh scripts/gates/nodefault-ui.sh
+	SCAN_MIN=367 TYPES='Dashboard Filter Detail Sections Overlay Selection Edit' /bin/sh scripts/gates/nodefault-ui.sh
 	SCAN_MIN=53 TYPES='Refresh' /bin/sh scripts/gates/nodefault-ui.sh
 	SCAN_MIN=99 TYPES='Launch' /bin/sh scripts/gates/nodefault-ui.sh
 	SCAN_MIN=111 HOMEFILE=src/agents.rs TYPES='Agent Listed AgentSnapshot Attribution' /bin/sh scripts/gates/nodefault-ui.sh
@@ -51,6 +52,7 @@ gates:
 	SCAN_MIN=25 TYPES='ArtifactSection' /bin/sh scripts/gates/nodefault-ui.sh
 	SCAN_MIN=55 HOMEFILE=src/ui/help.rs TYPES='Binding Group' /bin/sh scripts/gates/nodefault-ui.sh
 	SCAN_MIN=4 HOMEFILE=src/launch.rs TYPES='Settings' /bin/sh scripts/gates/nodefault-ui.sh
+	SCAN_MIN=105 HOMEFILE=src/settings.rs TYPES='Setting KindResolution PanelState' /bin/sh scripts/gates/nodefault-ui.sh
 	/bin/sh scripts/gates/noio-view.sh
 	/bin/sh scripts/gates/nojson-seam.sh
 	/bin/sh scripts/gates/nolit-change.sh
