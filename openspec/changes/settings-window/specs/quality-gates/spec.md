@@ -55,7 +55,7 @@ bare, and therefore run at a block default nobody chose. Where a gate has one su
 `Makefile` SHALL invoke it bare, and the floor SHALL NOT also appear on the recipe line.
 
 A gate with **more than one subject** — `LAUNCHSEAM` over `src/launch.rs` and `src/open.rs`,
-`NODEFAULT-UI` over its seven type sets — SHALL carry its subject-selecting variables on the
+`NODEFAULT-UI` over its nine type sets — SHALL carry its subject-selecting variables on the
 `Makefile` line. Where such a gate's floor is a **property of the subject** rather than of the
 gate, the floor SHALL accompany its subject there: `NODEFAULT-UI`'s span count differs by an
 order of magnitude between the `Dashboard` type set and the `Refresh` one, so a single default
@@ -140,7 +140,7 @@ worse outcome than the drift the sweep was hunting.
 - **AND** no floor appears in both a script's default and the `Makefile`'s recipe line. The
   `Makefile` carries only what a subject genuinely requires: `LAUNCH`/`ENTRY` for
   `LAUNCHSEAM`'s second subject, `SCAN_MIN`/`HOMEFILE`/`TYPES` for each of `NODEFAULT-UI`'s
-  seven, and `env -u GRAPH_WRITE` for `GRAPH-SNAP` — seven `SCAN_MIN` values and one `env -u`,
+  nine, and `env -u GRAPH_WRITE` for `GRAPH-SNAP` — nine `SCAN_MIN` values and one `env -u`,
   which the earlier wording "and nothing else" wrongly denied
 
 #### Scenario: The three excluded gates are named, with reasons, where a reader will meet them
