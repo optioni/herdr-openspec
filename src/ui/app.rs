@@ -669,6 +669,16 @@ pub enum Target {
     Section(SectionKey),
     /// An index into `Dashboard::visible()`.
     Change(usize),
+    /// `settings-window`'s addition: a setting's row inside the settings
+    /// panel's band — an index into `Dashboard::settings.rows`, addressed by
+    /// either of its two rendered rows, the value row or the source row.
+    /// Produced only by `ui::driver::mouse_action`, only while
+    /// `overlay.panel` is `Some(Panel::Settings)`, through a band-relative
+    /// hit test that is the exact inverse of `ui::settings::render`'s own
+    /// row grammar (design.md -> Boundaries). Not returned by `targets()`,
+    /// which addresses the list region alone, on exactly `DetailHeader`'s
+    /// own terms below.
+    Setting(usize),
     /// A section-header row of the detail region's content: its own
     /// content-line index beside its section index, both already resolved
     /// against the frame just drawn — `mouse_action` has the width to call
@@ -1239,6 +1249,14 @@ impl Dashboard {
             Action::OpenDetail => self.apply_settings_open_detail(),
             Action::Next | Action::ScrollDown => self.apply_settings_step(1),
             Action::Prev | Action::ScrollUp => self.apply_settings_step(-1),
+            // `mouse-input` :: "A click on a setting row selects it and begins no edit" —
+            // `settings-window`'s own dispatch table: "move the row cursor to `i` and nothing
+            // else". `ui::driver::mouse_action` only ever produces an in-range `i`, but the
+            // bounds check is kept anyway, on exactly `apply_click`'s `Target::Change` terms:
+            // a stale target changes nothing rather than panicking.
+            Action::Click(Target::Setting(i)) if i < self.settings.rows.len() => {
+                self.settings.cursor = i;
+            }
             Action::SelectTab(_)
             | Action::NextTab
             | Action::PrevTab
@@ -1466,6 +1484,12 @@ impl Dashboard {
                     self.toggle_detail_section(section);
                 }
             }
+            // Structurally unreachable, on `DetailHeader`'s own terms above:
+            // `mouse_action` produces `Target::Setting` only while
+            // `overlay.panel` is `Some(Panel::Settings)`, and `apply` routes
+            // that case to `apply_settings_action` instead of here. The arm
+            // exists only because this match is over `Target` as a whole.
+            Target::Setting(_) => {}
         }
     }
 
@@ -1482,6 +1506,9 @@ impl Dashboard {
             // as a whole (design.md -> Decision 7's own note on
             // `list-selection/spec.md`).
             Target::DetailHeader { .. } => None,
+            // `targets()` never emits `Setting` either, on the same terms:
+            // it addresses the settings panel's band, not the list.
+            Target::Setting(_) => None,
             Target::Section(key) => Some(*key),
             Target::Change(i) => {
                 let active_visible = if self.section_open(SectionKey::Active) {
@@ -1913,6 +1940,8 @@ impl Dashboard {
             Target::Section(_) => None,
             // Structurally unreachable — see `target_section`'s own note.
             Target::DetailHeader { .. } => None,
+            // Structurally unreachable, on the same terms.
+            Target::Setting(_) => None,
         }
     }
 

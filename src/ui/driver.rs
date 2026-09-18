@@ -9,7 +9,7 @@ use ratatui::backend::Backend;
 use ratatui::crossterm::event::{Event, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 
-use crate::ui::app::{Action, Dashboard, KindRecorder, SelectPhase, Target, action_for};
+use crate::ui::app::{Action, Dashboard, KindRecorder, Panel, SelectPhase, Target, action_for};
 use crate::ui::event::{EventError, EventSource};
 use crate::ui::layout::Zone;
 use crate::ui::list::RowKind;
@@ -8120,6 +8120,202 @@ mod tests {
         }];
         dashboard.overlay.panel = Some(Panel::Help);
         dashboard
+    }
+
+    /// `overlay_open`'s settings-panel sibling: three settings —
+    /// `openspec_bin` (read-only), `agent_kind` (editable, shortlist
+    /// `claude`/`codex`, committed `claude`), `prompts` (read-only) — the
+    /// settings panel open and the cursor on the first setting.
+    fn settings_overlay_open(selected: usize, route: Route) -> Dashboard {
+        let mut dashboard = mouse_dashboard(6, 1);
+        dashboard.route = route;
+        dashboard.selected = selected;
+        dashboard.overlay.panel = Some(Panel::Settings);
+        dashboard.settings.rows = vec![
+            crate::settings::Setting {
+                key: "openspec_bin",
+                value: "openspec_bin-value".to_string(),
+                provenance: crate::settings::Provenance::Default,
+                editable: crate::settings::Editable::No {
+                    reason: crate::settings::Reason::SetOnce,
+                },
+            },
+            crate::settings::Setting {
+                key: "agent_kind",
+                value: "claude".to_string(),
+                provenance: crate::settings::Provenance::SoleIntegration,
+                editable: crate::settings::Editable::Kind {
+                    shortlist: vec!["claude".to_string(), "codex".to_string()],
+                },
+            },
+            crate::settings::Setting {
+                key: "prompts",
+                value: "prompts-value".to_string(),
+                provenance: crate::settings::Provenance::Default,
+                editable: crate::settings::Editable::No {
+                    reason: crate::settings::Reason::SetOnce,
+                },
+            },
+        ];
+        dashboard.settings.cursor = 0;
+        dashboard
+    }
+
+    /// The settings band `mouse_action` resolves against at `area`, for the
+    /// three-setting fixture `settings_overlay_open` builds — the settings
+    /// panel's own sibling of `band_for`.
+    fn settings_band_for(area: Rect, dashboard: &Dashboard) -> Rect {
+        let (body, _) = crate::ui::layout::split_frame(area);
+        crate::ui::layout::overlay_band(
+            body,
+            crate::ui::settings::content_rows(&dashboard.settings.rows),
+        )
+    }
+
+    /// `mouse-input`: "A click on a setting row selects it and begins no
+    /// edit". Both mandated widths (120x40 and 60x20): the settings band is
+    /// nine rows regardless of frame size, so both fit the whole panel with
+    /// no scrolling.
+    #[test]
+    fn a_click_on_a_setting_row_selects_it_and_begins_no_edit() {
+        for area in [WIDE, NARROW] {
+            let dashboard = settings_overlay_open(2, Route::List);
+            let band = settings_band_for(area, &dashboard);
+
+            // `ui::settings::render`'s own row grammar: heading at interior
+            // row 0, then a value row and a source row per setting — the
+            // third setting's (index 2) value row is interior row 5, its
+            // source row interior row 6.
+            let value_row = band.y + 1 + 5;
+            let source_row = band.y + 1 + 6;
+
+            for row in [value_row, source_row] {
+                assert_eq!(
+                    mouse_action(&dashboard, area, &left(60, row)),
+                    Action::Click(Target::Setting(2)),
+                    "{area:?}: row {row}"
+                );
+            }
+
+            // Applying moves the cursor and begins no edit.
+            let mut applied = dashboard.clone();
+            applied.apply(mouse_action(&dashboard, area, &left(60, value_row)));
+            assert_eq!(applied.settings.cursor, 2);
+            assert_eq!(applied.overlay.edit, None);
+
+            // A second identical click still begins no edit — a click never
+            // opens one.
+            let mut twice = applied.clone();
+            twice.apply(mouse_action(&applied, area, &left(60, value_row)));
+            assert_eq!(twice.overlay.edit, None);
+
+            // The heading row and both rule rows are `Ignore`.
+            for row in [band.y, band.y + 1, band.y + band.height - 1] {
+                assert_eq!(
+                    mouse_action(&dashboard, area, &left(60, row)),
+                    Action::Ignore,
+                    "{area:?}: row {row}"
+                );
+            }
+        }
+    }
+
+    /// `mouse-input`: "A click outside the band dismisses whichever panel is
+    /// open" — `Action::Back`, not `Action::ToggleHelp` (design.md ->
+    /// Decision 8): with two panels sharing the overlay layer, `ToggleHelp`
+    /// means *swap to help* rather than *close*, so a click outside the
+    /// settings band must not open the help overlay instead of dismissing
+    /// it.
+    #[test]
+    fn a_click_outside_the_band_dismisses_whichever_panel_is_open() {
+        // The settings band is nine rows regardless of frame size, so both
+        // mandated widths (120x40 and 60x20) leave room above and below it.
+        for area in [WIDE, NARROW] {
+            let dashboard = settings_overlay_open(2, Route::List);
+            let band = settings_band_for(area, &dashboard);
+            let footer_row = area.height - 1;
+
+            for row in [band.y - 1, band.y + band.height, footer_row] {
+                assert_eq!(
+                    mouse_action(&dashboard, area, &left(60, row)),
+                    Action::Back,
+                    "{area:?}: row {row}, settings panel"
+                );
+            }
+
+            let mut applied = dashboard.clone();
+            applied.apply(mouse_action(&dashboard, area, &left(60, band.y - 1)));
+            assert_eq!(applied.overlay.panel, None);
+            assert_eq!(applied.selected, 2);
+            assert_eq!(
+                applied.settings.cursor, 0,
+                "the dismissal selected no setting"
+            );
+
+            // Past the frame's right edge: `Ignore`, not `Back` — a click
+            // the pane never received does not dismiss the overlay.
+            assert_eq!(
+                mouse_action(&dashboard, area, &left(200, 4)),
+                Action::Ignore,
+                "{area:?}: outside the frame"
+            );
+        }
+
+        // The help panel's band nearly fills a 120x40 or 60x20 body, so
+        // `TALL` (120x60) is what leaves room above it, on exactly
+        // `a_click_outside_the_band_dismisses_it_and_selects_nothing`'s own
+        // terms.
+        let help = overlay_open(2, Route::List);
+        let help_band = band_for(TALL);
+        for row in [
+            help_band.y - 1,
+            help_band.y + help_band.height,
+            TALL.height - 1,
+        ] {
+            assert_eq!(
+                mouse_action(&help, TALL, &left(60, row)),
+                Action::Back,
+                "row {row}, help panel"
+            );
+        }
+        let mut applied_help = help.clone();
+        applied_help.apply(mouse_action(&help, TALL, &left(60, help_band.y - 1)));
+        assert_eq!(applied_help.overlay.panel, None);
+        assert_eq!(applied_help.selected, 2);
+    }
+
+    /// `mouse-input`: "A click outside cancels an edit rather than closing
+    /// the panel" — `Back` cancels the edit in progress, exactly as `Esc`
+    /// does, and leaves the panel open; a second such click then closes it.
+    #[test]
+    fn a_click_outside_cancels_an_edit_rather_than_closing_the_panel() {
+        for area in [WIDE, NARROW] {
+            let mut dashboard = settings_overlay_open(1, Route::List);
+            dashboard.settings.cursor = 1;
+            dashboard.overlay.edit = Some(crate::ui::app::Edit {
+                setting: 1,
+                candidate: 1, // "codex"
+            });
+            let band = settings_band_for(area, &dashboard);
+
+            let action = mouse_action(&dashboard, area, &left(60, band.y + band.height));
+            assert_eq!(action, Action::Back, "{area:?}");
+
+            let mut applied = dashboard.clone();
+            applied.apply(action);
+            assert_eq!(applied.overlay.edit, None);
+            assert_eq!(applied.overlay.panel, Some(Panel::Settings));
+            assert_eq!(
+                applied.settings.rows[1].value, "claude",
+                "the committed value is unchanged: {area:?}"
+            );
+
+            // A second such click then closes the panel.
+            let second = mouse_action(&applied, area, &left(60, band.y + band.height));
+            let mut closed = applied.clone();
+            closed.apply(second);
+            assert_eq!(closed.overlay.panel, None, "{area:?}");
+        }
     }
 
     #[test]
