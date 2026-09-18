@@ -1992,12 +1992,29 @@ impl Dashboard {
     /// own answer, whose `picker` is always unset — leaves `overlay` untouched entirely: not
     /// only `panel`, but `scroll` and `edit` too. See `specs/agent-launch/spec.md` -> "An
     /// ambiguous agent kind opens the settings panel instead of picking one".
+    ///
+    /// `settings-window`'s further addition: whenever `resolution` is `Some` — a `,`-triggered
+    /// `Request::Resolve`'s answer no less than an ambiguous launch refusal's — the
+    /// `agent_kind` row is replaced in place with `settings::agent_kind_setting`'s own
+    /// rendering of it, the second of the three moments `settings::PanelState::rows`'s doc
+    /// comment names beside startup and a commit. `openspec_bin` and `prompts` are untouched:
+    /// neither depends on `kind`. Done before the `picker` branch so a picker outcome finds the
+    /// freshly-resolved row already in place when it repositions `settings.cursor` onto it.
     pub fn adopt_launch_outcome(&mut self, outcome: crate::launch::Outcome) {
         self.launch.in_flight = false;
         if let Some((agent, change)) = outcome.named {
             self.agent_names.names.insert(agent, change);
         }
         self.launch.problems = outcome.problems;
+        if let Some(resolution) = &outcome.resolution
+            && let Some(row) = self
+                .settings
+                .rows
+                .iter_mut()
+                .find(|row| row.key == "agent_kind")
+        {
+            *row = crate::settings::agent_kind_setting(Some(resolution));
+        }
         if outcome.picker {
             self.overlay.panel = Some(Panel::Settings);
             self.overlay.scroll = 0;
@@ -3055,7 +3072,10 @@ mod tests {
         );
         let agent_kind = &d.settings.rows[1];
         assert_eq!(agent_kind.key, "agent_kind");
-        assert_eq!(agent_kind.provenance, crate::settings::Provenance::Ambiguous);
+        assert_eq!(
+            agent_kind.provenance,
+            crate::settings::Provenance::Ambiguous
+        );
         match &agent_kind.editable {
             crate::settings::Editable::Kind { shortlist } => {
                 assert_eq!(shortlist, &vec!["claude".to_string(), "codex".to_string()]);

@@ -221,7 +221,14 @@ fn openspec_bin_setting(binary: &resolve::BinResolution) -> Setting {
 /// `Source` to convert and is `Kind`-editable with both candidates; and a
 /// resolved kind with no installed integration is refused for naming
 /// `config.toml` as the way to set it.
-fn agent_kind_setting(kind: Option<&KindResolution>) -> Setting {
+///
+/// `pub(crate)`, not private: this is also the one function `ui::app::Dashboard::
+/// adopt_launch_outcome` needs to update `settings.rows`'s `agent_kind` entry in place
+/// when an outcome's `resolution` is `Some` — the "every adopted resolution" moment
+/// `PanelState::rows`'s own doc comment names beside startup and a commit — without
+/// reaching for `settings::settings` itself, which would also need `Config` and
+/// `resolve::BinResolution` that `Dashboard` does not hold.
+pub(crate) fn agent_kind_setting(kind: Option<&KindResolution>) -> Setting {
     let Some(resolution) = kind else {
         return Setting {
             key: "agent_kind",
