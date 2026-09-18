@@ -89,8 +89,9 @@ The check SHALL fail when any of the following is true, naming the offending row
    place. The difference is the
    whole of why the rule is specified by enclosing item. The residual 16.9% is not
    misclassification: llvm-cov instruments a function's `fn` line and its closing brace, and
-   those are declarations by this rule's own definition. Across the map's 74 ranges the
-   enclosing-item form rejects exactly **one**. Both shapes this rule exists
+   those are declarations by this rule's own definition. Measured across the map as it stood
+   when this rule was written — 74 ranges — the enclosing-item form rejected exactly **one**;
+   the audit that followed rebound 28 of them and left 78, none rejected. Both shapes this rule exists
    to reject were live at HEAD: `src/tasks.rs:193-196` is three doc-comment lines plus
    `pub fn task_number_len(text: &str) -> usize {` — a function that reads no file — bound to
    "a tasks file exists but cannot be read"; and `src/ui/app.rs:830-843`, bound to "Herdr
@@ -119,7 +120,15 @@ The check SHALL fail when any of the following is true, naming the offending row
    `MIN_ROWS` is **46** at HEAD (`tests/degraded_coverage.rs:17`), against a table of 59 rows.
    This requirement states the floor as the constant rather than as a literal precisely so two
    changes in flight cannot fight over the number: whichever lands second adopts the higher
-   count, and neither lowers it.
+   count, and neither lowers it;
+6b. the map holds fewer `covers` **ranges**, summed across every row, than `MIN_RANGES`.
+   `MIN_ROWS` does not bound this and never could: a map may keep every row and collapse each
+   multi-range row to a single range, losing a fifth of what it names while the row floor stays
+   satisfied. The only range floor before this one lived in `scripts/coverage-prod.py`, which
+   requires ranges to be at least rows — so the map could fall from 78 ranges to 59 without
+   either check firing, and `coverage-prod.py` would not have been run to fire: it needs a
+   green suite, which is the scheduling defect this change exists to correct. `MIN_RANGES` is
+   **70** at HEAD against 78 ranges, stated as the constant for the same reason `MIN_ROWS` is.
 
 `tier` SHALL record the tier at which the row's **own wording** is observable, not the
 cheapest tier that could be written. A row that names something rendered is `view`; a row
@@ -233,6 +242,16 @@ watches the wrong thing.
   **hotness** check — uninstrumented lines are reported as "instruments no line in this range"
   — but only once `make coverage` was finally reachable, seven task groups late, which is the
   scheduling half of the same defect
+
+#### Scenario: Dropping `covers` ranges fails a floor of their own
+
+- **WHEN** every row's `covers` array is truncated to its first entry, so all 59 rows survive
+  and `MIN_ROWS` stays satisfied, and `cargo test --all-features` runs `degraded_coverage`
+- **THEN** it exits non-zero naming the **range** floor and the count it fell to, not the row
+  floor
+- **AND** the failure is reachable without a coverage report, so `make covers-check` reports
+  it on a red suite — which is the whole reason the floor is duplicated here rather than left
+  to `scripts/coverage-prod.py`'s ranges-at-least-rows rule
 
 #### Scenario: A range of real statements is accepted whatever it starts with
 

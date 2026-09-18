@@ -101,6 +101,7 @@ defect buried in a 1600-test run into a named gate that fails in seconds, before
 | A range that is only a signature or only struct fields is rejected | new test: both HEAD shapes planted as fixtures, each asserted rejected and naming the row's `condition` | unit | ScratchDir | `cargo test --test degraded_coverage` |
 | A range that is only a signature or only struct fields is rejected | negative control: a retained `legacy_holds_code` predicate is asserted to **accept** both ranges, so the strengthening is shown to be what catches them | unit | the tree itself | `cargo test --test degraded_coverage` |
 | A range of real statements is accepted whatever it starts with | new test: a range starting at a `fn` line but including its guard body is accepted; the `fn` line alone is rejected | unit | the tree itself | `cargo test --test degraded_coverage` |
+| Dropping `covers` ranges fails a floor of their own | new test: every row truncated to one range, all 59 rows kept so `MIN_ROWS` cannot be what fires, the message asserted to name the range floor | unit | the map itself | `cargo test --test degraded_coverage` |
 | A range that is only a signature or only struct fields is rejected | scanner control: a fixture holding a `{` inside a string literal, asserted not to desync field recognition — the failure mode is vacuous acceptance | unit | the tree itself | `cargo test --test degraded_coverage` |
 | An uncovered degraded path fails the coverage run | existing behaviour, unchanged | integration | `cargo llvm-cov` | `make coverage` |
 | Deleting the test that drives a degraded path is caught | existing behaviour, unchanged | integration | `cargo llvm-cov` | `make coverage` |
@@ -175,6 +176,19 @@ other reasons — so it is corrected rather than reproduced.
 - **`covers-check` adds a compile to `check` before `test`.** In practice it is the same
   compilation `test` performs moments later and is cached, so the cost is close to zero on a
   warm tree and one test binary's link on a cold one.
+- **A third defect class exists that this document did not name: drift.** A binding correct
+  when written slides when a line is inserted above it, and nothing here catches that — the
+  drifted-onto code holds statements, so the structural rule passes it, and it is hot, so the
+  coverage run passes it too. Measured during group 3: all eight `src/open.rs` ranges drifted
+  in `3ce2d50`, a commit of mostly doc comments, and it was the **largest** of the three
+  classes at 16 of 28 rebound ranges. Recorded here because this document's own risk list
+  predicted two classes and the shape-versus-aboutness framing below reads, wrongly, as
+  exhaustive. A line-anchored `covers` form is the repair and is a separate change.
+- **The structural rule does not reach a destructuring pattern.** `changes.rs:1794-1794` was a
+  field of `let ChangeSet { .. } = files;` — the vacuous shape the rule exists to reject, one
+  syntactic step outside it, because the extent scan recognises a struct *declaration* and a
+  pattern is not one. Found by the audit; left as a stated limit rather than widened into the
+  rule, which would need its own controls.
 - **The rule finds shape, not aboutness — and aboutness is the larger defect.** Measured at
   HEAD, the rule flags 1 of 74 ranges. It rejects the `settings-window` regression shape
   (`app.rs:830-843` at `bfe7e62`, struct fields) — but `fold_glyph` under "No `openspec/` found"

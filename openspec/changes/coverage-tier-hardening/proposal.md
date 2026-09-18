@@ -33,8 +33,10 @@ bound to "a tasks file exists but cannot be read", is three doc-comment lines pl
   what makes `src/tasks.rs:193-196` fail.
 - The instrumentation and hotness checks stay in `coverage`, gated on a green suite: a red suite
   means some paths legitimately did not run, so the floors would fire for unrelated reasons.
-- An audit of all **74** `covers` ranges across the 59 rows. Two different defects, and only one
-  of them is machine-findable:
+- An audit of all **74** `covers` ranges across the 59 rows. **Three** different defects, and
+  only one of them is machine-findable. The third was found by the audit itself and is the
+  largest — this list said two when it was written, and the correction is recorded here rather
+  than in a note, because the count is the point:
   - **Shape.** The rule rejects a range that only *names* code. At HEAD it flags exactly
     **one**, `src/tasks.rs:193-196` — the one range the hotness check can never catch, its only
     instrumented line being a `pub fn` signature hot at 35,050. It also rejects the
@@ -45,6 +47,17 @@ bound to "a tasks file exists but cannot be read", is three doc-comment lines pl
     `detail_row_role` under "`openspec` binary not found". Both pass the rule; both are wrong.
     **No automated rule finds these.** The audit is human judgement, row by row, and is the bulk
     of this change's work.
+  - **Drift.** A binding that was *correct when written* and silently slid when lines were
+    inserted above it. Found by the audit, not predicted: all eight `src/open.rs` ranges moved
+    in `3ce2d50`, a commit whose 38 added lines are **mostly doc comments**, and two of them now
+    name the opposite path — `open.rs:411-417`, bound to "focus fails with a usage error", is
+    the focus *success* arm. **No automated rule finds these either**, and the new structural
+    rule least of all: a drifted range still holds statements, and the code it drifted onto is
+    hot, so `make coverage` cannot see it. What would catch it is an anchor that survives an
+    edit above it, which is a different change to propose.
+  The audit's measured yield: **28 of 78 ranges rebound, across 20 of the 59 rows** — 1 shape,
+  11 aboutness, 16 drift. `settings-window`'s review scoped this at "~10 rows"; the difference
+  is the class nobody had named.
 - `scripts/gates/` gains no script: `covers-check` reads a test fixture and a coverage contract,
   not source hygiene, so it belongs beside `coverage`. Not **BREAKING**: no plugin manifest,
   config format, or keybinding changes.

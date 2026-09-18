@@ -2,6 +2,20 @@
 
 Reviewed against HEAD `fbfae77`, working tree clean outside this change's own directory.
 
+**Refreshed during apply, at `071213d`.** Group 3's audit revealed two things this package
+had not accounted for, both repaired in the owning artifact before the change review:
+
+| Discovery | Owning artifact | Repair |
+|---|---|---|
+| A **third** defect class, drift — a binding correct when written that slid when lines were inserted above it. All eight `src/open.rs` ranges moved in `3ce2d50`, a commit of mostly doc comments; 16 of the 28 rebound ranges are this class, making it the largest. Neither structural rule nor the hotness check can see it. | `proposal.md` -> What Changes; `design.md` -> Risks | the two-defect list corrected to three, with the measured yield (1 shape, 11 aboutness, 16 drift across 20 rows) and the reason no rule reaches it |
+| Task 3.3's `MIN_RANGES` floor was **checked machinery with no spec sentence** — the delta's failure-condition list stopped at `MIN_ROWS`. | `specs/degraded-coverage/spec.md` | failure condition **6b** added, with its own scenario; `design.md`'s matrix gained the matching row, keeping the scenario/row binding total in both directions |
+
+One further limit was found and **recorded rather than repaired**: the structural rule does
+not reach a destructuring **pattern**'s fields (`changes.rs:1794-1794` was `archived,` in
+`let ChangeSet { .. } = files;`), which is the vacuous shape one syntactic step outside the
+rule. Widening the extent scan to `let` patterns needs its own controls and is not this
+change. `design.md` -> Risks says so.
+
 Four `planning-reviewer` subagents were dispatched simultaneously, one slice each, none of them
 the session that wrote the package: **A** capability coverage, delta fidelity, scenario quality,
 cross-artifact contradictions; **B** design completeness, test boundaries, and the falsifiability
