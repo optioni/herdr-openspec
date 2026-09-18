@@ -9,7 +9,7 @@ tier = "view"
 proof = ["no_repository_names_the_directory_searched"]
 verdict = "confirmed"
 why = "the list region renders the empty state naming the directory searched, via render_at"
-covers = ["src/ui/list.rs:300-322"]
+covers = ["src/ui/list.rs:348-368", "src/ui/list.rs:380-381"]
 
 [[row]]
 condition = "`openspec` binary not found"
@@ -17,7 +17,7 @@ tier = "view"
 proof = ["the_badge_is_right_aligned_and_dropped_whole"]
 verdict = "implemented"
 why = "the list region's heading renders a dim, yellow file mode badge right-aligned against its own last column, dropped whole below its budget, driven through render_at at both widths and at the drop rule's own boundary"
-covers = ["src/ui/view.rs:400-421"]
+covers = ["src/ui/view.rs:596-598", "src/ui/view.rs:609-616"]
 
 [[row]]
 condition = "Schema unknown to the CLI"
@@ -57,7 +57,7 @@ tier = "view"
 proof = ["a_repository_with_no_changes_says_so"]
 verdict = "confirmed"
 why = "the list region's empty state, rendered through render_at"
-covers = ["src/ui/list.rs:405-412"]
+covers = ["src/ui/list.rs:536-542"]
 
 [[row]]
 condition = "A `/` filter matches no change"
@@ -65,7 +65,7 @@ tier = "view"
 proof = ["a_query_matching_nothing_names_itself"]
 verdict = "confirmed"
 why = "the filter's no-match rows, rendered through render_at"
-covers = ["src/ui/list.rs:413-426"]
+covers = ["src/ui/list.rs:544-555"]
 
 [[row]]
 condition = "Artifact file missing"
@@ -73,7 +73,7 @@ tier = "view"
 proof = ["a_missing_artifact_still_shows_its_tab_and_reads_no_content_yet"]
 verdict = "confirmed"
 why = "the detail region's No content yet state, rendered through render_at"
-covers = ["src/ui/detail.rs:512-522"]
+covers = ["src/ui/detail.rs:843-845"]
 
 [[row]]
 condition = "An artifact file exists and cannot be read (permission error, I/O error)"
@@ -81,7 +81,7 @@ tier = "view"
 proof = ["a_read_failure_is_named_above_the_content_at_both_widths"]
 verdict = "confirmed"
 why = "the detail region's leading problem line, rendered through render_at"
-covers = ["src/ui/detail.rs:525-535"]
+covers = ["src/ui/app.rs:2218-2222", "src/ui/detail.rs:672-672"]
 
 [[row]]
 condition = "No change is selected (an empty visible list, or a `/` filter matching none)"
@@ -97,7 +97,7 @@ tier = "unit"
 proof = ["unmodelled_constructs_render_as_source"]
 verdict = "unproven"
 why = "ui::markdown::lines renders a footnote as literal source, one line per source line; the same test's three control fixtures — a task-list item, a table, and a struck run — render as a checkbox glyph, as aligned columns and as a face, which is what says the narrowing is real"
-covers = ["src/ui/markdown.rs:786-786"]
+covers = ["src/ui/markdown.rs:809-811"]
 
 [[row]]
 condition = "A tasks file exists and yields no task **items**"
@@ -105,7 +105,7 @@ tier = "view"
 proof = ["prose_only_reads_no_tasks_yet"]
 verdict = "confirmed"
 why = "the tracked-tasks tab's No tasks yet state, rendered through render_at"
-covers = ["src/ui/tasks.rs:591-597"]
+covers = ["src/ui/tasks.rs:635-639"]
 
 [[row]]
 condition = "A marked tab's artifact resolves to no file while the change's `progress` is non-zero (the `tasks.md` fallback above counted a file the artifact itself did not)"
@@ -113,7 +113,7 @@ tier = "view"
 proof = ["missing_tasks_artifact_no_content_yet"]
 verdict = "confirmed"
 why = "the header's counted pair beside the tab's own No content yet, rendered through render_at"
-covers = ["src/ui/detail.rs:512-522", "src/ui/detail.rs:525-535"]
+covers = ["src/ui/detail.rs:843-845", "src/ui/detail.rs:674-679"]
 
 [[row]]
 condition = "`openspec/changes/` or its `archive/` exists and cannot be read"
@@ -137,7 +137,7 @@ tier = "unit"
 proof = ["a_non_looping_directory_symlink_resolving_inside_the_change_is_skipped_too"]
 verdict = "confirmed"
 why = "a real non-looping symlink whose target canonicalizes inside the change directory, read through resolve_artifact, is not descended into and the file behind it is absent from the artifact's paths - this proves the plugin's own skip, not that the CLI actually follows such a link (that claim rests on the 1.12.0 measurement cited in the row itself and in design.md, not on a test that spawns the real CLI)"
-covers = ["src/changes.rs:693-694", "src/changes.rs:697-699", "src/changes.rs:701-705"]
+covers = ["src/changes.rs:693-694", "src/changes.rs:697-697", "src/changes.rs:703-705"]
 
 [[row]]
 condition = "A tasks file exists but cannot be read (a directory where a file was expected, a permission error, an I/O error, or invalid UTF-8)"
@@ -153,7 +153,7 @@ tier = "view"
 proof = ["an_unreachable_socket_renders_the_agentless_pane"]
 verdict = "spec-corrected"
 why = "the pane renders identically whether AgentSnapshot::problem is Some or None, via render_at — because ui::list only draws that reason when the snapshot is also `stalled`, which the fixture never sets"
-covers = ["src/ui/list.rs:456-460"]
+covers = ["src/ui/list.rs:456-458"]
 
 [[row]]
 condition = "A launch's `pane split` call fails"
@@ -185,7 +185,7 @@ tier = "outer"
 proof = ["every_launch_failure_renders_as_a_leading_row"]
 verdict = "unproven"
 why = "a real run_wired run refused before any Herdr call, the sentence asserted in full at 120 columns"
-covers = ["src/launch.rs:158-162"]
+covers = ["src/launch.rs:156-160"]
 
 [[row]]
 condition = "`state::record` fails after a successful `agent start`"
@@ -241,7 +241,7 @@ tier = "unit"
 proof = ["out_of_scope_and_worktree_agents_are_invisible"]
 verdict = "confirmed"
 why = "rows() equality proves an absent or foreign cwd badges and counts nothing"
-covers = ["src/agents.rs:120-126"]
+covers = ["src/agents.rs:137-143"]
 
 [[row]]
 condition = "An agent works in a **linked worktree** of this repository"
@@ -249,7 +249,7 @@ tier = "unit"
 proof = ["out_of_scope_and_worktree_agents_are_invisible"]
 verdict = "unproven"
 why = "rows() equality proves a linked-worktree-shaped cwd fails the same containment check as row 29"
-covers = ["src/agents.rs:120-126"]
+covers = ["src/agents.rs:137-143"]
 
 [[row]]
 condition = "A configured `openspec_bin` that does not name a usable binary"
@@ -265,7 +265,7 @@ tier = "unit"
 proof = ["a_duplicate_artifact_id_parses_and_renders"]
 verdict = "unproven"
 why = "a real duplicate-id schema, read through changes::from_files and schema::parse, stays two addressable tabs"
-covers = ["src/schema.rs:258-263"]
+covers = ["src/schema.rs:263-268"]
 
 [[row]]
 condition = "`openspec list --json` reports a repository root other than the one this plugin resolved"
@@ -336,7 +336,7 @@ tier = "outer"
 proof = ["a_failed_cli_cycle_keeps_the_file_numbers"]
 verdict = "unproven"
 why = "a real run_wired run keeps the file-sourced result after a later failing CLI cycle"
-covers = ["src/changes.rs:1821-1822"]
+covers = ["src/changes.rs:1623-1628", "src/changes.rs:1830-1830"]
 
 [[row]]
 condition = "A touched path is classified to the wrong change, or conservatively to every change"
@@ -352,7 +352,7 @@ tier = "integration"
 proof = ["open_outside_herdr_exits_one"]
 verdict = "confirmed"
 why = "the real binary, spawned with no HERDR_WORKSPACE_ID, exits 1 with an empty Herdr argv log"
-covers = ["src/open.rs:70-74"]
+covers = ["src/open.rs:72-76"]
 
 [[row]]
 condition = "`open`/`open-tab`'s `pane list` call fails or its payload is unparseable"
@@ -360,7 +360,7 @@ tier = "unit"
 proof = ["listing_failure_warns_and_still_opens", "listing_unparseable_warns_and_still_opens"]
 verdict = "confirmed"
 why = "open::run's own unit proof that a failed or unparseable pane list still opens the pane"
-covers = ["src/open.rs:383-399"]
+covers = ["src/open.rs:391-407"]
 
 [[row]]
 condition = "`open`/`open-tab`'s `plugin pane focus` call fails with a usage error (code 2)"
@@ -368,7 +368,7 @@ tier = "unit"
 proof = ["focus_usage_error_warns_and_opens_once"]
 verdict = "confirmed"
 why = "open::run's own unit proof that a usage-error focus warns and still opens once"
-covers = ["src/open.rs:411-417"]
+covers = ["src/open.rs:419-425"]
 
 [[row]]
 condition = "`open`/`open-tab`'s `plugin pane focus` call fails with a domain error, or `plugin pane open` itself fails"
@@ -376,7 +376,7 @@ tier = "unit"
 proof = ["focus_domain_error_stops_and_opens_nothing"]
 verdict = "spec-corrected"
 why = "herdr_reason's own formatted prefix, not Herdr's raw message verbatim, is what reaches stderr"
-covers = ["src/open.rs:418-422", "src/open.rs:437-441"]
+covers = ["src/open.rs:426-430", "src/open.rs:445-450"]
 
 [[row]]
 condition = "`open`/`open-tab`'s **post-open** `pane list` call fails, is unparseable, or names no dashboard pane"
@@ -384,7 +384,7 @@ tier = "unit"
 proof = ["a_failed_second_listing_warns_and_succeeds", "an_unparseable_second_listing_warns_and_succeeds", "an_empty_second_listing_warns_rather_than_focusing_nothing"]
 verdict = "implemented"
 why = "open::run's own unit proofs over cli::FakeCli, asserted on the recorded argv sequence rather than outcome alone; none render anything, which is why this row stays unit rather than the capability spec's stated integration preference for one-shot commands"
-covers = ["src/open.rs:458-463", "src/open.rs:465-467"]
+covers = ["src/open.rs:466-471", "src/open.rs:473-475"]
 
 [[row]]
 condition = "`open`/`open-tab`'s **post-open** `plugin pane focus` call fails, on any code"
@@ -392,7 +392,7 @@ tier = "unit"
 proof = ["a_post_open_focus_failure_warns_on_every_code"]
 verdict = "implemented"
 why = "open::run's own unit proof looping over Failed{code:Some(1)}, Failed{code:Some(2)}, and NotStarted, asserted on the recorded focus argv and the warning text; it renders nothing, which is why this row stays unit rather than the capability spec's stated integration preference for one-shot commands"
-covers = ["src/open.rs:454-456"]
+covers = ["src/open.rs:462-464"]
 
 [[row]]
 condition = "The dashboard process opened by `open`/`open-tab` finds no workspace cwd in its own injected Herdr context (`ui::startup_cwd` returns `None`)"
@@ -424,7 +424,7 @@ tier = "unit"
 proof = ["a_change_archived_mid_cycle_appears_in_both_lists_for_one_cycle"]
 verdict = "confirmed"
 why = "changes::merge's own unit proof: two merges, the second with an empty CLI list, showing add-auth appears in both active and archived for one cycle and then self-corrects rather than sticking (design.md -> Decision D6)"
-covers = ["src/changes.rs:1794-1794", "src/changes.rs:1834-1835", "src/changes.rs:1842-1847"]
+covers = ["src/changes.rs:1902-1918", "src/changes.rs:1834-1835", "src/changes.rs:1842-1847"]
 
 # --- agent-client-choice ----------------------------------------------------
 

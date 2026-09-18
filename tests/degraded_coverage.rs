@@ -16,6 +16,15 @@ fn manifest_dir() -> PathBuf {
 /// equality, so a later change may add a degraded state without touching this number.
 const MIN_ROWS: usize = 46;
 
+/// The same floor for `covers` **ranges**, summed across every row. `MIN_ROWS` alone does not
+/// bound this: a map could keep all 59 rows and drop every multi-range row to one range each,
+/// losing a fifth of what the map names while `cargo test` reported green. The only range
+/// floor before this one lived in `scripts/coverage-prod.py`, which requires ranges >= rows —
+/// so 78 ranges could fall to 59 without either check firing, and `coverage-prod.py` runs
+/// only behind a green suite. A lower bound on the same terms as `MIN_ROWS`: whichever of two
+/// changes in flight lands second adopts the higher count, and neither lowers it.
+const MIN_RANGES: usize = 70;
+
 /// Parse the table between `## Degraded states` and `### No terminal is not a degraded
 /// state`, skipping the header and separator rows, taking each remaining line's first
 /// pipe-delimited cell trimmed. The same parse task 1.1 ran by hand; this is its executable
@@ -595,6 +604,16 @@ fn check_coverage(spec_md: &str, toml_text: &str, files: &[PathBuf]) -> Result<u
         ));
     }
 
+    let range_count: usize = rows.iter().map(|r| r.covers.len()).sum();
+    if range_count < MIN_RANGES {
+        return Err(format!(
+            "tests/degraded-coverage.toml holds {range_count} \"covers\" ranges across its \
+             {} rows, expected at least {MIN_RANGES} — dropping a range is a reduction in what \
+             the map proves, not a simplification",
+            rows.len()
+        ));
+    }
+
     // Condition 3: no two entries share a condition.
     let mut seen_conditions: BTreeSet<&str> = BTreeSet::new();
     for row in &rows {
@@ -1101,5 +1120,35 @@ fn a_range_of_real_statements_is_accepted_whatever_it_starts_with() {
     assert!(
         err.contains("holds no statement"),
         "the `fn` line alone names where the code is declared, not where it runs: {err:?}"
+    );
+}
+
+/// Task 3.3: the range floor fires on its own, independently of `MIN_ROWS`. Reducing every
+/// row to a single range keeps all 59 rows — so `MIN_ROWS` stays satisfied — while losing
+/// nineteen of the ranges the map names, which is the collapse `scripts/coverage-prod.py`'s
+/// own ranges-at-least-rows rule cannot see either and which it would not be run to see: it
+/// needs a green suite.
+#[test]
+fn dropping_covers_ranges_fails_the_range_floor() {
+    let mut mutated = parse_coverage_toml(&coverage_toml()).expect("parse the coverage map");
+    let rows_before = mutated.len();
+    for row in &mut mutated {
+        row.covers.truncate(1);
+    }
+    assert_eq!(
+        mutated.len(),
+        rows_before,
+        "the plant must keep every row, so MIN_ROWS is not what fires"
+    );
+    let files = searchable_files();
+    let err = check_coverage(&spec_md(), &render_rows_as_toml(&mutated), &files)
+        .expect_err("collapsing every row to one range must fail the range floor");
+    assert!(
+        err.contains("covers") && err.contains(&MIN_RANGES.to_string()),
+        "the failure must name the range floor, not the row floor: {err:?}"
+    );
+    assert!(
+        !err.contains(&format!("expected at least {MIN_ROWS}")),
+        "MIN_ROWS must still be satisfied, so it cannot be what fired: {err:?}"
     );
 }

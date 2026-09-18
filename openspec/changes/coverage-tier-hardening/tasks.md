@@ -160,7 +160,7 @@ does moves — so there is no client-visible wiring for an outer loop to drive. 
       Rebind the one range `make covers-check` rejects — `src/tasks.rs:193-196`,
       under "a tasks file exists but cannot be read" — to code that runs when that condition
       holds. `make covers-check` exits 0 when this is done.
-- [ ] 3.2 CHANGE: Audit the remaining 73 ranges for **aboutness**, which no rule reaches (design.md → Risks). For each, read the row's `condition`, `why`, and `proof`, then confirm the range
+- [x] 3.2 CHANGE: Audit the remaining 73 ranges for **aboutness**, which no rule reaches (design.md → Risks). For each, read the row's `condition`, `why`, and `proof`, then confirm the range
       names code that runs when that condition holds. The archived `settings-window` review scoped this at
       "~10 rows in the same vacuous shape" (`notes/change-review.md` → W7); two are verified
       here, so treat ~10 as the expected yield and record the difference rather than stopping at
@@ -170,17 +170,17 @@ does moves — so there is no client-visible wiring for an outer loop to drive. 
       each row's verdict in `notes/audit.md` so the judgement is reviewable as a whole; a row
       whose `proof` watches something other than its `why` claims is reported and left, not
       silently re-aimed.
-- [ ] 3.3 CHANGE: Add a **range** floor to `tests/degraded_coverage.rs` beside `MIN_ROWS`, so
+- [x] 3.3 CHANGE: Add a **range** floor to `tests/degraded_coverage.rs` beside `MIN_ROWS`, so
       `covers-check` carries it. Today the only in-suite floor counts rows (`MIN_ROWS = 46`
       against 59, thirteen rows of slack) and the range floor lives solely in
       `scripts/coverage-prod.py`, where it fires only below the row count — so 74 ranges could
       fall to 59 unnoticed by `cargo test`.
-- [ ] 3.4 VERIFY: Name the outcome, not the tally. `make covers-check` exits 0; `notes/audit.md`
+- [x] 3.4 VERIFY: Name the outcome, not the tally. `make covers-check` exits 0; `notes/audit.md`
       carries a verdict for all 74 ranges; and **both** aboutness defects the plan names by path
       are repaired: `src/ui/list.rs:300-322` (`fold_glyph`, under "No `openspec/` found while
       walking up") and `src/ui/view.rs:400-421` (`detail_row_role`, under "`openspec` binary not
       found") each now name code that executes when its row's condition holds.
-- [ ] 3.5 VERIFY: `git diff --stat tests/degraded-coverage.toml` shows changes beyond 3.1's single
+- [x] 3.5 VERIFY: `git diff --stat tests/degraded-coverage.toml` shows changes beyond 3.1's single
       range — or `notes/audit.md` records explicitly that no further range moved and why. Every
       other check in this group is green at HEAD before the audit runs: `covers-check` exits 0
       once 3.1 lands, the range count is already 74, and a verdict file is self-authored prose.
