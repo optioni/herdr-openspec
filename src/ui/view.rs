@@ -4824,6 +4824,113 @@ mod tests {
         }
     }
 
+    // `title-heading-preamble`, group 1: the render half of the two scenarios
+    // that draw differently once a document title heading is demoted.
+
+    /// `specs/artifact-folds/spec.md` -> "A document title heading is
+    /// demoted to an unlabelled section" -- the render half: exactly two
+    /// header rows, both unindented (column zero, no depth indent), and
+    /// `section_at` resolving none of the rows preceding the first header
+    /// (the demoted title's own body) to a section.
+    #[test]
+    fn a_document_title_heading_is_demoted_to_two_header_rows() {
+        const SOURCE: &str = "# drift — tasks\n\nIntro prose.\n\n## 1. Setup\n\n- [x] 1.1 a\n\n## 2. Build\n\n- [ ] 2.1 b\n";
+        let change = fixture::track_tasks_at(
+            fixture::with_artifacts(
+                fixture::active("c", 1, 2),
+                &[("tasks", &["/repo/openspec/changes/c/tasks.md"])],
+            ),
+            0,
+        );
+        let mut d = dashboard_with_detail(
+            vec![change],
+            Vec::new(),
+            1,
+            Route::Detail,
+            Detail {
+                sections: Vec::new(),
+                scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
+                expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
+            },
+        );
+        let recorder = crate::testutil::RecordingReader::always(Ok(SOURCE.to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+        d.sync_detail(&read);
+
+        for width in [120, 60] {
+            let interior = interior_width(width);
+            let rows = crate::ui::detail::content_lines(&d.detail, d.selected_change(), interior);
+            let header_indices: Vec<usize> = rows
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| {
+                    matches!(r.kind, crate::ui::detail::ContentKind::SectionHeader { .. })
+                })
+                .map(|(index, _)| index)
+                .collect();
+            assert_eq!(
+                header_indices.len(),
+                2,
+                "width {width}: exactly two header rows: {:?}",
+                rows.iter()
+                    .map(crate::ui::detail::ContentRow::text)
+                    .collect::<Vec<_>>()
+            );
+            for &index in &header_indices {
+                assert!(
+                    !rows[index].text().starts_with(' '),
+                    "width {width}: header row {index} is at column zero"
+                );
+            }
+            let first_header = header_indices[0];
+            for index in 0..first_header {
+                assert_eq!(
+                    crate::ui::detail::section_at(&rows, index, 0),
+                    None,
+                    "width {width}: row {index}, preceding the first header, resolves to no section"
+                );
+            }
+
+            // Rendering the same dashboard must not panic.
+            let _buf = render_at(width, 40, &d);
+        }
+    }
+
+    /// `specs/artifact-folds/spec.md` -> "A title heading with no prose
+    /// under it does not split the file" -- the render half: demoting the
+    /// title does not split the file into a single section that has lost
+    /// one of its two heading lines.
+    #[test]
+    fn a_title_heading_with_no_prose_under_it_keeps_both_heading_lines() {
+        const SOURCE: &str = "# drift — tasks\n## 1. Setup\n\n- [x] 1.1 a\n";
+        let progress = crate::tasks::Progress {
+            completed: 1,
+            total: 1,
+        };
+        let d = synced_task_dashboard(SOURCE, progress, 1);
+
+        for width in [120, 60] {
+            let interior = interior_width(width);
+            let rows = crate::ui::detail::content_lines(&d.detail, d.selected_change(), interior);
+            let texts: Vec<String> = rows.iter().map(crate::ui::detail::ContentRow::text).collect();
+            assert!(
+                texts.iter().any(|t| t.contains("# drift — tasks")),
+                "width {width}: the title heading line still draws: {texts:?}"
+            );
+            assert!(
+                texts.iter().any(|t| t.contains("## 1. Setup")),
+                "width {width}: the group heading line still draws: {texts:?}"
+            );
+
+            // Rendering the same dashboard must not panic.
+            let _buf = render_at(width, 20, &d);
+        }
+    }
+
     /// `heading-sections`: the seven-section spec-glob dashboard — the shape
     /// `ui::app::tests::a_spec_glob_nests_requirements_under_their_capability`
     /// derives through `sync_detail` from a three-path `specs` artifact whose first
