@@ -169,18 +169,18 @@ in any case — its guard drives the derivation group 1 writes.
 ## 5. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 5.1 CHECK: Inspect the intended verification commands and the tiers they reach — unit
+- [x] 5.1 CHECK: Inspect the intended verification commands and the tiers they reach — unit
       and view under `cargo test --lib`, the corpus guard under
       `cargo test --test title_corpus`, the contract tier under `cargo test --all-features`,
       and coverage at both floors.
-- [ ] 5.2 VERIFY: Run `make lint` — 0 warnings (`clippy -D warnings`).
-- [ ] 5.3 VERIFY: Run `make fmt-check` — clean.
-- [ ] 5.4 VERIFY: Run `make gates` — every hygiene gate OK.
+- [x] 5.2 VERIFY: Run `make lint` — 0 warnings (`clippy -D warnings`).
+- [x] 5.3 VERIFY: Run `make fmt-check` — clean.
+- [x] 5.4 VERIFY: Run `make gates` — every hygiene gate OK.
 - [x] 5.5 VERIFY: Run `make covers-check` — the degraded-states table's proofs all pass, and
       repoint `tests/degraded-coverage.toml:84` (`src/ui/app.rs:2218-2222`, immediately after
       `sync_detail`'s heading loop), whose line range this change's edits will shift.
-- [ ] 5.6 VERIFY: Run `make test` — green.
-- [ ] 5.7 VERIFY: Run `make coverage` — both floors met; add tests rather than lowering either.
-- [ ] 5.8 VERIFY: Run `openspec validate title-heading-preamble --strict` — valid.
-- [ ] 5.9 VERIFY: Run `make check` as the single gate. If it fails, name the failing
+- [x] 5.6 VERIFY: Run `make test` — green.
+- [x] 5.7 VERIFY: Run `make coverage` — both floors met; add tests rather than lowering either.
+- [x] 5.8 VERIFY: Run `openspec validate title-heading-preamble --strict` — valid.
+- [x] 5.9 VERIFY: Run `make check` as the single gate. If it fails, name the failing
       sub-command rather than summarising.
