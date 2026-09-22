@@ -261,9 +261,11 @@ spec rather than left for an implementer to "tidy up".
   exactly the unfinished ones instead of one parent that swallowed them.
 - **Three files lose a header row and gain nothing**, their title bodies being empty → they
   lose a row that said `[-]` about nothing; that is the intended outcome, not a regression.
-- **A carried MODIFIED block silently reverts landed work** → the two blocks were extracted
-  from `openspec/specs/` at this HEAD by script, and each was diffed against its live source
-  with every difference accounted for; the diff is reproduced in the change's own commit.
+- **A carried MODIFIED block silently reverts landed work** → all five blocks were extracted
+  from `openspec/specs/` at this HEAD by script and diffed against their live sources, with
+  every difference accounted for as this change's own edit. The accounting is written down in
+  `planning-review.md` → "Delta fidelity — the comparison that was run", which also says to
+  re-run it before implementing: a carried body goes stale the moment anything else archives.
 - **A file's split decision changes as a side effect** → D4 plus the corpus guard in the
   matrix, which asserts over this repository's own committed tree that every demoted file
   still yields more than one section.

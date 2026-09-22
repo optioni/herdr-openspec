@@ -12,7 +12,7 @@ Reviewed against HEAD `6386318`. A, B and D each built a probe against the real 
 copy rather than re-implementing the rules, so every corpus number below comes from the crate's
 own functions. D additionally drove the pane live in a 72×30 tmux pty.
 
-**1 CRITICAL, 17 WARNING, 5 SUGGESTION.** Every CRITICAL and WARNING is repaired below. The
+**1 CRITICAL, 17 WARNING, 7 SUGGESTION.** Every CRITICAL and WARNING is repaired below. The
 CRITICAL and four WARNINGs were raised independently by two reviewers each, which is the
 signal that the slicing worked rather than that the reviewers agreed with each other.
 
@@ -159,6 +159,15 @@ task 1.7 runs `cargo test --lib`, and says why.
   trailing blank plus the section separator, and changing it is `artifact-content`'s argument.
 - **S5 — the guard's tree lookup was unstated.** *(B)* Taken: `env!("CARGO_MANIFEST_DIR")`,
   recorded in design.md → Boundaries and tasks.md 2.2.
+- **S6 — the documentation task mis-described its own target.** *(D)* It said the `SPEC.md`
+  paragraph "normalises depth against the shallowest"; `SPEC.md` contains no "shallowest", no
+  "normalis" and no `min_level` — verified, `grep -c` returns 0. Taken: task 4.1 now names
+  **three** verified sites (`:99`, `:640-642`, `:647-648`), quotes the claim at each, and says
+  outright that no normalisation sentence is to be hunted for.
+- **S7 — an unfalsifiable mitigation in design.md → Risks.** *(D)* "the diff is reproduced in
+  the change's own commit" — a commit message contains no diff. The underlying claim holds; D
+  re-diffed the carried block itself and found only the intended hunks. Taken: the clause now
+  points at this document's "Delta fidelity" section, where the accounting actually lives.
 
 ## Number sweep
 

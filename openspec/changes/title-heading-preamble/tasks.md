@@ -117,11 +117,17 @@ in any case — its guard drives the derivation group 1 writes.
 ## 4. Documentation
 <!-- kind: operational -->
 
-- [ ] 4.1 Rewrite in `SPEC.md`, **both** sites (audience: anyone implementing against the
-      design contract): the section-derivation paragraph at `SPEC.md:635-648`, and the `| ui |`
-      module-map row at `SPEC.md:99`, which says "one section per resolved file and, inside a
-      spec-shaped or tracked task file, one per heading". Both become false for a demoted
-      title. Correct them in place; do not append a second sentence beside either.
+- [ ] 4.1 Rewrite in `SPEC.md`, **three** sites (audience: anyone implementing against the
+      design contract), each verified to carry the claim it is named for:
+      `:99`, the `| ui |` module-map row — "one section per resolved file and, inside a
+      spec-shaped or tracked task file, one per heading";
+      `:640-642` — "is split again at its own ATX headings, one section per heading, labelled
+      with the heading's own text";
+      and `:647-648` — "Text before a split file's first heading is a section with no label",
+      which is now only one of the two shapes that produce one.
+      `SPEC.md` says nothing about normalising depth against the shallowest heading — the words
+      "shallowest", "normalis" and `min_level` appear nowhere in it — so no such sentence is to
+      be hunted for. Correct all three in place; do not append beside any of them.
 - [ ] 4.2 Rewrite in `AGENTS.md`: the same claim in the "Current repo state" paragraph
       describing the detail region's foldable sections (audience: every agent session, which
       loads this file). Correct the existing sentence rather than appending. Net addition must
