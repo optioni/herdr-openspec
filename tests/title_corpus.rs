@@ -1,18 +1,19 @@
 //! `title-heading-preamble`'s corpus guard: every committed `tasks.md` under
 //! `openspec/changes/` (active and `archive/` alike) that has at least one
-//! task item still splits into more than one detail section once the title
-//! rule (`Dashboard::sync_detail`'s private `title_heading` helper) demotes
-//! its document title to an unlabelled section.
+//! task item is checked against a **regression**, not against an absolute
+//! rule — the title rule (`Dashboard::sync_detail`'s private `title_heading`
+//! helper) must not change whether the file *splits* relative to what it did
+//! before this change existed.
 //!
 //! This drives the *real* derivation end to end rather than re-deriving the
 //! rule: it builds a one-artifact `Dashboard` with `tracks_tasks: true` and
 //! calls the public `Dashboard::sync_detail` with a closure that returns the
-//! file's own bytes, then asserts `detail.sections.len() > 1` on the result.
-//! `title_heading` itself is private, so a guard that re-parsed headings and
-//! recomputed the three clauses `design.md` -> Boundaries describes would be
-//! a second implementation of the rule under guard — green even if
-//! `title_heading` were never written, or were written wrong. Driving
-//! `sync_detail` is the one way to avoid that.
+//! file's own bytes, then compares `detail.sections.len() > 1` against the
+//! same file's **pre-change** split decision. `title_heading` itself is
+//! private, so a guard that re-parsed headings and recomputed its three
+//! clauses (`design.md` -> Boundaries) would be a second implementation of
+//! the rule under guard — green even if `title_heading` were never written,
+//! or were written wrong. Driving `sync_detail` is the one way to avoid that.
 //!
 //! **Selection rule** (this is the "which files" choice `tasks.md`'s task
 //! 2.2 asks to be stated and justified): every `tasks.md` with at least one
@@ -29,6 +30,27 @@
 //! index found, per `design.md`'s "sole heading at the shallowest level, no
 //! task items in its own body" test, and non-empty trimmed body) to decide
 //! membership up front.
+//!
+//! **Why a regression, not `sections.len() > 1` outright**: every committed
+//! `tasks.md` with task items happening to split is stronger than the rule
+//! this guard exists to protect. An untitled, one-group file such as
+//! `## 1. Only\n\n- [ ] 1.1 x\n` never split before this change either
+//! (`a_single_heading_task_file_is_not_split_and_keeps_its_heading` asserts
+//! exactly that, unaffected by title demotion since it carries no title at
+//! all) — flagging it would blame this change for a pre-existing, correct
+//! non-split, and would turn `make check` red for any future change that
+//! happens to draft such a file mid-flight. What the title rule can actually
+//! break is a file whose split decision **changes** once a title is demoted
+//! out of the heading count, so that is what this guard compares:
+//! `pre_change_contributions` re-derives the split gate's contribution count
+//! exactly as `sync_detail` computed it **before** this change — every
+//! heading `split_headings` returns, plus one when the text before the first
+//! heading is non-empty (the OLD, byte-emptiness preamble predicate, not the
+//! trimmed one `title_heading`'s own body check uses) — a file always has a
+//! single path here, so `base` is always `0` and `contributions > 1` is
+//! exactly the old `splits` value. This re-derives the *old* formula, not
+//! `title_heading`'s three clauses, so it stays a regression check rather
+//! than a second implementation of the rule under guard.
 //!
 //! Lives in `tests/` rather than beside `src/ui/app.rs`'s own unit tests
 //! because `scripts/gates/noio-view.sh`'s `PURE` sweep covers `src/ui/app.rs`
@@ -64,6 +86,36 @@ fn find_tasks_md(dir: &Path, out: &mut Vec<PathBuf>) {
             out.push(path);
         }
     }
+}
+
+/// The split gate's contribution count **before** `title-heading-preamble`:
+/// every heading `split_headings` (public, and this guard's one call into
+/// the real derivation beyond `Dashboard::sync_detail` itself) returns, plus
+/// one when the text before the first heading line is non-empty. That
+/// preamble offset is derived from `sections` the same way `sync_detail`'s
+/// own (private) `preamble_len` does — walking backwards from the end of
+/// `text`, subtracting each section's own `body` length in reverse and
+/// stepping back over the heading line above it — because the two must
+/// agree on where a heading line starts for this to be the same preamble
+/// the old code measured. This is deliberately the OLD, byte-emptiness
+/// predicate (`!preamble.is_empty()`), not the trimmed-whitespace one
+/// `title_heading`'s own body check uses, because this function's whole job
+/// is to reproduce what `sync_detail` computed **before** this change, not
+/// to restate the new rule.
+fn pre_change_contributions(text: &str) -> usize {
+    let headings = herdr_openspec::ui::app::split_headings(text);
+    let mut pos = text.len();
+    for section in headings.iter().rev() {
+        pos = pos.saturating_sub(section.body.len());
+        let Some(head) = text.get(..pos) else {
+            pos = text.len();
+            break;
+        };
+        let line = head.strip_suffix('\n').unwrap_or(head);
+        pos = line.rfind('\n').map_or(0, |i| i + 1);
+    }
+    let has_preamble = !text.get(..pos).unwrap_or_default().is_empty();
+    headings.len() + usize::from(has_preamble)
 }
 
 /// A one-artifact, one-active-change `Dashboard` selecting that change, with
@@ -155,8 +207,12 @@ fn one_artifact_dashboard(path: &Path) -> Dashboard {
     }
 }
 
+/// Flags a file only when its split decision **changed** under title
+/// demotion — see the module doc comment's "Why a regression, not
+/// `sections.len() > 1` outright" — never a file that never split before
+/// this change either.
 #[test]
-fn no_committed_task_file_with_task_items_loses_its_split_under_title_demotion() {
+fn no_committed_task_file_changes_its_split_decision_under_title_demotion() {
     let root = manifest_dir().join("openspec").join("changes");
     let mut files = Vec::new();
     find_tasks_md(&root, &mut files);
@@ -176,14 +232,17 @@ fn no_committed_task_file_with_task_items_loses_its_split_under_title_demotion()
         }
         scanned += 1;
 
+        let pre_split = pre_change_contributions(&text) > 1;
+
         let mut dashboard = one_artifact_dashboard(path);
         let bytes = text.clone();
         let read = |_: &Path| -> Result<String, String> { Ok(bytes.clone()) };
         dashboard.sync_detail(&read);
+        let post_split = dashboard.detail.sections.len() > 1;
 
-        if dashboard.detail.sections.len() <= 1 {
+        if post_split != pre_split {
             offenders.push(format!(
-                "{} (sections: {})",
+                "{} (pre-change split: {pre_split}, post-change split: {post_split}, sections: {})",
                 path.display(),
                 dashboard.detail.sections.len()
             ));
@@ -199,7 +258,7 @@ fn no_committed_task_file_with_task_items_loses_its_split_under_title_demotion()
     );
     assert!(
         offenders.is_empty(),
-        "title demotion loses the split for {} file(s):\n{}",
+        "title demotion changes the split decision for {} file(s):\n{}",
         offenders.len(),
         offenders.join("\n")
     );
