@@ -109,10 +109,34 @@ A flat list is deliberate: `expanded: BTreeSet<usize>`, `section_at`'s lookup, a
 have moved all three.
 
 `label` SHALL be `Some` for a section that owns a **header row** and `None` for one that does
-not. A `None` label names the text preceding a split file's first heading — its **preamble**
-— which is rendered as ordinary body rows, folds under nothing, and is never a fold target.
-There is at most one such section per file, and a file whose text begins with a heading
-contributes none.
+not. A `None` label names an **unlabelled** section: one rendered as ordinary body rows,
+folding under nothing, and never a fold target. A file contributes at most **two** — its
+**preamble**, the text preceding its first heading, and the body of a **title heading**
+demoted by the rule below — in that order, both at `base` depth. A file whose text begins
+with a heading contributes no preamble, a file with no title heading contributes no demoted
+section, and most files contribute neither.
+
+A **title heading** is a document title rather than a task group. It SHALL be recognised from
+the heading list alone, on a **tracked-tasks** artifact only — one whose selected
+`ArtifactRef` carries `tracks_tasks == true` — when all three of these hold:
+
+1. it is the **first** heading `ui::app::split_headings` returned for that file;
+2. it is the **only** heading at that file's smallest returned `level`;
+3. `tasks::count` over its own `body` reports a `total` of zero.
+
+The order is: recognise the title from the heading list, derive the sections, count them, and
+only then decide whether the file splits. Recognition SHALL NOT be conditioned on the file
+splitting — the split decision reads the contribution count, which reads the demotion, and a
+rule in the other direction would be circular.
+
+The gate is `tracks_tasks`, never the artifact's `id` and never a resolved path's file name,
+on exactly the terms the split gate itself is stated in. It is deliberately **not** applied to
+a spec file: a delta spec whose only level-2 heading is `## ADDED Requirements` satisfies all
+three clauses and must keep its header row, that heading being the operation the badge walk
+attributes from and the one row naming what the file does. On a tracked-tasks tab a heading
+section **is** a task group, and a lone top-level heading holding no items of its own is not
+one — it is the file's title, and drawing it as a group is what put a `[-]` cell on a header
+the seed had already opened over its subtree's unfinished work.
 
 Sections SHALL be derived as follows, for each path the selected `ArtifactRef` resolved to
 and the reader succeeded on, in the order `changes::from_files` resolved them:
@@ -127,20 +151,50 @@ and the reader succeeded on, in the order `changes::from_files` resolved them:
   than the empty string, and otherwise a single section with the path's label and `depth` `0`.
   This is today's behaviour, unchanged, and is what keeps every prose artifact identical.
 - When the file **does** split, its preamble — when non-empty — contributes a `None`-labelled
-  section at `base` depth, and each `ui::app::HeadingSection` contributes one section whose
-  `label` is `Some(that section's label)`, whose `text` is its `body`, and whose `depth` is
-  `base + (level - min_level)`, where `base` is `1` when a file section precedes it and `0`
-  otherwise, and `min_level` is the smallest `level` `split` returned **for that file**.
+  section at `base` depth; a **title heading**, where the file has one, contributes no header
+  row at all and instead contributes a `None`-labelled section at `base` depth carrying its
+  own `body`, and only where that body is **non-empty after trimming whitespace**; and each
+  **remaining**
+  `ui::app::HeadingSection` contributes one section whose `label` is `Some(that section's
+  label)`, whose `text` is its `body`, and whose `depth` is `base + (level - min_level)`,
+  where `base` is `1` when a file section precedes it and `0` otherwise, and `min_level` is
+  the smallest `level` `split` returned **for that file among the headings that contribute a
+  labelled section**. Excluding the demoted title from `min_level` is the half that
+  un-indents: with it counted, a file titled `#` and grouped `##` holds every group at
+  `depth` `1` under a header row that no longer exists.
+- A file SHALL be split only when this derivation would yield **more than one section** for
+  it, or a file section already precedes it; otherwise it contributes the one unsplit section
+  of the bullet above. The count is of the sections the derivation yields — the demoted
+  title's body among them, the title heading itself not — so
+  `# drift — tasks\n## 1. Setup\n\n- [x] 1.1 a\n`, whose title body is empty even before
+  trimming, yields one
+  section, does not split, and renders through `ui::tasks::lines` with **both** heading lines
+  drawn, rather than splitting into a single section whose text has lost one of them.
+
+A title body is measured **after trimming** deliberately, and this differs from the
+preamble's own predicate, which is byte emptiness. The blank line separating a title from the
+first group is not content: measured over this repository's 49 task files, three of the
+seventeen demoted ones (`agent-attribution`, `agent-launch`, `agent-polling`) carry a title
+body of exactly `"\n"`, and under a byte predicate each would contribute a section that draws
+**zero** rows and that no row can address. The two predicates are otherwise equivalent here —
+no file in either surveyed tree changes its split decision between them — so the choice is
+between an unreachable section and none, and the rules are deliberately **not** unified.
 
 Normalising against the file's own smallest heading level is what makes a delta spec —
 which starts at `##` — and an archived spec — which starts at `#` — both open with their
 shallowest headings flush at the left. The normalisation is per file, so two files at
-different heading levels in one glob each read correctly.
+different heading levels in one glob each read correctly. A demoted title is excluded from
+that smallest level for the same reason it owns no header row: it is not one of the file's
+sections to be levelled against. Where the demotion leaves **no** labelled heading at all —
+reachable, for a file whose preamble carries the items and whose one heading is a demoted
+title — `min_level` SHALL be `0` and the file contributes its unlabelled sections alone, with
+no header row.
 
-`progress` SHALL be `Some` for exactly the **heading sections of a split tracked-tasks file**
-— one whose selected `ArtifactRef` carries `tracks_tasks == true` — and `None` everywhere
-else: `None` on every file section, on every preamble, on every section of an unsplit file,
-and on every section of every other artifact. Its value SHALL be that heading section's own
+`progress` SHALL be `Some` for exactly the **labelled heading sections of a split
+tracked-tasks file** — one whose selected `ArtifactRef` carries `tracks_tasks == true` — and
+`None` everywhere else: `None` on every file section, on every preamble, on every **demoted
+title heading's** section, on every section of an unsplit file, and on every section of every
+other artifact. Its value SHALL be that heading section's own
 `tasks::parse(&section.text).progress()`, which is `task-groups`' count of that group's items
 and therefore agrees with the whole file's count by that capability's own summation property.
 
@@ -303,6 +357,81 @@ that tab to the line-cursor model.
 - **THEN** every section's `operation` is `None`
 - **AND** the group headers' `progress` is `Some`, so the badge column and the progress cell
   are never competing for the same header row
+
+#### Scenario: A document title heading is demoted to an unlabelled section
+
+- **WHEN** a `Dashboard` whose selected artifact carries `tracks_tasks == true` and resolves
+  to one path is synced with a reader returning
+  `# drift — tasks\n\nIntro prose.\n\n## 1. Setup\n\n- [x] 1.1 a\n\n## 2. Build\n\n- [ ] 2.1 b\n`
+- **THEN** `detail.sections` holds three entries: `(None, 0)` carrying `\nIntro prose.\n\n`,
+  `(Some("1. Setup"), 0)`, and `(Some("2. Build"), 0)`
+- **AND** no section is labelled `drift — tasks`, and no section carries `depth` `1`
+- **AND** the first entry's `progress` is `None` and the other two carry `Some({1, 1})` and
+  `Some({0, 1})`
+- **AND** rendering at 120x40 and at 60x40 draws exactly two header rows, both at column
+  zero, and `ui::detail::section_at` resolves none of the first entry's rows to a section
+
+#### Scenario: A title heading with no prose under it does not split the file
+
+- **WHEN** the same dashboard, whose one path is `[<dir>/tasks.md]`, is synced with a reader
+  returning `# drift — tasks\n## 1. Setup\n\n- [x] 1.1 a\n`
+- **THEN** `detail.sections` holds exactly one entry, whose `label` is `Some("tasks.md")` and
+  whose `text` is that whole source verbatim, and the artifact is not foldable
+- **AND** at 120x20 and at 60x20 the content area holds a row reading `# drift — tasks` and a
+  row reading `## 1. Setup`, so demoting the title loses neither heading line
+
+#### Scenario: A whitespace-only title body contributes no section
+
+- **WHEN** the same dashboard is synced with a reader returning
+  `# drift — tasks\n\n## 1. Setup\n\n- [x] 1.1 a\n\n## 2. Build\n\n- [ ] 2.1 b\n`, whose
+  title body is exactly `"\n"` — the shape three of this repository's seventeen demoted task
+  files actually carry
+- **THEN** `detail.sections` holds **two** entries, `(Some("1. Setup"), 0)` and
+  `(Some("2. Build"), 0)`, and **no** unlabelled section at all
+- **AND** the file still splits, its contribution count being two, and no section in the list
+  draws zero rows
+
+#### Scenario: A leading heading holding its own items is a group, not a title
+
+- **WHEN** the same dashboard is synced with a reader returning
+  `# drift — tasks\n\n- [ ] 0.1 a\n\n## 1. Setup\n\n- [x] 1.1 b\n`
+- **THEN** `detail.sections` holds two entries, `(Some("drift — tasks"), 0)` and
+  `(Some("1. Setup"), 1)`, the title keeping its header row, its `Some({0, 1})` progress cell
+  and the level it holds the group at
+- **AND** this is the pre-change derivation, unchanged, because clause 3 of the title rule
+  failed
+
+#### Scenario: Two headings at the file's shallowest level are both groups
+
+- **WHEN** the same dashboard is synced with a reader returning
+  `# A\n\nprose\n\n# B\n\n- [ ] x\n`
+- **THEN** `detail.sections` holds two entries, `(Some("A"), 0)` and `(Some("B"), 0)`, both
+  owning header rows
+- **AND** no unlabelled section appears, the file's text beginning with a heading, because
+  clause 2 of the title rule failed
+
+#### Scenario: A preamble and a demoted title are two unlabelled sections
+
+- **WHEN** the same dashboard is synced with a reader returning
+  `Intro.\n\n# drift — tasks\n\nMore prose.\n\n## 1. Setup\n\n- [ ] x\n`
+- **THEN** `detail.sections` holds three entries: `(None, 0)` carrying `Intro.\n\n`,
+  `(None, 0)` carrying `\nMore prose.\n\n`, and `(Some("1. Setup"), 0)`
+- **AND** neither unlabelled section owns a header row, and — with `route: Route::Detail` and
+  `detail.drawn_width: Some(78)`, without which `apply` never reaches the detail cursor at all
+  and the check would pass vacuously — ten `ToggleSection` actions with `detail.scroll`
+  addressing a row of either leave `detail.expanded` unchanged
+
+#### Scenario: A spec tab's lone operation heading keeps its header row
+
+- **WHEN** a `Dashboard` whose selected artifact carries `tracks_tasks == false` and resolves
+  to one path is synced with a reader returning
+  `## ADDED Requirements\n\n### Requirement: Alpha\n\n#### Scenario: A works\n`
+- **THEN** `detail.sections` holds three entries, `(Some("ADDED Requirements"), 0)`,
+  `(Some("Requirement: Alpha"), 1)`, and `(Some("Scenario: A works"), 2)`
+- **AND** the first keeps its header row although it is the file's first and only level-2
+  heading and holds no task items, because the title rule is gated on `tracks_tasks`
+- **AND** `Requirement: Alpha` still carries `operation: Some(Added)`, the badge walk reading
+  the same heading list it did before
 
 ### Requirement: Sections start collapsed, and the fold state resets with the tab
 
@@ -526,9 +655,11 @@ of its own: `tasks-checklist`'s rows — its items, their own body rows, and its
 alike — are a section's body like any other, and a tab whose groups sit at a non-zero depth
 indents them. A tracked-tasks tab's sections are **not**
 always at depth 0 — `depth` is `base + (level - min_level)`, `base` is 1 whenever the artifact
-resolves to more than one path, and a task file that opens with a level-1 title puts every
-`## ` group at depth 1 — so a rule resting on "every tracked-tasks section is at depth 0" would
-be false for much of this repository's own history. One rule for every tab is what keeps the
+resolves to more than one path, and a **leading heading holding items of its own** — one the
+title rule therefore does not demote — puts every following `## ` group at depth 1 — so a rule
+resting on "every tracked-tasks section is at depth 0" would be false for much of this
+repository's own history. A file whose leading heading **is** demoted no longer produces that
+shape: its groups return to depth 0. One rule for every tab is what keeps the
 fold grammar single, and it is stated here because the opposite was previously assumed.
 
 The **progress-bar** rows `tasks-progress-bar` draws above every header SHALL NOT be indented:
@@ -736,7 +867,7 @@ opened the section to read. The strikethrough SHALL be the existing `Face` field
   change, at both widths
 - **AND** the same holds for the **file section** and the **preamble** of a split
   tracked-tasks file whose artifact resolved to more than one path: both carry
-  `progress: None`, so only heading sections gain a cell
+  `progress: None`, so only **labelled** heading sections gain a cell
 
 #### Scenario: The progress cell is dropped whole rather than truncated
 
@@ -910,8 +1041,9 @@ opened the section to read. The strikethrough SHALL be the existing `Face` field
 
 #### Scenario: A depth-1 tracked-tasks tab indents its items like any other tab
 
-- **WHEN** a foldable tracked-tasks tab whose groups sit at depth 1 — the shape a task file
-  that opens with a level-1 title produces, `min_level` being 1 — is rendered at the mandated
+- **WHEN** a foldable tracked-tasks tab whose groups sit at depth 1 — the shape a multi-path
+  artifact produces, or a task file whose leading heading holds items of its own and is
+  therefore not demoted, `min_level` being 1 — is rendered at the mandated
   `78`-column interior and again at `58`
 - **THEN** at `78` every row of a group's body — item rows, their own body rows, and the
   group's blocks alike — begins with exactly two spaces and is wrapped at `76`, its floor
@@ -1247,6 +1379,13 @@ when, **either**:
   reports a `total` greater than zero; or
 - `ui::app::is_spec_shaped(text)` is true, meaning `split` returned at least one section
   whose `level` is `3` and whose `label` begins with `Requirement:`.
+
+A file passing that gate SHALL additionally be split only when the derivation in "A
+multi-file artifact's content is a list of named sections" would yield **more than one
+section** for it, or a file section already precedes it. The two conditions are read in that
+order — the gate first, from the bytes and `tracks_tasks`; the contribution count second,
+after any title demotion — and never in the other, which would make the split decide its own
+input.
 
 Every other file SHALL contribute exactly one unsplit section, as it does today. This is what
 keeps `proposal.md`, `design.md`, and `planning-review.md` — prose artifacts with `##` and

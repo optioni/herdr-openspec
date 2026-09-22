@@ -98,10 +98,11 @@ receives the bytes `sync_detail` already placed in `detail.sections` and parses 
    `paths` **in the order `changes::from_files` resolved them**, call `read(path)`. Every
    `Err(e)` contributes no section and appends the problem `"<path>: <e>"`. Every `Ok(text)`
    contributes one or more `ArtifactSection` values by `artifact-folds`' derivation: an
-   optional file section, an optional `None`-labelled preamble section, and one section per
-   heading `ui::app::split_headings` returned, each carrying its own `depth` — or, when the file
-   does not split, exactly one section carrying the whole text, which is every prose artifact
-   and is unchanged from before this change.
+   optional file section, up to two optional `None`-labelled sections — the preamble, and the
+   body of a **title heading** demoted on a tracked-tasks artifact — and one section per
+   heading `ui::app::split_headings` returned **that was not demoted**, each carrying its own
+   `depth` — or, when the file does not split, exactly one section carrying the whole text,
+   which is every prose artifact and is unchanged from before this change.
 5. Set `detail.scroll` to `0` and clear `detail.expanded` **exactly when the key changed**,
    and on that same condition **seed** `detail.expanded` per `artifact-folds` when the
    selected `ArtifactRef` carries `tracks_tasks == true` — every section whose subtree is
@@ -318,13 +319,16 @@ than state types and SHALL NOT join the `NODEFAULT-UI` type list, on the same te
 `kind` SHALL be `Problem` for a problem row — **both** sources of them, the selected change's
 own `Change::problems` and the tab's `detail.problems`, which the requirement below stacks in
 that order — `SectionHeader` for a header row, and `Body` for every other row, including every
-line of an open section's rendered body, every line of a `None`-labelled preamble section,
+line of an open section's rendered body, every line of a `None`-labelled section — a preamble
+or a demoted title body alike —
 every blank separator row, the tracked-tasks progress-bar row and its blank line, and every
 line of a non-foldable artifact's body.
 
 `selected` SHALL be true for exactly the one header whose section the cursor is on or in, and
-false on every header when the cursor addresses a problem row, a preamble row, or a
-progress-bar row, or when there are no sections. Because both problem sources precede every
+false on every header when the cursor addresses a problem row, a row of a `None`-labelled
+section at depth `0` — a preamble or a demoted title body of a single-path artifact — or a
+progress-bar row, or when there are no
+sections. Because both problem sources precede every
 section and are counted in the same row list, a change that gained a problem between two
 frames shifts every section's row index by one, and `detail.scroll` — an index into that same
 list — follows the shift rather than the section. That is the same behaviour a problem row
