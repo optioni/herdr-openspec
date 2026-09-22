@@ -78,7 +78,7 @@ in any case — its guard drives the derivation group 1 writes.
 ## 2. The corpus guard
 <!-- kind: operational -->
 
-- [ ] 2.1 CHECK: Record the survey at HEAD and its negative control. The guard asserts that
+- [x] 2.1 CHECK: Record the survey at HEAD and its negative control. The guard asserts that
       every `openspec/changes/**/tasks.md` in this repository which the title rule demotes
       still yields **more than one** section, so no file's split decision changes.
 
@@ -92,7 +92,7 @@ in any case — its guard drives the derivation group 1 writes.
       again. 48 files scanned, not zero; 49 at `6386318`, this change's own `tasks.md` having
       joined the corpus. The minimum post-demotion contribution count in the tree is 7.
 
-- [ ] 2.2 CHANGE: Add `tests/title_corpus.rs`. It reads each `tasks.md` itself, builds a
+- [x] 2.2 CHANGE: Add `tests/title_corpus.rs`. It reads each `tasks.md` itself, builds a
       one-artifact `Dashboard` with `tracks_tasks: true`, calls `Dashboard::sync_detail` with
       a closure returning those bytes, and asserts `detail.sections.len() > 1` — driving the
       real derivation and the real split gate rather than re-deriving the rule, which would
@@ -101,7 +101,7 @@ in any case — its guard drives the derivation group 1 writes.
       that number is zero. It lives in `tests/` because `noio-view.sh`'s `PURE` list covers
       `src/ui/app.rs` and its grep is not `#[cfg(test)]`-stripped.
 
-- [ ] 2.3 VERIFY: Run `cargo test --test title_corpus` — green, with the printed scan count
+- [x] 2.3 VERIFY: Run `cargo test --test title_corpus` — green, with the printed scan count
       at 49 or more.
 
 ## 3. Change Review
