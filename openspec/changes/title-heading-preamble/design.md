@@ -7,8 +7,9 @@ a labelled section with a header row, a fold, and a `[-]` progress cell, and eve
 drops to `depth` 1 and gains a two-column body indent.
 
 Measured live, `herdr-openspec ui` in a 72×30 pty against `~/Code/slot-car-racing`'s
-`drift-window` change draws `▾ drift-window — tasks` with `[-]`, then roughly 140 rows of the
-title's prose, then `▸ 1. Measure the model as it stands` indented two columns.
+`drift-window` change draws `▾ drift-window — tasks` with `[-]`, then **174** rows of the
+title's prose (counted by driving `ui::detail::content_lines` over the real file at the pane's
+70-column interior), then `▸ 1. Measure the model as it stands` indented two columns.
 
 The shape is common rather than exotic. Surveying both trees for a file whose **first**
 heading is the **only** heading at its smallest level and whose own body holds **no**
@@ -16,14 +17,22 @@ checkbox — the three clauses of the rule this change adds:
 
 | Tree | `tasks.md` files | would demote |
 |---|---|---|
-| `herdr-openspec` | 48 | **17** |
+| `herdr-openspec` | 49 | **17** |
 | `slot-car-racing` | 9 | 2 |
 
 All 19 are level-1 titles; all 19 pass clause 3 as well as clauses 1 and 2, so no file in
 either tree is excluded by the no-items clause alone; and **none** of them has a contribution
-count of 1, so the split decision changes for none of them. **Three** of the 19 —
-`agent-attribution`, `agent-launch`, and `agent-polling` — carry an *empty* title body and so
-contribute a header row today and **nothing** afterwards, there being no prose to keep.
+count of 1 — the minimum is 7 — so the split decision changes for none of them, under either
+reading of the emptiness predicate (see D8).
+
+**Three** of the 19 — `agent-attribution`, `agent-launch`, and `agent-polling` — carry a title
+body of exactly `"\n"`. **No** file in either tree has a byte-empty title body, so the shape
+D4's worked example uses is real markdown but not a shape the corpus contains; the shape the
+corpus actually has is the whitespace-only one, and D8 is the decision that settles it.
+
+The 49 includes this change's own `tasks.md`, committed in the planning commit; at its parent
+`8ccd255` the figure was 48, which is what the checks recorded in `tasks.md` were measured
+against.
 
 The constraint the fix must respect: `sync_detail` already reads each path exactly once per
 key change and calls `split_headings` at most once per path, and `ui::app` is a pure view file
@@ -55,8 +64,9 @@ under `NOIO-VIEW`. Nothing here may read a file, spawn a process, or consult a c
 | `src/ui/app.rs` | `Dashboard::sync_detail`'s per-path walk, plus one new private pure helper beside `preamble_len` and `seed_expanded` | the existing private-helper-plus-doc-comment shape those two already have |
 | `src/ui/detail.rs` | nothing | `visible_sections`, `bodies_are_indented`, and `content_lines` already treat `label.is_none()` as always-open, un-foldable, and header-less |
 | `src/ui/tasks.rs` | nothing | `group_body` already renders a headingless group's blocks, which is what a preamble is |
-| `tests/title_corpus.rs` (new) | the corpus guard | a `tests/` integration file, **not** a `src/ui/` one: `NOIO-VIEW` forbids every pure view file from naming a filesystem API, and this survey reads the committed tree |
-| `SPEC.md`, `AGENTS.md` | the prose describing the derivation | `tests/doc_contract.rs` binds several such claims to their files |
+| `src/ui/view.rs` (tests only) | the render half of the two rendering scenarios | its `WIDTHS` gate requires every `#[test]` there to name `60` and `120`, which is what the scenarios render at; `WIDTHS_MIN` is a floor, so added tests are fine |
+| `tests/title_corpus.rs` (new) | the corpus guard | a `tests/` integration file, **not** a `src/ui/` one: `noio-view.sh`'s `PURE` list covers `src/ui/app.rs` and its grep is **not** `#[cfg(test)]`-stripped, so even a unit test there could not read the corpus |
+| `SPEC.md` (two sites), `AGENTS.md`, and a doc comment in `src/ui/detail.rs` | the prose describing the derivation | named site by site in the documentation group, because **no** test binds this prose — `tests/doc_contract.rs` reads none of it |
 
 No new module, no new type, no new field on `ArtifactSection`, no new dependency. The change
 is confined to which sections the existing walk pushes and at which depth.
@@ -66,6 +76,16 @@ Option<usize>`: pure, total, returning `Some(0)` when the three clauses hold and
 otherwise. It is sited in `src/ui/app.rs` beside `preamble_len` for the same reason that
 function is there — it measures no display width, so `COLWIDTH` and the `*WIDTHS` gates are
 unaffected, and `src/ui/app.rs` is not swept for a `58`/`78` pair.
+
+**The helper stays private, and the corpus guard does not call it.** An integration test links
+only against the public API, so a guard that re-derived the three clauses and the contribution
+arithmetic would be a second implementation of the rule under guard — green even if
+`title_heading` were never written. The guard instead drives the real derivation end to end:
+it reads each `tasks.md` itself, builds a one-artifact `Dashboard` with `tracks_tasks: true`,
+calls `Dashboard::sync_detail` with a closure returning those bytes, and asserts
+`detail.sections.len() > 1`. Every field it needs is `pub`, and `NOLIT-CHANGE` scans `src/`
+only, so a `Change { … }` literal in `tests/` is allowed. It finds the tree through
+`env!("CARGO_MANIFEST_DIR")`.
 
 ## Contracts
 
@@ -93,9 +113,9 @@ preamble behaviour reached by a new input, not a new behaviour.
 
 ## Test Boundaries
 
-| Dependency | In acceptance test | In unit tests |
+| Dependency | In the corpus guard | In unit and view tests |
 |---|---|---|
-| Filesystem (artifact read) | replaced — the injected `ArtifactReader` closure returning canned text, per `artifact-content`'s one-binding rule | replaced, identically |
+| Filesystem (artifact read) | **real, read-only** — `tests/title_corpus.rs` reads each committed `tasks.md` and hands its bytes to the reader closure | replaced — the injected `ArtifactReader` closure returning canned text, per `artifact-content`'s one-binding rule |
 | `openspec` binary | not reached — `sync_detail` never touches the CLI seam | not reached |
 | Herdr socket / `herdr` binary | not reached | not reached |
 | Terminal | replaced — `ratatui::backend::TestBackend` at 120×40 and 60×40 | replaced, identically |
@@ -103,8 +123,11 @@ preamble behaviour reached by a new input, not a new behaviour.
 | `tasks::parse` / `tasks::count` | real — pure functions over `&str` | real |
 | `ui::app::split_headings` | real — pure function over `&str` | real |
 
-Every collaborator this change touches is above; there is no dependency left unstated. No task
-may introduce a real filesystem, a real binary, or a real terminal.
+Every collaborator this change touches is above; there is no dependency left unstated. No
+**unit or view** test may introduce a real filesystem, a real binary, or a real terminal; the
+corpus guard's read-only walk of the committed tree is the one real-filesystem boundary this
+change adds, and it is named here rather than invented by a task. Nothing in this change ever
+reaches a real binary or a real terminal.
 
 ## Test Strategy
 
@@ -115,22 +138,24 @@ committed `openspec/changes` tree — no process, no network, and sited in `test
 `NOIO-VIEW` forbids a pure view file from naming a filesystem API at all). All three are
 reached by `make test` and therefore by `make check`.
 
-This change takes **no outer-loop acceptance test** of its own. The pane's outer loop is
-`ui::driver::run_loop`, which cannot be driven without a terminal, and the behaviour here is
-fully observable one layer in — at `detail.sections` and at the rendered `TestBackend` buffer.
-`artifact-folds`' existing scenarios are all at those two tiers for the same reason, and
-adding a first terminal-driving test for this would move a boundary this change has no cause
-to move.
+This change takes **no outer-loop acceptance test** of its own, and the reason is not that the
+outer loop is undrivable — `ui::driver::run_loop` is driven 68 times in `src/ui/driver.rs`'s
+own tests against a `TestBackend` and the `none()` seams. The reason is that `run_loop` adds
+only event plumbing this change does not touch: the behaviour is fully determined by
+`sync_detail`'s derived `detail.sections` and by the rows `content_lines` returns for it, both
+observable one layer in. An outer-loop test here would exercise the loop, not the rule.
+`artifact-folds`' existing scenarios sit at those same two tiers for the same reason.
 
 | Spec Scenario | Verification | Tier | Collaborators | Command |
 |---|---|---|---|---|
-| A document title heading is demoted to an unlabelled section | new test asserting the three `(label, depth, progress)` triples, then a render at 120×40 and 60×40 counting header rows and resolving `section_at` | unit + view | reader replaced, terminal replaced | `cargo test --lib ui::app` and `… ui::detail` |
-| A title heading with no prose under it does not split the file | new test asserting one section, `foldable()` false, and both heading rows present in the drawn buffer at 120×20 and 60×20 | unit + view | reader replaced, terminal replaced | `cargo test --lib` |
+| A document title heading is demoted to an unlabelled section | new test asserting `(label, depth)` through `shape_of` and each section's `progress` read directly off `detail.sections`, then a render at 120×40 and 60×40 counting header rows and resolving `section_at` | unit + view | reader replaced, terminal replaced | `cargo test --lib ui::app` and `… ui::view` |
+| A title heading with no prose under it does not split the file | new test asserting one section, its `Some("tasks.md")` label, its verbatim `text`, `foldable()` false, and both heading rows present in the drawn buffer at 120×20 and 60×20 | unit + view | reader replaced, terminal replaced | `cargo test --lib ui::app` and `… ui::view` |
+| A whitespace-only title body contributes no section | new test asserting two sections, no unlabelled one, and that the file still splits | unit | reader replaced | `cargo test --lib ui::app` |
 | A leading heading holding its own items is a group, not a title | new test asserting the pre-change triples are reproduced exactly | unit | reader replaced | `cargo test --lib ui::app` |
 | Two headings at the file's shallowest level are both groups | new test asserting two labelled sections and no unlabelled one | unit | reader replaced | `cargo test --lib ui::app` |
-| A preamble and a demoted title are two unlabelled sections | new test asserting three sections and that ten `ToggleSection` actions on either unlabelled row leave `expanded` unchanged | unit | reader replaced | `cargo test --lib ui::app` |
+| A preamble and a demoted title are two unlabelled sections | new test asserting three sections and, at `Route::Detail` with `drawn_width: Some(78)` so the check is not vacuous, that ten `ToggleSection` actions on either unlabelled row leave `expanded` unchanged | unit | reader replaced | `cargo test --lib ui::app` |
 | A spec tab's lone operation heading keeps its header row | new test asserting three labelled sections and `operation: Some(Added)` on the requirement | unit | reader replaced | `cargo test --lib ui::app` |
-| **Corpus guard** (no spec scenario; design's own) | `tests/title_corpus.rs`: a survey over this repository's own `openspec/changes/**/tasks.md` asserting every file the rule demotes still yields more than one section, so no file's split decision changes | corpus | real committed tree, read-only | `cargo test --test title_corpus` |
+| **Corpus guard** (no spec scenario; design's own) | `tests/title_corpus.rs`: drives the real `Dashboard::sync_detail` over every committed `openspec/changes/**/tasks.md` and asserts each demoted file still yields more than one section, so no file's split decision changes; prints the scan count and fails at zero | corpus | real committed tree read-only, reader closure over its bytes | `cargo test --test title_corpus` |
 | The three spec files of a change become three labelled sections | carried unchanged — existing `ui::app` test re-run | unit | reader replaced | `make test` |
 | A spec glob nests requirements under their capability | carried unchanged — existing `ui::app` test re-run | unit | reader replaced | `make test` |
 | A preamble becomes an unlabelled section | carried unchanged — existing test re-run; its fixture opens at `## 1. Setup` with prose above, so no title is recognised | unit + view | reader replaced, terminal replaced | `make test` |
@@ -188,7 +213,8 @@ and all 19 also pass clause 3, so the clause costs nothing on the real corpus an
 the shape it excludes.
 
 **D4 — The split decision counts the sections the derivation yields, not the headings.**
-This is the subtle half. `# drift — tasks\n## 1. Setup\n\n- [x] a\n` has an empty title body;
+This is the subtle half. `# drift — tasks\n## 1. Setup\n\n- [x] a\n` has a byte-empty title body — empty under either
+reading, see D8 —
 without this rule the file would still split, yield exactly one labelled section, be
 **non**-foldable by `sections.len() > 1`, and fall to `ui::tasks::lines` over a text that no
 longer carries its `## 1. Setup` line — a heading lost off the screen. Counting contributions
@@ -216,6 +242,18 @@ non-contiguous byte ranges, which falsifies `artifact-folds`' own "a split file'
 partition those same bytes" sentence. Two sections cost one reworded sentence and keep the
 partition property exactly true.
 
+**D8 — a title body is measured after trimming whitespace, and the preamble's is not.**
+The corpus's real shape is `# T\n\n## 1. G`, whose title body is exactly `"\n"`. Byte
+emptiness — the predicate the adjacent preamble rule uses, `!preamble.is_empty()` — would make
+that a section carrying one newline, which `content_lines` draws as **zero** rows: a section in
+`detail.sections` that no row can address, on three of this repository's seventeen demoted
+files. Trimming removes it. The two readings were measured to be equivalent everywhere else —
+across 58 task files in two trees, **zero** change their split decision between them, the
+minimum post-demotion contribution count being 7 — so the choice is between an unreachable
+section and none. The two predicates are deliberately **not** unified: changing the preamble's
+would alter behaviour this change has no business touching, so the difference is stated in the
+spec rather than left for an implementer to "tidy up".
+
 ## Risks / Trade-offs
 
 - **The collapse-everything gesture disappears** for the 19 files that gain a title → named as
@@ -229,9 +267,16 @@ partition property exactly true.
 - **A file's split decision changes as a side effect** → D4 plus the corpus guard in the
   matrix, which asserts over this repository's own committed tree that every demoted file
   still yields more than one section.
-- **Prose in `SPEC.md`/`AGENTS.md` drifts from the new rule** → `tests/doc_contract.rs` binds
-  several of those claims; the tasks below make the doc edit a gated step rather than a
-  trailing one.
+- **Prose in `SPEC.md`/`AGENTS.md` drifts from the new rule** → **not** machine-bound:
+  `tests/doc_contract.rs` binds the module map's *names* column, the tested-modules list, the
+  MSRV, the gate programs, the key and mouse tables, the seam names, OSC 52 and the
+  drag-to-select note — **nothing** that reads either document's section-derivation prose. So
+  the mitigation is the documentation group naming every stale site explicitly (there are two
+  in `SPEC.md`, not one) and a reviewer checking them, not a test that would pass either way.
+- **Four further live requirements restate the derivation and are falsified by it** → all four
+  are carried into the deltas and repaired: `artifact-folds`' split gate and its header-row
+  requirement, and `artifact-content`'s content-area requirement. Each was extracted by script
+  and diffed against HEAD, every difference accounted for.
 
 ## Migration Plan
 
