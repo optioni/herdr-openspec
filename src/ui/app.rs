@@ -3530,6 +3530,230 @@ mod tests {
         }
     }
 
+    // `title-heading-preamble`, group 1: a document title heading, recognised
+    // on a tracked-tasks artifact alone, is demoted to an unlabelled section
+    // rather than drawn as a task group with a stray progress cell.
+    // `specs/artifact-folds/spec.md` -> the seven scenarios below, verbatim.
+
+    /// `specs/artifact-folds/spec.md` -> "A document title heading is
+    /// demoted to an unlabelled section".
+    #[test]
+    fn a_document_title_heading_is_demoted_to_an_unlabelled_section() {
+        const SOURCE: &str = "# drift — tasks\n\nIntro prose.\n\n## 1. Setup\n\n- [x] 1.1 a\n\n## 2. Build\n\n- [ ] 2.1 b\n";
+        let mut d = dashboard_over(
+            &[("tasks", &["/repo/openspec/changes/c/tasks.md"])],
+            Some(0),
+        );
+        let recorder = crate::testutil::RecordingReader::always(Ok(SOURCE.to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+
+        d.sync_detail(&read);
+
+        assert_eq!(
+            shape_of(&d.detail),
+            vec![(None, 0), (Some("1. Setup"), 0), (Some("2. Build"), 0)]
+        );
+        assert_eq!(d.detail.sections[0].text, "\nIntro prose.\n\n");
+        assert!(
+            !d.detail.sections.iter().any(|s| s.label.as_deref() == Some("drift — tasks")),
+            "the title's own text never becomes a section label"
+        );
+        assert!(
+            !d.detail.sections.iter().any(|s| s.depth == 1),
+            "excluding the demoted title from min_level un-indents every group"
+        );
+        assert_eq!(d.detail.sections[0].progress, None);
+        assert_eq!(
+            d.detail.sections[1].progress,
+            Some(crate::tasks::Progress {
+                completed: 1,
+                total: 1
+            })
+        );
+        assert_eq!(
+            d.detail.sections[2].progress,
+            Some(crate::tasks::Progress {
+                completed: 0,
+                total: 1
+            })
+        );
+    }
+
+    /// `specs/artifact-folds/spec.md` -> "A title heading with no prose
+    /// under it does not split the file".
+    #[test]
+    fn a_title_heading_with_no_prose_under_it_does_not_split_the_file() {
+        const SOURCE: &str = "# drift — tasks\n## 1. Setup\n\n- [x] 1.1 a\n";
+        let mut d = dashboard_over(
+            &[("tasks", &["/repo/openspec/changes/c/tasks.md"])],
+            Some(0),
+        );
+        let recorder = crate::testutil::RecordingReader::always(Ok(SOURCE.to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+
+        d.sync_detail(&read);
+
+        assert_eq!(
+            shape_of(&d.detail),
+            vec![(Some("tasks.md"), 0)],
+            "one unsplit section carrying the file's own label"
+        );
+        assert_eq!(d.detail.sections[0].text, SOURCE, "the reader's bytes verbatim");
+        assert!(!d.detail.foldable(), "one section is not foldable");
+    }
+
+    /// `specs/artifact-folds/spec.md` -> "A whitespace-only title body
+    /// contributes no section".
+    #[test]
+    fn a_whitespace_only_title_body_contributes_no_section() {
+        const SOURCE: &str = "# drift — tasks\n\n## 1. Setup\n\n- [x] 1.1 a\n\n## 2. Build\n\n- [ ] 2.1 b\n";
+        let mut d = dashboard_over(
+            &[("tasks", &["/repo/openspec/changes/c/tasks.md"])],
+            Some(0),
+        );
+        let recorder = crate::testutil::RecordingReader::always(Ok(SOURCE.to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+
+        d.sync_detail(&read);
+
+        assert_eq!(
+            shape_of(&d.detail),
+            vec![(Some("1. Setup"), 0), (Some("2. Build"), 0)]
+        );
+        assert!(
+            !d.detail.sections.iter().any(|s| s.label.is_none()),
+            "the title body is whitespace-only, so no unlabelled section is contributed"
+        );
+        assert!(
+            d.detail.foldable(),
+            "the file still splits, its contribution count being two"
+        );
+    }
+
+    /// `specs/artifact-folds/spec.md` -> "A leading heading holding its own
+    /// items is a group, not a title".
+    #[test]
+    fn a_leading_heading_holding_its_own_items_is_a_group_not_a_title() {
+        const SOURCE: &str = "# drift — tasks\n\n- [ ] 0.1 a\n\n## 1. Setup\n\n- [x] 1.1 b\n";
+        let mut d = dashboard_over(
+            &[("tasks", &["/repo/openspec/changes/c/tasks.md"])],
+            Some(0),
+        );
+        let recorder = crate::testutil::RecordingReader::always(Ok(SOURCE.to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+
+        d.sync_detail(&read);
+
+        assert_eq!(
+            shape_of(&d.detail),
+            vec![(Some("drift — tasks"), 0), (Some("1. Setup"), 1)],
+            "clause 3 of the title rule fails, so this is the pre-change derivation"
+        );
+        assert_eq!(
+            d.detail.sections[0].progress,
+            Some(crate::tasks::Progress {
+                completed: 0,
+                total: 1
+            })
+        );
+    }
+
+    /// `specs/artifact-folds/spec.md` -> "Two headings at the file's
+    /// shallowest level are both groups".
+    #[test]
+    fn two_headings_at_the_files_shallowest_level_are_both_groups() {
+        const SOURCE: &str = "# A\n\nprose\n\n# B\n\n- [ ] x\n";
+        let mut d = dashboard_over(
+            &[("tasks", &["/repo/openspec/changes/c/tasks.md"])],
+            Some(0),
+        );
+        let recorder = crate::testutil::RecordingReader::always(Ok(SOURCE.to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+
+        d.sync_detail(&read);
+
+        assert_eq!(
+            shape_of(&d.detail),
+            vec![(Some("A"), 0), (Some("B"), 0)],
+            "clause 2 of the title rule fails: two headings share the shallowest level"
+        );
+        assert!(!d.detail.sections.iter().any(|s| s.label.is_none()));
+    }
+
+    /// `specs/artifact-folds/spec.md` -> "A preamble and a demoted title are
+    /// two unlabelled sections".
+    #[test]
+    fn a_preamble_and_a_demoted_title_are_two_unlabelled_sections() {
+        const SOURCE: &str =
+            "Intro.\n\n# drift — tasks\n\nMore prose.\n\n## 1. Setup\n\n- [ ] x\n";
+        let mut d = dashboard_over(
+            &[("tasks", &["/repo/openspec/changes/c/tasks.md"])],
+            Some(0),
+        );
+        let recorder = crate::testutil::RecordingReader::always(Ok(SOURCE.to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+
+        d.sync_detail(&read);
+
+        assert_eq!(
+            shape_of(&d.detail),
+            vec![(None, 0), (None, 0), (Some("1. Setup"), 0)]
+        );
+        assert_eq!(d.detail.sections[0].text, "Intro.\n\n");
+        assert_eq!(d.detail.sections[1].text, "\nMore prose.\n\n");
+
+        // `route: Route::Detail` and `detail.drawn_width: Some(78)` are both
+        // required, or `apply` never reaches the detail cursor at all and the
+        // check below would pass vacuously.
+        d.route = Route::Detail;
+        d.detail.drawn_width = Some(78);
+        let rows = crate::ui::detail::content_lines(&d.detail, d.selected_change(), 78);
+        for needle in ["Intro", "More prose"] {
+            let scroll = rows
+                .iter()
+                .position(|r| r.text().contains(needle))
+                .unwrap_or_else(|| panic!("no row contains {needle:?}: {rows:?}"));
+            d.detail.scroll = scroll;
+            let before = d.detail.expanded.clone();
+            for _ in 0..10 {
+                d.apply(Action::ToggleSection);
+            }
+            assert_eq!(
+                d.detail.expanded, before,
+                "neither unlabelled section owns a header row, so Space stays inert"
+            );
+        }
+    }
+
+    /// `specs/artifact-folds/spec.md` -> "A spec tab's lone operation
+    /// heading keeps its header row".
+    #[test]
+    fn a_spec_tabs_lone_operation_heading_keeps_its_header_row() {
+        const SOURCE: &str = "## ADDED Requirements\n\n### Requirement: Alpha\n\n#### Scenario: A works\n";
+        let mut d = dashboard_over(
+            &[("specs", &["/repo/openspec/changes/c/specs/a/spec.md"])],
+            None,
+        );
+        let recorder = crate::testutil::RecordingReader::always(Ok(SOURCE.to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+
+        d.sync_detail(&read);
+
+        assert_eq!(
+            shape_of(&d.detail),
+            vec![
+                (Some("ADDED Requirements"), 0),
+                (Some("Requirement: Alpha"), 1),
+                (Some("Scenario: A works"), 2),
+            ],
+            "the title rule is gated on tracks_tasks, which this artifact does not carry"
+        );
+        assert_eq!(
+            d.detail.sections[1].operation,
+            Some(crate::specs::DeltaOp::Added)
+        );
+    }
+
     /// The two-path counterpart of the test above, and the derivation that
     /// `ui::detail`'s `the_tracked_tasks_tab_concatenates_rather_than_folding`
     /// transcribes by hand rather than executing. Two things run nowhere
