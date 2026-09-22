@@ -97,7 +97,7 @@ tier = "unit"
 proof = ["unmodelled_constructs_render_as_source"]
 verdict = "unproven"
 why = "ui::markdown::lines renders a footnote as literal source, one line per source line; the same test's three control fixtures — a task-list item, a table, and a struck run — render as a checkbox glyph, as aligned columns and as a face, which is what says the narrowing is real"
-covers = ["src/ui/markdown.rs:809-811"]
+covers = ["src/ui/markdown.rs:824-826"]
 
 [[row]]
 condition = "A tasks file exists and yields no task **items**"
