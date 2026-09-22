@@ -151,7 +151,7 @@ in any case — its guard drives the derivation group 1 writes.
 - [ ] 5.2 VERIFY: Run `make lint` — 0 warnings (`clippy -D warnings`).
 - [ ] 5.3 VERIFY: Run `make fmt-check` — clean.
 - [ ] 5.4 VERIFY: Run `make gates` — every hygiene gate OK.
-- [ ] 5.5 VERIFY: Run `make covers-check` — the degraded-states table's proofs all pass, and
+- [x] 5.5 VERIFY: Run `make covers-check` — the degraded-states table's proofs all pass, and
       repoint `tests/degraded-coverage.toml:84` (`src/ui/app.rs:2218-2222`, immediately after
       `sync_detail`'s heading loop), whose line range this change's edits will shift.
 - [ ] 5.6 VERIFY: Run `make test` — green.
