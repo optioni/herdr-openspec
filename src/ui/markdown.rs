@@ -201,6 +201,18 @@ struct Block {
     prefix_face: Face,
     category: Category,
     groups: Vec<Vec<Run>>,
+    /// How many block quotes wrap this block — the `Folder`'s own
+    /// `quote_depth` at the moment the block was pushed, which is correct
+    /// at every push site because a quote's `Start` and `End` both
+    /// `finish()` the open block *before* moving the depth.
+    ///
+    /// Read by [`layout`] alone, and only to prefix the separator between
+    /// two blocks that share a quote: a quote's separator row is a line of
+    /// that quote, and `markdown-render` requires every one of them to
+    /// carry `│ `. It is not a substitute for the two prefixes, which a
+    /// list item inside a quote builds from this depth *and* its own
+    /// indent.
+    quote_depth: usize,
 }
 
 /// One level of list nesting: whether it numbers, the next number to
@@ -349,6 +361,7 @@ impl Folder {
             prefix_face: self.prefix_face,
             category: self.category,
             groups,
+            quote_depth: self.quote_depth,
         });
         self.reset_ambient();
     }
@@ -367,6 +380,7 @@ impl Folder {
             prefix_face: Face::plain(),
             category: Category::Other,
             groups: Vec::new(),
+            quote_depth: self.quote_depth,
         });
     }
 
@@ -604,6 +618,7 @@ impl Folder {
             prefix_face: self.prefix_face,
             category: self.category,
             groups: Vec::new(),
+            quote_depth: self.quote_depth,
         });
         self.reset_ambient();
     }
@@ -880,8 +895,17 @@ fn fold(source: &str) -> Vec<Block> {
     f.end()
 }
 
-/// Lay out `blocks` at `width`, inserting exactly one blank `Line` between
-/// two adjacent blocks unless both are list items of the same list.
+/// Lay out `blocks` at `width`, inserting exactly one separating `Line`
+/// between two adjacent blocks unless both are list items of the same list.
+///
+/// The separator is blank except between two blocks that share a block
+/// quote, where it carries that shared quote's own prefix and `quoted`
+/// face: a quote holding two paragraphs is one quote, and
+/// `markdown-render` requires every line of it — "continuations included"
+/// — to be prefixed `│ `. The **shared** depth, so the row between a
+/// nested quote and the text after it carries only the prefix both sides
+/// are still inside, and the row between a quote and an unquoted paragraph
+/// is a bare blank exactly as before.
 fn layout(blocks: &[Block], width: u16) -> Vec<Line> {
     let mut out = Vec::new();
     for (i, block) in blocks.iter().enumerate() {
@@ -889,12 +913,38 @@ fn layout(blocks: &[Block], width: u16) -> Vec<Line> {
             let same_list_items =
                 block.category == Category::Item && blocks[i - 1].category == Category::Item;
             if !same_list_items {
-                out.push(Line::blank());
+                out.push(separator(
+                    blocks[i - 1].quote_depth.min(block.quote_depth),
+                    width,
+                ));
             }
         }
         emit_block(block, width, &mut out);
     }
     out
+}
+
+/// The row between two blocks: blank outside a quote, and the quote prefix
+/// for `depth` inside one — truncated in **columns** where even the prefix
+/// does not fit, on the same terms `emit_block` already truncates a prefix
+/// it cannot fit.
+fn separator(depth: usize, width: u16) -> Line {
+    if depth == 0 {
+        return Line::blank();
+    }
+    let prefix = truncate_columns(&quote_prefix(depth), width as usize).to_string();
+    if prefix.is_empty() {
+        return Line::blank();
+    }
+    Line {
+        segments: vec![Segment {
+            text: prefix,
+            face: Face {
+                quoted: true,
+                ..Face::plain()
+            },
+        }],
+    }
 }
 
 fn emit_block(block: &Block, width: u16, out: &mut Vec<Line>) {
@@ -1635,6 +1685,35 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    /// `markdown-render` -> "A block quote's every line, continuations
+    /// included, SHALL be prefixed `│ ` and carry `quoted` true": the row
+    /// separating two paragraphs of one quote is a line of that quote, so
+    /// it carries the quote's own prefix rather than dropping out of it.
+    /// A nested quote's separator carries `│ │ `; the row between a quote
+    /// and the paragraph after it stays a bare blank, the two blocks
+    /// sharing no quote at all.
+    #[test]
+    fn a_separator_inside_a_block_quote_keeps_the_quote_prefix() {
+        for width in [58, 78] {
+            let out = lines("> alpha\n>\n> bravo\n\ncharlie", width);
+            assert_eq!(
+                text_of(&out),
+                vec!["│ alpha", "│ ", "│ bravo", "", "charlie"],
+                "width {width}"
+            );
+            for line in &out[..3] {
+                for segment in &line.segments {
+                    assert!(segment.face.quoted, "width {width}: {segment:?}");
+                }
+            }
+            assert_eq!(
+                text_of(&lines("> > alpha\n> >\n> > bravo", width)),
+                vec!["│ │ alpha", "│ │ ", "│ │ bravo"],
+                "width {width}"
+            );
         }
     }
 
