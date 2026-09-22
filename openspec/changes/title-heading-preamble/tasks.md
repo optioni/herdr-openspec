@@ -137,7 +137,7 @@ in any case — its guard drives the derivation group 1 writes.
 ## 4. Documentation
 <!-- kind: operational -->
 
-- [ ] 4.1 Rewrite in `SPEC.md`, **three** sites (audience: anyone implementing against the
+- [x] 4.1 Rewrite in `SPEC.md`, **three** sites (audience: anyone implementing against the
       design contract), each verified to carry the claim it is named for:
       `:99`, the `| ui |` module-map row — "one section per resolved file and, inside a
       spec-shaped or tracked task file, one per heading";
@@ -148,11 +148,11 @@ in any case — its guard drives the derivation group 1 writes.
       `SPEC.md` says nothing about normalising depth against the shallowest heading — the words
       "shallowest", "normalis" and `min_level` appear nowhere in it — so no such sentence is to
       be hunted for. Correct all three in place; do not append beside any of them.
-- [ ] 4.2 Rewrite in `AGENTS.md`: the same claim in the "Current repo state" paragraph
+- [x] 4.2 Rewrite in `AGENTS.md`: the same claim in the "Current repo state" paragraph
       describing the detail region's foldable sections (audience: every agent session, which
       loads this file). Correct the existing sentence rather than appending. Net addition must
       stay under ten lines — the title rule replaces text rather than extending it.
-- [ ] 4.3 Rewrite the doc comment at `src/ui/detail.rs:4749-4751`, which asserts "17 of this
+- [x] 4.3 Rewrite the doc comment at `src/ui/detail.rs:4749-4751`, which asserts "17 of this
       repository's own 44 task files" put their groups at depth 1. The denominator is stale and
       the claim itself is falsified by this change; the test below it hand-builds its depths,
       so nothing fails on its own. *Widened by the Change Review* to the three further sites it
@@ -161,7 +161,7 @@ in any case — its guard drives the derivation group 1 writes.
       and `:725` that call every `None`-labelled section a preamble, and
       `specs/artifact-content/spec.md:255-257` in this change's own delta, whose "no header is
       selected on a `None`-labelled row" holds only at `base` 0.
-- [ ] 4.4 VERIFY: Run `cargo test --all-features --test doc_contract` — green. This is a plain
+- [x] 4.4 VERIFY: Run `cargo test --all-features --test doc_contract` — green. This is a plain
       regression check and **not** evidence for 4.1–4.3: nothing in `tests/doc_contract.rs`
       reads either document's section-derivation prose, so it passes whether or not the
       rewrites happened.

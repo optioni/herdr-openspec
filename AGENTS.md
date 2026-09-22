@@ -87,11 +87,15 @@ list of foldable **sections** drawn from two sources: one per resolved file — 
 an artifact whose `generates` is a glob, `specs` being the one every shipped
 schema has, becomes a list of per-file sections each labelled by its capability
 directory — and one per ATX heading inside any file that is spec-shaped (it
-carries a level-3 `Requirement:` heading) or is the tracked task file. Every
+carries a level-3 `Requirement:` heading) or is the tracked task file — except a
+tracked task file's **document title** (its first heading, alone at its shallowest
+level, holding no items), which owns no header row: its body becomes an unlabelled
+section like a preamble, and its groups are levelled without it. Every
 section carries a `depth` and the list stays flat, so collapsing a section hides
 its whole subtree; all sections start collapsed; a file is split only when doing
-so would yield more than one section, which is what keeps a one-heading file on
-a one-path artifact byte-identical to the flat document it was; and
+so would yield more than one section, counted after that demotion, which is
+what keeps a one-heading file on a one-path artifact byte-identical to the flat
+document it was; and
 `Detail::foldable` is the crate's one site for that question and derives it from
 the section count, never storing it. The header's gauge is drawn on **every**
 artifact tab, not only the tracked-tasks one, and it is first in the header's

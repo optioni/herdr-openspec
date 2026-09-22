@@ -253,7 +253,8 @@ line of a non-foldable artifact's body.
 
 `selected` SHALL be true for exactly the one header whose section the cursor is on or in, and
 false on every header when the cursor addresses a problem row, a row of a `None`-labelled
-section — a preamble or a demoted title body — or a progress-bar row, or when there are no
+section at depth `0` — a preamble or a demoted title body of a single-path artifact — or a
+progress-bar row, or when there are no
 sections. Because both problem sources precede every
 section and are counted in the same row list, a change that gained a problem between two
 frames shifts every section's row index by one, and `detail.scroll` — an index into that same

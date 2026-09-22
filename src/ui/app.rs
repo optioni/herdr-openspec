@@ -228,9 +228,10 @@ pub struct Filter {
 /// is a list of named sections" and design.md -> Decision 1 and Decision 2.
 ///
 /// `tasks-emphasis` adds a fourth field. `progress` is `Some` for exactly the
-/// **heading sections of a split tracked-tasks file** and `None` everywhere
-/// else — on every file section, every preamble, every section of an unsplit
-/// file, and every section of every other artifact — so a reader can fold a
+/// **labelled heading sections of a split tracked-tasks file** and `None`
+/// everywhere else — on every file section, every preamble, every demoted
+/// title heading's section (`title-heading-preamble`), every section of an
+/// unsplit file, and every section of every other artifact — so a reader can fold a
 /// completed task group without losing how far along it was. It is an
 /// `Option<Progress>` rather than a `Progress` defaulting to `{0, 0}` because
 /// the two mean different things on a header row: a `[-]` cell would claim the

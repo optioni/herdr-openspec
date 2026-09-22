@@ -96,7 +96,7 @@ binding, not its only one — `NOBLOCK` leg 2 covers it identically.
 | `watch` | The recursive `notify` watch, the debounce, and classifying a touched path to a per-change `Selection` |
 | `refresh` | The worker thread and the non-blocking `Refresher` seam it answers through |
 | `open` | The `open` and `open-tab` subcommands that open or focus the dashboard pane through `herdr plugin pane`; the crate's third `HerdrCli` consumer |
-| `ui` | Views (the change-row grammar, the detail region's header/tab-bar/content grammar, markdown rendering, `ui::tasks`' checklist-and-progress-bar grammar for the tracked-tasks tab, and `ui::help`'s help band — its row grammar and, in `ui::help::INVENTORY`, the crate's one list of what every key and gesture does, which `?` renders and `tests/doc_contract.rs` binds back to the driver), the semantic-role colour palette (`ui::palette`, the one table from a role to a `Style` and the crate's only `ratatui::style::Color` — see Colour and style), layout, the dashboard's own state (selection, the `/` filter, the detail region's section list — one section per resolved file and, inside a spec-shaped or tracked task file, one per heading, each carrying a `depth` — and its fold set, the detail cursor, the width of the content area last drawn — the one piece of geometry the dashboard stores, and only so a keypress taken between frames can resolve against what the last frame did, never as a source of what is drawn — the selected artifact tab, the live tier's refresh flag and standing problems, the help overlay's own layer state — open or not, and its scroll — and the injected artifact-read binding), key handling, terminal lifecycle, and the event loop |
+| `ui` | Views (the change-row grammar, the detail region's header/tab-bar/content grammar, markdown rendering, `ui::tasks`' checklist-and-progress-bar grammar for the tracked-tasks tab, and `ui::help`'s help band — its row grammar and, in `ui::help::INVENTORY`, the crate's one list of what every key and gesture does, which `?` renders and `tests/doc_contract.rs` binds back to the driver), the semantic-role colour palette (`ui::palette`, the one table from a role to a `Style` and the crate's only `ratatui::style::Color` — see Colour and style), layout, the dashboard's own state (selection, the `/` filter, the detail region's section list — one section per resolved file and, inside a spec-shaped or tracked task file, one per heading, a tracked task file's document title excepted, each carrying a `depth` — and its fold set, the detail cursor, the width of the content area last drawn — the one piece of geometry the dashboard stores, and only so a keypress taken between frames can resolve against what the last frame did, never as a source of what is drawn — the selected artifact tab, the live tier's refresh flag and standing problems, the help overlay's own layer state — open or not, and its scroll — and the injected artifact-read binding), key handling, terminal lifecycle, and the event loop |
 | `cli` | The two subprocess traits and their real implementations |
 
 ## Data layer
@@ -641,11 +641,18 @@ labelled with the capability directory for `specs/<capability>/spec.md` and with
 the file name otherwise. And a file that is **spec-shaped** — it carries a
 level-3 heading whose label begins `Requirement:` — or that is the tracked task
 file is split again at its own ATX headings, one section per heading, labelled
-with the heading's own text. Every section carries a `depth`, and the list stays
+with the heading's own text — except a tracked task file's **document title**:
+its first heading, when it is the only heading at the file's shallowest level
+and its own body holds no task items. On a tracked-tasks tab a heading section
+is a task group, and a title is not one, so it owns no header row and depth is
+levelled against the remaining headings, returning the groups to depth `0`. The
+split decision counts the sections this yields, not the headings. Every section carries a `depth`, and the list stays
 flat and index-addressed: collapsing a section at depth `d` hides every
 following section of greater depth until the first at or below `d`, so a fold
-hides a **subtree**. Text before a split file's first heading is a section with
-no label — it draws no header row, is always open, and is never a fold target.
+hides a **subtree**. Two sections carry no label: the text before a split
+file's first heading, and a demoted title's own body where it is non-empty
+after trimming. Either draws no header row, is always open, and is never a fold
+target.
 
 A labelled section is drawn under a header row of `"  " * depth` then
 `<glyph> <label>`, whose glyph pair is the list region's own, read from

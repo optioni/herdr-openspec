@@ -537,7 +537,8 @@ fn indented_line(indent: &str, line: crate::ui::markdown::Line) -> crate::ui::ma
 /// section of depth strictly greater than `d` — header and body alike — until
 /// the first section of depth at or below `d`.
 ///
-/// A `None`-labelled section is a split file's preamble: it is always open,
+/// A `None`-labelled section is a split file's preamble or the body of a
+/// demoted title heading (`title-heading-preamble`): either is always open,
 /// owns no header row, and is never a fold target, so it hides nothing
 /// (design.md -> D2). Indentation is therefore never the only signal of
 /// nesting — a fold hides a whole subtree, which is what makes a two-level
@@ -695,8 +696,10 @@ pub fn content_lines(
             // beside it.
             //
             // Skipping `None` has a stated consequence: `artifact-folds` sets
-            // `progress` on heading sections only, so a split file's preamble
-            // contributes no span even when it holds items. Those items are
+            // `progress` on labelled heading sections only, so a split file's
+            // preamble contributes no span even when it holds items. A demoted
+            // title's body contributes none either, and loses nothing by it:
+            // the title rule demotes only a heading whose body holds no items. Those items are
             // still counted by the bar's own `progress`, which is the
             // `Change`'s field, so the gauge's fill is unaffected; only the
             // boundary marking omits them. A preamble holding task items is
@@ -722,8 +725,9 @@ pub fn content_lines(
         let indented = bodies_are_indented(&detail.sections, width);
         for (position, &index) in visible.iter().enumerate() {
             let section = &detail.sections[index];
-            // A `None`-labelled preamble is always open and owns no
-            // header row at all (design.md -> D2).
+            // A `None`-labelled section — a preamble or a demoted title's
+            // body — is always open and owns no header row at all
+            // (design.md -> D2).
             let open = section.label.is_none() || detail.expanded.contains(&index);
             if let Some(label) = section.label.as_deref() {
                 out.push(ContentRow {
@@ -4746,9 +4750,12 @@ mod tests {
     /// `artifact-folds` :: "A depth-1 tracked-tasks tab indents its items
     /// like any other tab".
     ///
-    /// The shape a task file opening with a level-1 title produces:
-    /// `min_level` is 1, so every `## ` group lands at `base + 1` — 17 of
-    /// this repository's own 44 task files. Its floor is `64 + 2 * 1 = 66`.
+    /// The shape a task file opening with a level-1 heading that holds items
+    /// of its own produces — one the title rule does not demote, so
+    /// `min_level` stays 1 and every `## ` group lands at `base + 1`; a
+    /// multi-path artifact's `base` of 1 reaches the same depth. A demoted
+    /// title no longer produces it (`title-heading-preamble`). The depths
+    /// here are hand-built. Its floor is `64 + 2 * 1 = 66`.
     #[test]
     fn a_depth_1_tracked_tasks_tab_indents_its_items_like_any_other_tab() {
         let (change, progress) = tracked_tasks_change();
