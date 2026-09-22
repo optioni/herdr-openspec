@@ -69,6 +69,8 @@ in any case — its guard drives the derivation group 1 writes.
       must stay green; its fixture's one heading holds two items, so clause 3 fails for it.
 
 - [x] 1.6 REFACTOR: Clean up while the tests stay green, or state that none was needed.
+      *None was needed: the walk was already one branch inside the heading loop, and
+      `title_heading` already had the `preamble_len` doc-comment shape.*
 
 - [x] 1.7 Run `cargo test --lib` — no regressions, recording the executed count. Not
       `ui::app` alone: `sync_detail` is driven from `src/ui/view.rs`, `src/ui/detail.rs` and
@@ -100,6 +102,12 @@ in any case — its guard drives the derivation group 1 writes.
       through `env!("CARGO_MANIFEST_DIR")`, prints the number of files scanned, and fails when
       that number is zero. It lives in `tests/` because `noio-view.sh`'s `PURE` list covers
       `src/ui/app.rs` and its grep is not `#[cfg(test)]`-stripped.
+      *Clarified by the Change Review (W2, `7751748`): `sections.len() > 1` over every file
+      with items was stronger than the rule guarded — an untitled one-group `tasks.md` failed
+      it while blaming this change. The guard now asserts the split decision is **unchanged**,
+      comparing the real post-change `sync_detail` against the pre-change contribution count
+      re-derived from the public `split_headings` (the old formula, not the rule under guard).
+      Both plants re-run: the titled single-group plant fires, the untitled one stays quiet.*
 
 - [x] 2.3 VERIFY: Run `cargo test --test title_corpus` — green, with the printed scan count
       at 49 or more.
@@ -107,12 +115,24 @@ in any case — its guard drives the derivation group 1 writes.
 ## 3. Change Review
 <!-- kind: operational -->
 
-- [ ] 3.1 CHECK: Dispatch the `outside-in-tdd-reviewer` subagent — not a fork of this session
+- [x] 3.1 CHECK: Dispatch the `outside-in-tdd-reviewer` subagent — not a fork of this session
       — against `proposal.md`, both delta specs, `design.md`, `tasks.md`, `planning-review.md`,
       and the diff.
-- [ ] 3.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
+- [x] 3.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
       one-line reason, note each SUGGESTION, and re-run the affected tests.
-- [ ] 3.3 VERIFY: Confirm no blocking or unowned finding remains.
+      *0 CRITICAL, 3 WARNING, 8 SUGGESTION. Every WARNING fixed, each proved by a mutation
+      that the new assertion catches (`4acd4b8`, `7751748`): W1 clause 1 of the title rule had
+      no test; W2 the corpus guard asserted a stronger rule (see 2.2); W3 the view test's
+      `section_at` loop could never fail and discarded the drawn buffer. SUGGESTIONS taken:
+      a D6 operation-walk test, a positive `ToggleSection` control, a `min_level`-0 fallback
+      shape test, a no-zero-row assertion, and change-qualified design citations. Routed to
+      group 4 (4.3): the stale `ArtifactSection` doc at `src/ui/app.rs:230-233`, the
+      "a `None`-labelled section is a preamble" comments in `src/ui/detail.rs`, and the
+      `artifact-content` delta's "no header is selected" sentence, false at `base > 0` before
+      this change. Task 1.6's missing note is added above.*
+- [x] 3.3 VERIFY: Confirm no blocking or unowned finding remains.
+      *None: `cargo test --lib` 1638 passed, `title_corpus` scanned 49, tree clean at
+      `1c45b6e`; the remaining three findings are owned by 4.3.*
 
 ## 4. Documentation
 <!-- kind: operational -->
@@ -135,7 +155,12 @@ in any case — its guard drives the derivation group 1 writes.
 - [ ] 4.3 Rewrite the doc comment at `src/ui/detail.rs:4749-4751`, which asserts "17 of this
       repository's own 44 task files" put their groups at depth 1. The denominator is stale and
       the claim itself is falsified by this change; the test below it hand-builds its depths,
-      so nothing fails on its own.
+      so nothing fails on its own. *Widened by the Change Review* to the three further sites it
+      found: `ArtifactSection`'s `progress` doc at `src/ui/app.rs:230-233` (its list of `None`
+      cases omits the demoted title), the comments in `src/ui/detail.rs` near `:540`, `:698-702`
+      and `:725` that call every `None`-labelled section a preamble, and
+      `specs/artifact-content/spec.md:255-257` in this change's own delta, whose "no header is
+      selected on a `None`-labelled row" holds only at `base` 0.
 - [ ] 4.4 VERIFY: Run `cargo test --all-features --test doc_contract` — green. This is a plain
       regression check and **not** evidence for 4.1–4.3: nothing in `tests/doc_contract.rs`
       reads either document's section-derivation prose, so it passes whether or not the
