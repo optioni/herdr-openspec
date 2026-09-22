@@ -1192,12 +1192,11 @@ fn split_at_columns(s: &str, width: usize) -> (&str, &str) {
     }
 }
 
-/// One atom of a word-wrappable stream: a contiguous run of non-space
-/// characters carrying one face, or a space (a break opportunity, never
-/// itself rendered — a single space is synthesised between two words that
-/// need one).
+/// One atom of a word-wrappable stream: a [`Word`], or a space (a break
+/// opportunity, never itself rendered — a single space is synthesised
+/// between two words that need one).
 enum Atom {
-    Word(String, Face),
+    Word(Word),
     /// A space, carrying the face of the run it was found in — the run
     /// that contains a word and its own adjacent space is what a
     /// multi-word faced phrase (`the design`, all one `Link` run) is
@@ -1206,23 +1205,86 @@ enum Atom {
     Space(Face),
 }
 
+/// A maximal run of non-space characters, which MAY span several faces.
+/// An inline face change with no space between it and its neighbours —
+/// `*bravo*,`, `` `bravo`sierra ``, `**bravo**tango` — is **not** a break
+/// opportunity: `markdown-render` requires wrapping to be greedy at ASCII
+/// spaces, and a run boundary is not one. So the word spans every face it
+/// touches and is measured, wrapped, and hard-split as one.
+///
+/// `text` is the run's characters, its pieces concatenated, and is the
+/// subject of every width measurement and of the hard split, so a grapheme
+/// cluster spanning a face boundary is measured and split as one rather
+/// than as two half-clusters. `faces` holds each piece's start byte offset
+/// in `text` and that piece's face, in order: never empty for a non-empty
+/// word, and always opening at offset 0.
+struct Word {
+    text: String,
+    faces: Vec<(usize, Face)>,
+}
+
+impl Word {
+    fn new() -> Word {
+        Word {
+            text: String::new(),
+            faces: Vec::new(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.text.is_empty()
+    }
+
+    /// Append `ch` at `face`, opening a new face piece only where the face
+    /// actually changes — so a single-faced word carries exactly one piece
+    /// and produces exactly the segments it produced before words spanned
+    /// faces at all.
+    fn push(&mut self, ch: char, face: Face) {
+        if self.faces.last().is_none_or(|&(_, f)| f != face) {
+            self.faces.push((self.text.len(), face));
+        }
+        self.text.push(ch);
+    }
+
+    /// Append `self.text[from..to]` to `current`, one piece at a time and
+    /// each through [`append`], so two adjacent same-face pieces still
+    /// merge into one segment exactly as two adjacent same-face words do.
+    /// Both offsets are byte offsets into `text` and both fall on piece
+    /// boundaries or inside a piece; an empty intersection contributes
+    /// nothing.
+    fn append_range(&self, current: &mut Vec<Segment>, from: usize, to: usize) {
+        for (index, &(start, face)) in self.faces.iter().enumerate() {
+            let end = self
+                .faces
+                .get(index + 1)
+                .map_or(self.text.len(), |&(next, _)| next);
+            let (lo, hi) = (start.max(from), end.min(to));
+            if lo < hi {
+                append(current, &self.text[lo..hi], face);
+            }
+        }
+    }
+}
+
 fn atomize(group: &[Run]) -> Vec<Atom> {
     let mut atoms = Vec::new();
+    // Deliberately outside the `group` loop: a word is closed by a space
+    // and by the end of the stream, never by a run boundary.
+    let mut current = Word::new();
     for run in group {
-        let mut current = String::new();
         for ch in run.text.chars() {
             if ch == ' ' {
                 if !current.is_empty() {
-                    atoms.push(Atom::Word(std::mem::take(&mut current), run.face));
+                    atoms.push(Atom::Word(std::mem::replace(&mut current, Word::new())));
                 }
                 atoms.push(Atom::Space(run.face));
             } else {
-                current.push(ch);
+                current.push(ch, run.face);
             }
         }
-        if !current.is_empty() {
-            atoms.push(Atom::Word(current, run.face));
-        }
+    }
+    if !current.is_empty() {
+        atoms.push(Atom::Word(current));
     }
     atoms
 }
@@ -1265,20 +1327,27 @@ fn wrap_prose(group: &[Run], width: usize) -> Vec<Vec<Segment>> {
                     pending_space = Some(face);
                 }
             }
-            Atom::Word(text, face) => {
-                let mut remaining = text.as_str();
+            Atom::Word(word) => {
+                // The byte offset into `word.text` of the part not yet
+                // placed, advanced only by the hard split — every other
+                // path places the whole remainder and breaks.
+                let mut start = 0usize;
                 loop {
+                    let remaining = &word.text[start..];
                     let word_cols = columns(remaining);
                     if current_len == 0 && word_cols > width {
                         let (chunk, rest) = split_at_columns(remaining, width);
                         if !chunk.is_empty() {
-                            append(&mut current, chunk, face);
+                            word.append_range(&mut current, start, start + chunk.len());
                         }
                         lines.push(std::mem::take(&mut current));
                         current_len = 0;
                         pending_space = None;
-                        remaining = rest;
-                        if remaining.is_empty() {
+                        // `rest` is a suffix of `word.text`, including in
+                        // the dropped-cluster case, where it is shorter
+                        // than `remaining` — so this always advances.
+                        start = word.text.len() - rest.len();
+                        if start >= word.text.len() {
                             break;
                         }
                         continue;
@@ -1293,7 +1362,7 @@ fn wrap_prose(group: &[Run], width: usize) -> Vec<Vec<Segment>> {
                             append(&mut current, " ", sep_face);
                             current_len += 1;
                         }
-                        append(&mut current, remaining, face);
+                        word.append_range(&mut current, start, word.text.len());
                         current_len += word_cols;
                         pending_space = None;
                         break;
@@ -1534,6 +1603,39 @@ mod tests {
         assert_eq!(lines("", 78), Vec::new());
         assert_eq!(lines("# Proposal\n", 0), Vec::new());
         assert_eq!(lines("", 0), Vec::new());
+    }
+
+    /// `markdown-render` -> "Wrapping SHALL be greedy at ASCII spaces": an
+    /// inline face change with no space between is **not** a break
+    /// opportunity, so `*bravo*,`, `` `bravo`sierra `` and `**bravo**tango`
+    /// each wrap as one word rather than leaving their differently-faced
+    /// tail to open the next line.
+    ///
+    /// Swept over a growing pad so the wrap point lands on every column of
+    /// the glued word at both mandated widths, rather than on whichever one
+    /// column a single fixture happens to produce.
+    #[test]
+    fn a_face_change_without_a_space_is_not_a_break_opportunity() {
+        for width in [58, 78] {
+            for pad in 0..40usize {
+                let prefix = "pad ".repeat(pad);
+                for source in [
+                    format!("{prefix}alpha *bravo*, charlie"),
+                    format!("{prefix}alpha `bravo`sierra charlie"),
+                    format!("{prefix}alpha **bravo**tango charlie"),
+                ] {
+                    for line in lines(&source, width) {
+                        let text = line.text();
+                        for orphan in [",", "sierra", "tango"] {
+                            assert!(
+                                !text.starts_with(orphan),
+                                "width {width}, pad {pad}: {text:?} opens with {orphan:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn composite_fixture() -> String {
