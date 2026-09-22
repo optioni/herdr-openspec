@@ -484,6 +484,39 @@ fn preamble_len(text: &str, sections: &[HeadingSection]) -> usize {
     pos
 }
 
+/// The index into `headings` of the document's **title heading**, per
+/// `specs/artifact-folds/spec.md`'s three clauses — recognised on a
+/// **tracked-tasks** artifact only, never a spec, per design.md -> D2:
+///
+/// 1. it is the first heading `split_headings` returned;
+/// 2. it is the only heading at the file's smallest returned `level`;
+/// 3. `tasks::count` over its own `body` reports a `total` of zero.
+///
+/// `None` when `tracks_tasks` is `false`, `headings` is empty, or any
+/// clause fails; `Some(0)` otherwise, a title being by construction always
+/// the first heading in document order. Pure and total, sited beside
+/// `preamble_len` for the same reason: it measures no display width, so
+/// `COLWIDTH` and the `*WIDTHS` gates are unaffected. Recognition alone —
+/// whether a **non-empty-after-trimming** body then contributes a section
+/// is a separate question the caller decides, per design.md -> D8.
+fn title_heading(headings: &[HeadingSection], tracks_tasks: bool) -> Option<usize> {
+    if !tracks_tasks {
+        return None;
+    }
+    let first = headings.first()?;
+    let min_level = headings.iter().map(|h| h.level).min()?;
+    if first.level != min_level {
+        return None;
+    }
+    if headings.iter().filter(|h| h.level == min_level).count() != 1 {
+        return None;
+    }
+    if crate::tasks::count(&first.body).total != 0 {
+        return None;
+    }
+    Some(0)
+}
+
 /// The detail region's content and scroll offset, plus `detail-view`'s three
 /// additions. `sections` is set by `Dashboard::sync_detail`, driven once per
 /// loop iteration by the injected `ArtifactReader`; `ui::load` still starts
@@ -2110,22 +2143,40 @@ impl Dashboard {
                     // the sections rather than of the text.
                     let headings = split_headings(&text);
                     let preamble_end = preamble_len(&text, &headings);
+                    // `title-heading-preamble`: recognised from the heading
+                    // list alone, before the split decision reads it — never
+                    // the other way, which would be circular (design.md ->
+                    // "The order is").
+                    let title_index = title_heading(&headings, tracks_tasks);
+                    // A title heading's own body contributes a section only
+                    // when it is non-empty **after trimming whitespace** —
+                    // deliberately not the preamble's own byte-emptiness
+                    // predicate (design.md -> D8).
+                    let title_contributes =
+                        title_index.is_some_and(|i| !headings[i].body.trim().is_empty());
+                    let remaining_headings = headings.len() - usize::from(title_index.is_some());
                     // What this file would contribute if it split: its
-                    // preamble, when non-empty, plus one section per heading.
-                    // A file that would contribute exactly one section is not
-                    // split at all, unless a file section already precedes it.
-                    // Splitting it would consume its one heading into a
-                    // `label` that `content_lines`' non-foldable branch never
-                    // draws, losing the heading row off the screen — so
-                    // refusing the split keeps `artifact-folds`'
-                    // byte-identity sentence true by construction rather than
-                    // by a second exemption inside `content_lines`, which is
-                    // the argument design.md -> D3 already makes for the
-                    // gate's `total > 0` half. With a file section ahead of
-                    // it the heading does draw as a header row, so the
-                    // fallback is not wanted there.
+                    // preamble, when non-empty, plus the demoted title's own
+                    // body, when it contributes, plus one section per
+                    // remaining heading. A file that would contribute
+                    // exactly one section is not split at all, unless a file
+                    // section already precedes it. Splitting it would
+                    // consume its one heading into a `label` that
+                    // `content_lines`' non-foldable branch never draws,
+                    // losing the heading row off the screen — so refusing
+                    // the split keeps `artifact-folds`' byte-identity
+                    // sentence true by construction rather than by a second
+                    // exemption inside `content_lines`, which is the
+                    // argument design.md -> D3 already makes for the gate's
+                    // `total > 0` half. With a file section ahead of it the
+                    // heading does draw as a header row, so the fallback is
+                    // not wanted there. Counting contributions **after**
+                    // demotion, rather than counting headings, is what keeps
+                    // a titled single-group file unsplit (design.md -> D4).
                     let has_preamble = !text.get(..preamble_end).unwrap_or_default().is_empty();
-                    let contributions = usize::from(has_preamble) + headings.len();
+                    let contributions = usize::from(has_preamble)
+                        + usize::from(title_contributes)
+                        + remaining_headings;
                     let splits = ((tracks_tasks && crate::tasks::count(&text).total > 0)
                         || has_requirement_heading(&headings))
                         && (base > 0 || contributions > 1);
@@ -2163,8 +2214,19 @@ impl Dashboard {
                     }
                     // Normalised against this file's own shallowest heading,
                     // so a delta spec starting at `##` and an archived spec
-                    // starting at `#` both open flush at the left.
-                    let min_level = headings.iter().map(|h| h.level).min().unwrap_or(0);
+                    // starting at `#` both open flush at the left. The
+                    // demoted title is excluded — it owns no header row to
+                    // level against — which is the half that un-indents
+                    // every group (design.md -> D5); `unwrap_or(0)` is
+                    // reached when demotion leaves no labelled heading at
+                    // all.
+                    let min_level = headings
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, _)| Some(*i) != title_index)
+                        .map(|(_, h)| h.level)
+                        .min()
+                        .unwrap_or(0);
                     // `spec-emphasis`: the operation walk, a single forward
                     // pass over this file's own headings, in the order
                     // `heading-sections` produced them, holding the most
@@ -2175,7 +2237,42 @@ impl Dashboard {
                     // derived once per key change over the section list
                     // already in hand.
                     let mut current_operation: Option<crate::specs::DeltaOp> = None;
-                    for heading in headings {
+                    for (index, heading) in headings.into_iter().enumerate() {
+                        // A level-2 heading that classifies **resets** the
+                        // walk rather than nesting: the sections after a
+                        // later operation heading carry that heading's
+                        // operation even where an earlier one appeared in the
+                        // same file. The operation heading itself is
+                        // deliberately unbadged — attribution below asks
+                        // `is_requirement_heading`, the same predicate
+                        // `has_requirement_heading` applies, never restated —
+                        // and a requirement under no operation heading yet
+                        // carries `None`. This runs **inside** the loop, at
+                        // every heading including the demoted title, so the
+                        // walk still advances over every heading in
+                        // document order regardless of demotion (design.md
+                        // -> D6): a single branch, not a title skipped
+                        // ahead of it.
+                        if let Some(op) =
+                            crate::specs::operation_of_heading(heading.level, &heading.label)
+                        {
+                            current_operation = Some(op);
+                        }
+                        if Some(index) == title_index {
+                            // The demoted title contributes no header row,
+                            // and only where its own body is non-empty
+                            // after trimming (design.md -> D8).
+                            if !heading.body.trim().is_empty() {
+                                self.detail.sections.push(ArtifactSection {
+                                    label: None,
+                                    text: heading.body,
+                                    depth: base,
+                                    progress: None,
+                                    operation: None,
+                                });
+                            }
+                            continue;
+                        }
                         // `tasks-emphasis`: a **heading section of a split
                         // tracked-tasks file** carries its own group's count,
                         // which is what lets a reader fold a completed group
@@ -2188,21 +2285,6 @@ impl Dashboard {
                         // summation property.
                         let progress =
                             tracks_tasks.then(|| crate::tasks::parse(&heading.body).progress());
-                        // A level-2 heading that classifies **resets** the
-                        // walk rather than nesting: the sections after a
-                        // later operation heading carry that heading's
-                        // operation even where an earlier one appeared in the
-                        // same file. The operation heading itself is
-                        // deliberately unbadged — attribution below asks
-                        // `is_requirement_heading`, the same predicate
-                        // `has_requirement_heading` applies, never restated —
-                        // and a requirement under no operation heading yet
-                        // carries `None`.
-                        if let Some(op) =
-                            crate::specs::operation_of_heading(heading.level, &heading.label)
-                        {
-                            current_operation = Some(op);
-                        }
                         let operation = is_requirement_heading(&heading)
                             .then_some(current_operation)
                             .flatten();
@@ -3555,7 +3637,10 @@ mod tests {
         );
         assert_eq!(d.detail.sections[0].text, "\nIntro prose.\n\n");
         assert!(
-            !d.detail.sections.iter().any(|s| s.label.as_deref() == Some("drift — tasks")),
+            !d.detail
+                .sections
+                .iter()
+                .any(|s| s.label.as_deref() == Some("drift — tasks")),
             "the title's own text never becomes a section label"
         );
         assert!(
@@ -3598,7 +3683,10 @@ mod tests {
             vec![(Some("tasks.md"), 0)],
             "one unsplit section carrying the file's own label"
         );
-        assert_eq!(d.detail.sections[0].text, SOURCE, "the reader's bytes verbatim");
+        assert_eq!(
+            d.detail.sections[0].text, SOURCE,
+            "the reader's bytes verbatim"
+        );
         assert!(!d.detail.foldable(), "one section is not foldable");
     }
 
@@ -3606,7 +3694,8 @@ mod tests {
     /// contributes no section".
     #[test]
     fn a_whitespace_only_title_body_contributes_no_section() {
-        const SOURCE: &str = "# drift — tasks\n\n## 1. Setup\n\n- [x] 1.1 a\n\n## 2. Build\n\n- [ ] 2.1 b\n";
+        const SOURCE: &str =
+            "# drift — tasks\n\n## 1. Setup\n\n- [x] 1.1 a\n\n## 2. Build\n\n- [ ] 2.1 b\n";
         let mut d = dashboard_over(
             &[("tasks", &["/repo/openspec/changes/c/tasks.md"])],
             Some(0),
@@ -3684,8 +3773,7 @@ mod tests {
     /// two unlabelled sections".
     #[test]
     fn a_preamble_and_a_demoted_title_are_two_unlabelled_sections() {
-        const SOURCE: &str =
-            "Intro.\n\n# drift — tasks\n\nMore prose.\n\n## 1. Setup\n\n- [ ] x\n";
+        const SOURCE: &str = "Intro.\n\n# drift — tasks\n\nMore prose.\n\n## 1. Setup\n\n- [ ] x\n";
         let mut d = dashboard_over(
             &[("tasks", &["/repo/openspec/changes/c/tasks.md"])],
             Some(0),
@@ -3729,7 +3817,8 @@ mod tests {
     /// heading keeps its header row".
     #[test]
     fn a_spec_tabs_lone_operation_heading_keeps_its_header_row() {
-        const SOURCE: &str = "## ADDED Requirements\n\n### Requirement: Alpha\n\n#### Scenario: A works\n";
+        const SOURCE: &str =
+            "## ADDED Requirements\n\n### Requirement: Alpha\n\n#### Scenario: A works\n";
         let mut d = dashboard_over(
             &[("specs", &["/repo/openspec/changes/c/specs/a/spec.md"])],
             None,

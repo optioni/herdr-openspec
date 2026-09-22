@@ -4916,7 +4916,10 @@ mod tests {
         for width in [120, 60] {
             let interior = interior_width(width);
             let rows = crate::ui::detail::content_lines(&d.detail, d.selected_change(), interior);
-            let texts: Vec<String> = rows.iter().map(crate::ui::detail::ContentRow::text).collect();
+            let texts: Vec<String> = rows
+                .iter()
+                .map(crate::ui::detail::ContentRow::text)
+                .collect();
             assert!(
                 texts.iter().any(|t| t.contains("# drift — tasks")),
                 "width {width}: the title heading line still draws: {texts:?}"

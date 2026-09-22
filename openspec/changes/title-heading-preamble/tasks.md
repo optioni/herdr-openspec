@@ -12,7 +12,7 @@ in any case — its guard drives the derivation group 1 writes.
 ## 1. The title rule, and what it renders as
 <!-- kind: behavior -->
 
-- [ ] 1.1 RED: Write failing tests in `src/ui/app.rs`'s test module named for the spec
+- [x] 1.1 RED: Write failing tests in `src/ui/app.rs`'s test module named for the spec
       scenarios *A document title heading is demoted to an unlabelled section*, *A title
       heading with no prose under it does not split the file*, *A whitespace-only title body
       contributes no section*, *A leading heading holding its own items is a group, not a
@@ -43,34 +43,34 @@ in any case — its guard drives the derivation group 1 writes.
       Both are RED because the behaviour is absent, not because the fixture is wrong: the
       `left` value is today's real derivation. The probe was deleted after measuring.
 
-- [ ] 1.2 RED: Write the render half in `src/ui/view.rs`, whose `WIDTHS` gate requires every
+- [x] 1.2 RED: Write the render half in `src/ui/view.rs`, whose `WIDTHS` gate requires every
       `#[test]` there to name both `60` and `120`: for *A document title heading is demoted*,
       exactly two header rows at 120x40 and 60x40, both at column zero, with
       `ui::detail::section_at` resolving none of the first entry's rows; for *A title heading
       with no prose under it*, rows reading `# drift — tasks` and `## 1. Setup` both present
       at 120x20 and 60x20. Confirm both fail for the missing behaviour.
 
-- [ ] 1.3 GREEN: Add the private pure helper
+- [x] 1.3 GREEN: Add the private pure helper
       `fn title_heading(headings: &[HeadingSection], tracks_tasks: bool) -> Option<usize>` to
       `src/ui/app.rs`, returning `Some(0)` when the three clauses of
       `specs/artifact-folds` hold and `None` otherwise, with unit tests covering each clause
       failing alone. The body-emptiness predicate is **trimmed**, per design.md → Decisions D8.
 
-- [ ] 1.4 GREEN: Use it in `sync_detail`: exclude the title from `min_level` (falling back to
+- [x] 1.4 GREEN: Use it in `sync_detail`: exclude the title from `min_level` (falling back to
       `0` when demotion leaves no labelled heading), push a `None`-labelled section carrying
       its `body` at `base` depth when that body is non-empty after trimming, and skip its
       labelled push — inside the existing `for heading in headings` loop, so
       `current_operation` still advances over every heading (design.md → Decisions D6).
 
-- [ ] 1.5 GREEN: Change the `splits` gate's contribution count to count the sections the
+- [x] 1.5 GREEN: Change the `splits` gate's contribution count to count the sections the
       derivation yields rather than the headings — `has_preamble` plus a non-empty-after-
       trimming title body plus the remaining headings (design.md → Decisions D4). The existing
       `a_single_heading_task_file_is_not_split_and_keeps_its_heading` (`src/ui/app.rs:3493`)
       must stay green; its fixture's one heading holds two items, so clause 3 fails for it.
 
-- [ ] 1.6 REFACTOR: Clean up while the tests stay green, or state that none was needed.
+- [x] 1.6 REFACTOR: Clean up while the tests stay green, or state that none was needed.
 
-- [ ] 1.7 Run `cargo test --lib` — no regressions, recording the executed count. Not
+- [x] 1.7 Run `cargo test --lib` — no regressions, recording the executed count. Not
       `ui::app` alone: `sync_detail` is driven from `src/ui/view.rs`, `src/ui/detail.rs` and
       `src/ui/driver.rs` as well, and a regression there would otherwise stay hidden until
       group 5.
