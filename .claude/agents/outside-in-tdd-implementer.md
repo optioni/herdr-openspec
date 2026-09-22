@@ -20,9 +20,24 @@ The orchestrator pre-gathers everything you need. **Work only from what it named
 - **The verification command** for this repository — report its real output, not a summary, if it fails
 - **Already-done tasks**: if any tasks in the group are already checked (`- [x]`), the orchestrator will name them explicitly — treat their implementation as complete and in git; start from the first unchecked task
 
+## Which discipline this group runs
+
+The dispatch names the group's type, and the task lines carry a `<!-- kind: -->` marker.
+
+- **`kind: behavior`, or no marker** → the TDD rules below, without exception.
+- **`kind: operational`** → CHECK → CHANGE → VERIFY instead. Configuration, migration,
+  plumbing and documentation changes have no behavior to assert, so there is no failing test
+  to write first. CHECK what is actually there now, CHANGE it, VERIFY against the evidence the
+  task names — the command exits clean, the setting reads back, the document contains the rule.
+  Commit once per task. Do not invent an assertion to satisfy a RED step: a test that cannot
+  fail is no more a test here than anywhere else.
+
+If an operational task gives you no evidence to verify against, that is a `NEEDS_CONTEXT` —
+not licence to make one up.
+
 ## TDD rules
 
-Follow these without exception:
+These govern behavior groups. Follow them without exception:
 
 1. **RED first**: write the test and confirm it fails before writing any implementation. A test that cannot fail is not a test.
 2. **GREEN minimal**: write the minimum implementation to make the failing test pass. No extras.

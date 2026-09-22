@@ -62,10 +62,16 @@ Split tasks.md by `##` headers. For each group:
 - **Done**: all tasks are `- [x]`. Skip entirely.
 - **Pending**: has at least one `- [ ]`. Add to the work list.
 
-Classify each pending group by its header text:
+Classify each pending group. The three named groups go by header text; everything else is
+typed by the `<!-- kind: -->` marker the planner wrote on the line after the `##` heading.
+Check the headers first — the Change Review group also carries an operational marker, and it
+belongs to the reviewer:
 - Contains "Outer Loop RED" → **acceptance-red** (write the failing test only, do not implement)
 - Contains "Outer Loop GREEN" → **acceptance-green** (make the acceptance test pass)
 - Contains "Change Review" → **review** (dispatch reviewer subagent)
+- Marked `<!-- kind: operational -->` → **operational** — configuration, migration, plumbing
+  and documentation work. Dispatched to an implementer like any other group, but told it is
+  operational, so it runs CHECK → CHANGE → VERIFY instead of a test-first cycle.
 - Anything else → **implementation**
 
 Read the line immediately after each `##` heading for a `<!-- parallel-after: N -->` marker.
@@ -103,6 +109,30 @@ If you are dispatching and find yourself opening a source file, running the test
 anything but a gate, or writing an edit, you have taken on work that belonged in an
 implementer. Stop and dispatch it.
 
+## Location questions — dispatch the locator
+
+You are forbidden from reading source files, and the run keeps handing you questions that
+need a search anyway. Send those to a `repo-locator` subagent. It returns paths and line
+numbers and nothing else, so the search's output dies with it and only the address reaches
+you. Three situations call for it, all of them named again where they arise below:
+
+- a manifest path from design.md that no longer exists, found while re-measuring
+- a `NEEDS_CONTEXT` naming a concept rather than a file
+- which nested agent-guidance file covers a package, when the planning artifacts do not say
+
+**One dispatch per question.** A locator that comes back `NOT_FOUND` has told you the
+artifact is wrong, not that it needs another try — that is drift, and it is repaired in
+design.md or tasks.md before the group goes out. Asking twice buys a second guess, and a
+guessed path is worse than none because the implementer reads it.
+
+**Keep the paths, not the reasoning.** Write what it found into the manifest and let the rest
+of its report go. If you find yourself asking it to explain what is in a file, you wanted an
+implementer.
+
+Do not use it to explore a group's work for your own benefit. It answers questions whose
+answer is an address; anything whose answer is an understanding belongs in the implementer
+that owns the group.
+
 ## Step 4: Per-group loop
 
 Work through pending groups in order, dispatching each group's implementers and gating the
@@ -123,7 +153,7 @@ when the user asks for one.
 
 ---
 
-### Groups typed: acceptance-red, acceptance-green, implementation — dispatch an implementer
+### Groups typed: acceptance-red, acceptance-green, implementation, operational — dispatch an implementer
 
 **Pre-gather the group's context.** The implementer starts cold and must not explore the
 codebase. Build every dispatch prompt in this order, and keep the order fixed for the whole
@@ -148,11 +178,22 @@ change, so that a reader comparing two groups' dispatches sees only what actuall
    conventions. Paths, not contents: the implementer reads each named file itself. Source files
    are read, not quoted — they change under you between groups, and a quoted stale copy is
    worse than a path.
+
+   For a documentation group the manifest is what stops the implementer walking the whole
+   repository. Name the agent-guidance files that could own the rule — the root one and the
+   nested ones covering the packages this change touched — and quote the existing entries the
+   change may supersede. "Put it in the narrowest file that covers it" without that list is an
+   instruction to read every AGENTS.md there is before writing three lines. When design.md and
+   tasks.md do not name the candidates, ask the locator for them.
 5. **Git state** — one line per completed group, so it knows what code already exists.
 6. **The verification command** for this repository, from the project context, and the
    instruction to report its output rather than a summary if it fails.
-7. **The group's type**, when it is `acceptance-red`: say explicitly that the goal is a
-   correctly-failing test and it must implement nothing to make it pass.
+7. **The group's type**, whenever it is not plain implementation. For `acceptance-red`, say
+   explicitly that the goal is a correctly-failing test and it must implement nothing to make
+   it pass. For `operational`, say that it is operational and runs CHECK → CHANGE → VERIFY,
+   and name the evidence each VERIFY task is gated on. An implementer told nothing arrives
+   under test-first rules and spends the difference working out that a config edit or a
+   documentation rule has no behavior to assert.
 8. **Staging discipline**: stage explicit paths, never `git add -A`/`-u`. This is not optional
    when parallel groups are running — two implementers in one working tree will otherwise
    commit each other's files.
@@ -164,6 +205,8 @@ and locations taken when the plan was written — counts, line numbers, "the onl
 that do X". Re-run the ones this group acts on, against the tree as it stands now. A number
 that no longer reproduces is drift: repair the owning artifact first, and dispatch the
 repaired text, rather than letting an implementer build on it and discovering it at the gate.
+When a manifest path is the thing that moved, ask the locator where it went instead of
+searching yourself — repairing design.md needs the new path, not the file behind it.
 
 This is the last moment a claim is cheap to check, and it is where a surprising share of
 surviving planning defects actually surface. On one measured change six CRITICAL findings
@@ -183,11 +226,22 @@ separately — a parallel group gets its own manifest, not the union.
 
 **Gate the result yourself.** An implementer's report is a claim, not evidence:
 
-1. Run the repository's verification command and read its actual output.
+1. For a behavior group, run the repository's verification command.
 2. For an `acceptance-red` group, confirm the acceptance test *fails*, and fails because the
    behavior is missing rather than because the harness is broken.
 3. For every other behavior group, confirm all tests pass.
-4. `git log --oneline` the group's commits and confirm they exist.
+4. For an `operational` group, gate on what the group actually claims — the command exits
+   clean, the setting reads back, the document contains the rule — and not on the test suite.
+   No code changed, so a green run proves nothing about this group while charging you its
+   whole output. `Lint & Verify` runs the suite once at the end, which is where a regression
+   from an operational group would surface anyway.
+5. `git log --oneline` the group's commits and confirm they exist.
+
+**Read the gate's result, not its transcript.** Capture the tail of a passing run and keep the
+summary line. The full output of a green suite is the largest thing you will ever put into a
+context you are trying to keep small, it tells you nothing the summary does not, and every
+remaining turn of the change pays for it. Read the whole output only when the gate fails —
+and then it belongs in the re-dispatch, not in your standing context.
 
 If the gate fails, hand the failure back to a fresh implementer for that group with the real
 output — do not fix it yourself.
@@ -201,8 +255,8 @@ could not resolve is a **re-dispatch, not an escalation**: hand the group to a f
 implementer together with the real output and what the first one concluded. **Two dispatches
 per group is the budget** — counting a `BLOCKED` return and a failed gate alike — and the
 second one starting cold with the first one's findings is far cheaper than the first one at
-four hundred turns. Cost is quadratic in a context's length, so a long agent that is still
-failing is the most expensive thing in the run.
+four hundred turns. Every turn pays for the whole context again, so a long agent that is
+still failing is the most expensive thing in the run.
 
 Escalate to the user when that budget is spent, or immediately for a blocker
 no implementer can resolve — a spec contradiction, a missing dependency, an unexpected
@@ -212,7 +266,8 @@ design gap — with options:
 3. Abort
 
 If an implementer reports `NEEDS_CONTEXT`, add exactly what it named to the manifest and
-re-dispatch. A second `NEEDS_CONTEXT` on the same group means the group's file list is wrong in
+re-dispatch. When it named a concept rather than a path — "wherever the retry policy is
+configured" — that is a locator question; add the path that comes back, not the file. A second `NEEDS_CONTEXT` on the same group means the group's file list is wrong in
 design.md or tasks.md — treat that as drift, not as a retry.
 
 ---
@@ -222,10 +277,13 @@ design.md or tasks.md — treat that as drift, not as a retry.
 **Gather context for the reviewer:**
 
 1. Planning docs — proposal.md, design.md, all spec files (already read in Step 1).
-2. Full diff — run `git log --oneline` to find the commit just before this change's first commit;
-   run `git diff <base>..HEAD` for the full diff.
+2. The base ref — run `git log --oneline` and find the commit just before this change's first
+   commit. Pass that ref. **Do not run the diff yourself.** It is the largest single object in
+   the change and this is the second-to-last group, so reading it here charges the whole diff
+   to every turn you have left, to save a cold agent one command it can run in a context that
+   ends when it reports.
 
-**Dispatch an `outside-in-tdd-reviewer` subagent** with planning docs + diff.
+**Dispatch an `outside-in-tdd-reviewer` subagent** with the planning docs and the base ref.
 
 **Handle the response:**
 
@@ -283,15 +341,23 @@ Reason: <description>
   group here and there in a larger change.
 - **Never read source files while dispatching** — pass a manifest of paths. Reading a file into
   your context charges it to every remaining turn of the change.
+- **Send location questions to the locator** — a moved path, a file named only by concept, the
+  nested guidance file covering a package. One dispatch per question, and keep the paths it
+  returns rather than its reasoning. A `NOT_FOUND` is drift in the artifact, not a retry.
+- **The documentation group is dispatched like every other** — it sits second-to-last, when your
+  context is at its heaviest, and "it is only Markdown" is the most expensive sentence available
+  to you at that point. A prose edit made here is charged to every turn you have left; the same
+  edit in an implementer is charged to a context that ends when the group does.
 - **Quote slices, never documents.** Everything you write into a dispatch prompt you keep, once
   per dispatch, until the change ends. On one measured change the dispatch prompts were already
   24% of the orchestrator's accumulated content at thirteen dispatches; quoting the change's two
   main artifacts into each would have taken its context from 254 000 tokens to about 418 000.
-- **Your context is re-created, not re-read, after every dispatch.** Measured: the cache lives
-  about five minutes, and an implementer runs for seven to sixty. All twelve of one run's
-  dispatch waits came back cold and rebuilt the whole context — 2.38 million tokens re-created.
-  You cannot avoid that by pinging; you are blocked inside the tool call and have no turn. The
-  only lever is being smaller, and it is linear: every token you carry is paid again per group.
+- **A dispatch wait can outlive the prompt cache.** An implementer runs for minutes to the
+  better part of an hour, and whether your context is still cached when it returns depends on a
+  TTL you neither control nor can check from in here. Assume it is not: a cold return rebuilds
+  your whole context before you can gate anything. You cannot keep it warm by pinging — you are
+  blocked inside the tool call and have no turn. The only lever is being smaller, and it pays
+  either way, because a cached token is cheaper than an uncached one rather than free.
 - **A shared prompt is not cached across siblings.** Two subagents dispatched back to back, one
   with a prompt identical to the other's for its first 4 000 characters and one sharing nothing
   with it, read exactly the same number of cached tokens — the fixed system-and-tools prefix,
@@ -301,8 +367,9 @@ Reason: <description>
 - **Re-measure a group's claims at dispatch** — the counts and line numbers in its task lines
   were true when the plan was written. A number that no longer reproduces is drift in the
   artifact, not a detail for the implementer to work around.
-- **Gate every group yourself** — run the verification command and read the output. A report of
-  success is not evidence of success.
+- **Gate every group yourself** — a report of success is not evidence of success. Gate a
+  behavior group on the verification command and an operational group on the evidence its
+  tasks name; keep the summary of a passing run, never its transcript.
 - **You are the only writer of tasks.md** — mark `- [x]` after the gate is green, never before,
   and never let an implementer do it.
 - **A returning implementer is cheaper than a grinding one** — a `BLOCKED` on a failure it
@@ -315,6 +382,10 @@ Reason: <description>
   of eyes, not context savings.
 - **Acceptance-red groups must not have implementation** — the group is done when the test fails
   for the right reason.
+- **Operational groups are not test-first** — a group marked `<!-- kind: operational -->` runs
+  CHECK → CHANGE → VERIFY, and the dispatch has to say so. The marker is already in the task
+  lines you pass through; dropping it on the floor is how a documentation edit reaches an agent
+  whose first rule is to write a failing test.
 - **Pause between groups, never mid-group** — a boundary pause loses nothing; a mid-group halt
   strands uncommitted work. Decide whether to continue only at a boundary.
 - **No worktree unless asked** — work in the checkout you were given. Isolation is the user's

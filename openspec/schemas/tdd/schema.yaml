@@ -782,7 +782,10 @@ apply:
     the part that does not vary first: proposal.md and design.md by path together with the
     slice this group implements quoted, then that group's specs the same way, its task
     lines only, a short git state summary, and a manifest naming the exact paths the group
-    will read or modify plus one similar existing implementation as a pattern reference.
+    will read or modify plus one similar existing implementation as a pattern reference. Where
+    a group edits agent-facing guidance, the manifest names the candidate files and quotes the
+    entries the change may supersede, so placing the rule in the narrowest file that covers it
+    does not mean reading every such file in the repository first.
     Re-measure before dispatching: the counts and line numbers in a group's task lines were
     taken when the plan was written, and a claim that no longer reproduces against the tree
     is drift in the owning artifact, repaired before the group goes out rather than met at
@@ -796,11 +799,18 @@ apply:
     stop and report rather than grind: the same failure surviving three consecutive fixes is
     a BLOCKED, and a file the manifest does not name is a NEEDS_CONTEXT. Both are complete
     outcomes. Re-dispatch the group to a fresh implementer with that evidence rather than
-    escalating — budget two per group — because cost is quadratic in a context's length and
+    escalating — budget two per group — because every turn pays for the whole context again and
     a long agent that is still failing is the most expensive thing in the run. After
     completing group N, dispatch all remaining groups marked `<!-- parallel-after: N -->`
     simultaneously, then gate each. Dispatch the Change Review group to the reviewer agent
-    with only the artifacts and the diff.
+    with only the artifacts and the base commit ref, and let the reviewer run the diff itself —
+    a context that ends with the review can afford the change's largest object; the
+    orchestrator's, with groups still to gate, cannot. If the repository also provides a
+    locator subagent, send location questions there — a planned path that no longer exists, a
+    file an implementer named only by concept, which nested guidance file covers a package —
+    and keep the paths it returns rather than its reasoning. The orchestrator does not search
+    the tree itself, because a search's output does not need to survive the change and its
+    context does.
 
     If the repository defines no such agents, implement each group inline in this session
     and delegate only the Change Review finding pass. Never fork the implementing session
