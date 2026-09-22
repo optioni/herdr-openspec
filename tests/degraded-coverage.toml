@@ -81,7 +81,7 @@ tier = "view"
 proof = ["a_read_failure_is_named_above_the_content_at_both_widths"]
 verdict = "confirmed"
 why = "the detail region's leading problem line, rendered through render_at"
-covers = ["src/ui/app.rs:2300-2304", "src/ui/detail.rs:672-672"]
+covers = ["src/ui/app.rs:2304-2308", "src/ui/detail.rs:672-672"]
 
 [[row]]
 condition = "No change is selected (an empty visible list, or a `/` filter matching none)"
