@@ -486,7 +486,8 @@ fn preamble_len(text: &str, sections: &[HeadingSection]) -> usize {
 
 /// The index into `headings` of the document's **title heading**, per
 /// `specs/artifact-folds/spec.md`'s three clauses — recognised on a
-/// **tracked-tasks** artifact only, never a spec, per design.md -> D2:
+/// **tracked-tasks** artifact only, never a spec, per `title-heading-preamble`'s
+/// design.md -> D2:
 ///
 /// 1. it is the first heading `split_headings` returned;
 /// 2. it is the only heading at the file's smallest returned `level`;
@@ -498,7 +499,8 @@ fn preamble_len(text: &str, sections: &[HeadingSection]) -> usize {
 /// `preamble_len` for the same reason: it measures no display width, so
 /// `COLWIDTH` and the `*WIDTHS` gates are unaffected. Recognition alone —
 /// whether a **non-empty-after-trimming** body then contributes a section
-/// is a separate question the caller decides, per design.md -> D8.
+/// is a separate question the caller decides, per `title-heading-preamble`'s
+/// design.md -> D8.
 fn title_heading(headings: &[HeadingSection], tracks_tasks: bool) -> Option<usize> {
     if !tracks_tasks {
         return None;
@@ -2145,13 +2147,13 @@ impl Dashboard {
                     let preamble_end = preamble_len(&text, &headings);
                     // `title-heading-preamble`: recognised from the heading
                     // list alone, before the split decision reads it — never
-                    // the other way, which would be circular (design.md ->
-                    // "The order is").
+                    // the other way, which would be circular
+                    // (`specs/artifact-folds/spec.md` -> "The order is").
                     let title_index = title_heading(&headings, tracks_tasks);
                     // A title heading's own body contributes a section only
                     // when it is non-empty **after trimming whitespace** —
                     // deliberately not the preamble's own byte-emptiness
-                    // predicate (design.md -> D8).
+                    // predicate (`title-heading-preamble`'s design.md -> D8).
                     let title_contributes =
                         title_index.is_some_and(|i| !headings[i].body.trim().is_empty());
                     let remaining_headings = headings.len() - usize::from(title_index.is_some());
@@ -2167,12 +2169,13 @@ impl Dashboard {
                     // the split keeps `artifact-folds`' byte-identity
                     // sentence true by construction rather than by a second
                     // exemption inside `content_lines`, which is the
-                    // argument design.md -> D3 already makes for the gate's
-                    // `total > 0` half. With a file section ahead of it the
-                    // heading does draw as a header row, so the fallback is
-                    // not wanted there. Counting contributions **after**
-                    // demotion, rather than counting headings, is what keeps
-                    // a titled single-group file unsplit (design.md -> D4).
+                    // argument `heading-sections`' design.md -> D3 already
+                    // makes for the gate's `total > 0` half. With a file
+                    // section ahead of it the heading does draw as a header
+                    // row, so the fallback is not wanted there. Counting
+                    // contributions **after** demotion, rather than counting
+                    // headings, is what keeps a titled single-group file
+                    // unsplit (`title-heading-preamble`'s design.md -> D4).
                     let has_preamble = !text.get(..preamble_end).unwrap_or_default().is_empty();
                     let contributions = usize::from(has_preamble)
                         + usize::from(title_contributes)
@@ -2217,9 +2220,9 @@ impl Dashboard {
                     // starting at `#` both open flush at the left. The
                     // demoted title is excluded — it owns no header row to
                     // level against — which is the half that un-indents
-                    // every group (design.md -> D5); `unwrap_or(0)` is
-                    // reached when demotion leaves no labelled heading at
-                    // all.
+                    // every group (`title-heading-preamble`'s design.md ->
+                    // D5); `unwrap_or(0)` is reached when demotion leaves no
+                    // labelled heading at all.
                     let min_level = headings
                         .iter()
                         .enumerate()
@@ -2250,9 +2253,9 @@ impl Dashboard {
                         // carries `None`. This runs **inside** the loop, at
                         // every heading including the demoted title, so the
                         // walk still advances over every heading in
-                        // document order regardless of demotion (design.md
-                        // -> D6): a single branch, not a title skipped
-                        // ahead of it.
+                        // document order regardless of demotion
+                        // (`title-heading-preamble`'s design.md -> D6): a
+                        // single branch, not a title skipped ahead of it.
                         if let Some(op) =
                             crate::specs::operation_of_heading(heading.level, &heading.label)
                         {
@@ -2261,7 +2264,8 @@ impl Dashboard {
                         if Some(index) == title_index {
                             // The demoted title contributes no header row,
                             // and only where its own body is non-empty
-                            // after trimming (design.md -> D8).
+                            // after trimming (`title-heading-preamble`'s
+                            // design.md -> D8).
                             if !heading.body.trim().is_empty() {
                                 self.detail.sections.push(ArtifactSection {
                                     label: None,
@@ -3717,6 +3721,45 @@ mod tests {
             d.detail.foldable(),
             "the file still splits, its contribution count being two"
         );
+        let change = d.selected_change().expect("a change is selected");
+        let rows = crate::ui::detail::content_lines(&d.detail, Some(change), 78);
+        for (index, section) in d.detail.sections.iter().enumerate() {
+            assert!(
+                rows.iter().any(|r| matches!(
+                    r.kind,
+                    crate::ui::detail::ContentKind::SectionHeader { section: s, .. } if s == index
+                )),
+                "section {index} ({:?}) contributes no header row in content_lines",
+                section.label
+            );
+        }
+    }
+
+    /// The `min_level` fallback when demotion leaves no labelled heading at
+    /// all — `title-heading-preamble`'s design.md -> D5's `unwrap_or(0)`.
+    /// The file's only heading is the recognised title, so `headings.iter()`
+    /// filtered to exclude `title_index` is empty and `.min()` would panic
+    /// without the fallback; both the preamble and the demoted title's own
+    /// body land as `None`-labelled sections at depth `0`.
+    #[test]
+    fn a_file_with_no_labelled_heading_after_demotion_falls_back_to_depth_zero() {
+        const SOURCE: &str = "- [ ] a\n\n# T\n\nprose\n";
+        let mut d = dashboard_over(
+            &[("tasks", &["/repo/openspec/changes/c/tasks.md"])],
+            Some(0),
+        );
+        let recorder = crate::testutil::RecordingReader::always(Ok(SOURCE.to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+
+        d.sync_detail(&read);
+
+        assert_eq!(
+            shape_of(&d.detail),
+            vec![(None, 0), (None, 0)],
+            "the preamble and the demoted title's own body, no labelled section at all"
+        );
+        assert_eq!(d.detail.sections[0].text, "- [ ] a\n\n");
+        assert_eq!(d.detail.sections[1].text, "\nprose\n");
     }
 
     /// `specs/artifact-folds/spec.md` -> "A leading heading holding its own
@@ -3769,6 +3812,32 @@ mod tests {
         assert!(!d.detail.sections.iter().any(|s| s.label.is_none()));
     }
 
+    /// Clause 1 of the title rule: the title heading must be the **first**
+    /// heading in document order, not merely a heading at the file's
+    /// shallowest level. `## Notes` sits at level two and comes first; `#
+    /// Plan` sits at level one, later, and is alone at that level — clauses 2
+    /// and 3 both pass for `## Notes` taken on its own, so only clause 1 (the
+    /// `first.level != min_level` check in `title_heading`) tells the two
+    /// apart and keeps `## Notes` an ordinary group.
+    #[test]
+    fn a_first_heading_deeper_than_the_files_shallowest_level_is_not_a_title() {
+        const SOURCE: &str = "## Notes\n\nprose\n\n# Plan\n\n- [ ] x\n";
+        let mut d = dashboard_over(
+            &[("tasks", &["/repo/openspec/changes/c/tasks.md"])],
+            Some(0),
+        );
+        let recorder = crate::testutil::RecordingReader::always(Ok(SOURCE.to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+
+        d.sync_detail(&read);
+
+        assert_eq!(
+            shape_of(&d.detail),
+            vec![(Some("Notes"), 1), (Some("Plan"), 0)],
+            "clause 1 of the title rule fails: the first heading is not the file's shallowest"
+        );
+    }
+
     /// `specs/artifact-folds/spec.md` -> "A preamble and a demoted title are
     /// two unlabelled sections".
     #[test]
@@ -3809,6 +3878,56 @@ mod tests {
             assert_eq!(
                 d.detail.expanded, before,
                 "neither unlabelled section owns a header row, so Space stays inert"
+            );
+        }
+
+        // Positive control: a labelled header row (`1. Setup`) does still
+        // toggle, proving the two inert checks above actually exercised
+        // `Action::ToggleSection`'s section lookup at the detail cursor
+        // rather than passing vacuously for some unrelated reason (the
+        // cursor never reaching `apply`, or `ToggleSection` failing to look
+        // up a section at all).
+        let setup_row = rows
+            .iter()
+            .position(|r| r.text().contains("1. Setup"))
+            .unwrap_or_else(|| panic!("no row contains \"1. Setup\": {rows:?}"));
+        d.detail.scroll = setup_row;
+        let before = d.detail.expanded.clone();
+        d.apply(Action::ToggleSection);
+        assert_ne!(
+            d.detail.expanded, before,
+            "the labelled header row does toggle"
+        );
+    }
+
+    /// `title-heading-preamble`'s design.md -> D6: the operation walk
+    /// advances over **every** heading in document order, the demoted title
+    /// included, so a `## ADDED Requirements` title still classifies the
+    /// requirements that follow it even though the title itself is demoted
+    /// and draws no header row of its own on a tracked-tasks artifact.
+    #[test]
+    fn the_operation_walk_advances_over_a_demoted_title_heading() {
+        const SOURCE: &str = "## ADDED Requirements\n\n### Requirement: X\n\n- [ ] 1.1 x\n\n### Requirement: Y\n\n- [ ] 1.2 y\n";
+        let mut d = dashboard_over(
+            &[("tasks", &["/repo/openspec/changes/c/tasks.md"])],
+            Some(0),
+        );
+        let recorder = crate::testutil::RecordingReader::always(Ok(SOURCE.to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+
+        d.sync_detail(&read);
+
+        assert_eq!(
+            shape_of(&d.detail),
+            vec![(Some("Requirement: X"), 0), (Some("Requirement: Y"), 0)],
+            "the title is demoted (its own body is empty) and contributes no section"
+        );
+        for section in &d.detail.sections {
+            assert_eq!(
+                section.operation,
+                Some(crate::specs::DeltaOp::Added),
+                "{:?}: the operation walk must reach every requirement past the demoted title",
+                section.label
             );
         }
     }

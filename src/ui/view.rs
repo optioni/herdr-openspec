@@ -4887,16 +4887,52 @@ mod tests {
                 );
             }
             let first_header = header_indices[0];
-            for index in 0..first_header {
-                assert_eq!(
-                    crate::ui::detail::section_at(&rows, index, 0),
-                    None,
-                    "width {width}: row {index}, preceding the first header, resolves to no section"
+            // The demoted title's own body ("Intro prose.") must actually be
+            // present, and precede the first header — a loop over `0..
+            // first_header` alone is vacuously true whenever `first_header`
+            // is `0`, which would prove nothing if the preamble row ever
+            // stopped being emitted.
+            let preamble_row = rows
+                .iter()
+                .position(|r| r.text().contains("Intro prose"))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "width {width}: no row contains \"Intro prose\": {:?}",
+                        rows.iter()
+                            .map(crate::ui::detail::ContentRow::text)
+                            .collect::<Vec<_>>()
+                    )
+                });
+            assert!(
+                preamble_row < first_header,
+                "width {width}: the demoted title's own body row ({preamble_row}) does not \
+                 precede the first header ({first_header})"
+            );
+            assert_eq!(
+                crate::ui::detail::section_at(&rows, preamble_row, 0),
+                None,
+                "width {width}: the demoted title's own body row resolves to no section"
+            );
+
+            // The real drawn buffer, not merely `content_lines`, carries both
+            // header rows at column zero.
+            let buf = render_at(width, 40, &d);
+            let drawn = drawn_content_rows(&buf, interior);
+            let drawn_headers: Vec<&String> = drawn
+                .iter()
+                .filter(|r| r.contains("1. Setup") || r.contains("2. Build"))
+                .collect();
+            assert_eq!(
+                drawn_headers.len(),
+                2,
+                "width {width}: the drawn buffer carries both header rows: {drawn:?}"
+            );
+            for header in &drawn_headers {
+                assert!(
+                    !header.starts_with(' '),
+                    "width {width}: drawn header {header:?} is at column zero"
                 );
             }
-
-            // Rendering the same dashboard must not panic.
-            let _buf = render_at(width, 40, &d);
         }
     }
 
