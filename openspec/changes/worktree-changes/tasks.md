@@ -58,19 +58,24 @@
 ## 2. The worktree marker in the list row
 <!-- kind: behavior -->
 
-- [ ] 2.1 RED: Write in `src/ui/list.rs` (whose `LISTWIDTHS` gate requires `38` and `58` in every
+- [x] 2.1 RED: Write in `src/ui/list.rs` (whose `LISTWIDTHS` gate requires `38` and `58` in every
       test): *A worktree row carries its marker after the badge*, *The worktree marker is dropped
       before the badge*, *A pane inside a nested worktree marks none of its own rows*, *A change
       archived in a worktree carries the marker on its archived row*, and the width-22/21
       worktree arm of *An archived row drops the progress cell, then the date, as the width
       falls*, with the strings the `change-rows` delta gives.
-- [ ] 2.2 GREEN: In `ui::list::rows`, mark a row when `worktrees::member_of(&changes.worktrees,
+- [x] 2.2 GREEN: In `ui::list::rows`, mark a row when `worktrees::member_of(&changes.worktrees,
       &change.dir)` is `Some`, insert the `@` cell after the badge, and drop it first, per
       design.md → D12.
-- [ ] 2.3 REFACTOR: Fold the marker into the badge's cell-list arithmetic if the two duplicate
+- [x] 2.3 REFACTOR: Fold the marker into the badge's cell-list arithmetic if the two duplicate
       each other, or record that no refactor was needed.
-- [ ] 2.4 Run `cargo test --lib ui::list` — green (53 at HEAD, plus this group's), every carried
+      - No refactor needed: `active_style_row` and `archived_row_text` gained a `worktree: bool`
+        parameter and a fullest-to-degenerate cascade (badge+marker, badge alone, marker alone,
+        neither) mirroring the existing drop structure one-for-one; `BadgeCell::x` arithmetic is
+        untouched.
+- [x] 2.4 Run `cargo test --lib ui::list` — green (53 at HEAD, plus this group's), every carried
       `change-rows` test unchanged.
+      - Confirmed: `cargo test --lib ui::list::` → 58 passed, 0 failed (53 + 5 new).
 
 ## 3. The branch in the detail header
 <!-- kind: behavior -->
