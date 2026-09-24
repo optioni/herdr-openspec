@@ -1982,6 +1982,240 @@ pub fn from_files(repo: &std::path::Path, archived: ArchivedScope) -> ChangeSet 
     }
 }
 
+/// The changes one worktree member owns and, under [`ArchivedScope::Full`],
+/// has built — the per-member half of [`overlay`]. `active` holds a built
+/// [`Change`] for every name `touched` says the member owns *and* the
+/// member's own active enumeration still holds; `archived` holds one
+/// [`OwnedArchived`] for every directory `touched` says the member owns
+/// *and* the member's own archived enumeration still holds.
+/// `worktree-overlay` -> "The overlay replaces, adds, and hides by
+/// ownership and nothing else": a member **holds** an archived directory
+/// when `change-enumeration`'s archived enumeration over its root lists it,
+/// so [`from_files_owned`]'s one `archived_entries` call is where the count
+/// and the built list both come from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnedChanges {
+    pub active: Vec<Change>,
+    pub archived: Vec<OwnedArchived>,
+}
+
+/// One archived directory a member owns and holds: its raw directory name
+/// (for matching against the base archive's own directory names in
+/// [`overlay`]), its stripped name (for matching an active change the
+/// member archived), and — under [`ArchivedScope::Full`] only — its built
+/// [`Change`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnedArchived {
+    pub dir_name: String,
+    pub name: String,
+    pub change: Option<Change>,
+}
+
+/// Build a member's owned changes over its own OpenSpec `root`, on exactly
+/// `from_files`' terms — the same private [`build_change`], the same
+/// per-call schema cache — but limited to what `touched` says the member
+/// owns. `worktree-overlay` -> "The overlay replaces, adds, and hides by
+/// ownership and nothing else": the member's copy is never corrected by the
+/// `openspec` CLI, exactly as an archived change never is.
+pub fn from_files_owned(
+    root: &std::path::Path,
+    touched: &crate::worktrees::Touched,
+    scope: ArchivedScope,
+) -> OwnedChanges {
+    let project_config_path = root.join("openspec").join("config.yaml");
+    let project_config_text = crate::schema::read_file(&project_config_path);
+    let mut schema_cache: std::collections::HashMap<String, CachedSchemaLoad> =
+        std::collections::HashMap::new();
+
+    let (active_names, _active_problems, active_unreadable) = active_change_names(root);
+    let active = active_names
+        .into_iter()
+        .filter(|name| touched.active.contains(name))
+        .map(|name| {
+            let dir = root.join("openspec").join("changes").join(&name);
+            build_change(
+                root,
+                &dir,
+                &name,
+                Origin::Active,
+                &project_config_path,
+                &project_config_text,
+                &mut schema_cache,
+            )
+        })
+        .collect();
+
+    let (entries, _archived_problems) = archived_entries(root, active_unreadable);
+    let archived = entries
+        .into_iter()
+        .filter_map(|entry| {
+            let dir_name = entry
+                .dir
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or_default()
+                .to_string();
+            if !touched.archived.contains(&dir_name) {
+                return None;
+            }
+            let change = match scope {
+                ArchivedScope::Full => Some(build_change(
+                    root,
+                    &entry.dir,
+                    &entry.name,
+                    Origin::Archived {
+                        date: entry.date.clone(),
+                    },
+                    &project_config_path,
+                    &project_config_text,
+                    &mut schema_cache,
+                )),
+                ArchivedScope::Names => None,
+            };
+            Some(OwnedArchived {
+                dir_name,
+                name: entry.name,
+                change,
+            })
+        })
+        .collect();
+
+    OwnedChanges { active, archived }
+}
+
+/// Join labels English-style: `"a"`, `"a and b"`, `"a, b and c"` — shared by
+/// [`overlay`]'s conflict-problem message. Only the one- and two-element
+/// cases are exercised today (`worktree-overlay` gives no three-owner
+/// example), but the rule is total rather than special-cased to two.
+fn join_labels(labels: &[&str]) -> String {
+    match labels.split_last() {
+        None => String::new(),
+        Some((last, [])) => (*last).to_string(),
+        Some((last, init)) => format!("{} and {last}", init.join(", ")),
+    }
+}
+
+/// The same ordering [`archived_entries`] gives its [`ArchivedEntry`]
+/// values, restated over already-built [`Change`]s so [`overlay`] can merge
+/// a member's newly built archived changes into the base's own list rather
+/// than only ever appending. Panics if given a `Change` whose `origin` is
+/// not `Archived` — `overlay` never calls it with anything else.
+fn archived_change_order(a: &Change, b: &Change) -> std::cmp::Ordering {
+    let (Origin::Archived { date: date_a }, Origin::Archived { date: date_b }) =
+        (&a.origin, &b.origin)
+    else {
+        unreachable!("overlay's archived tier holds only Archived changes")
+    };
+    match (date_a, date_b) {
+        (Some(da), Some(db)) => db.cmp(da).then_with(|| b.name.cmp(&a.name)),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => b.name.cmp(&a.name),
+    }
+}
+
+/// Layer each worktree member's owned changes over the base's own set:
+/// `worktree-overlay`'s full contract. Pure — no filesystem, no CLI — over
+/// already-built values; [`from_files_owned`] is where the filesystem is
+/// read. `base_archive_dirs` is the base's own archive's raw directory
+/// names, supplied by the caller because `base.archived` alone cannot say
+/// which directories exist under [`ArchivedScope::Names`], where it is
+/// empty. Each member is its [`crate::worktrees::Worktree`] identity, what
+/// it touched since it forked from the base, and what it owns and holds
+/// ([`OwnedChanges`], from [`from_files_owned`]) — `touched` is kept
+/// alongside `owned` rather than folded into it because rule 3 below (a
+/// bare deletion) has to tell "owns but does not hold" apart from "does not
+/// own at all", which `owned` alone cannot say.
+pub fn overlay(
+    base: ChangeSet,
+    base_archive_dirs: &[String],
+    members: &[(
+        crate::worktrees::Worktree,
+        crate::worktrees::Touched,
+        OwnedChanges,
+    )],
+) -> ChangeSet {
+    let ChangeSet {
+        active: base_active,
+        archived: base_archived,
+        problems: base_problems,
+        archived_total: base_archived_total,
+        worktrees: _,
+    } = base;
+
+    let mut active_map: std::collections::BTreeMap<String, Change> = base_active
+        .into_iter()
+        .map(|change| (change.name.clone(), change))
+        .collect();
+    let mut problems = base_problems;
+
+    let mut candidate_names: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    for (_, touched, _) in members {
+        candidate_names.extend(touched.active.iter().map(String::as_str));
+    }
+
+    for name in candidate_names {
+        let owners: Vec<&(
+            crate::worktrees::Worktree,
+            crate::worktrees::Touched,
+            OwnedChanges,
+        )> = members
+            .iter()
+            .filter(|(_, touched, _)| touched.active.contains(name))
+            .collect();
+        let Some(owner) = owners.first() else {
+            continue;
+        };
+        let (_, _, owner_owned) = *owner;
+
+        if let Some(active_change) = owner_owned.active.iter().find(|c| c.name == name) {
+            active_map.insert(name.to_string(), active_change.clone());
+        } else if owner_owned.archived.iter().any(|entry| entry.name == name) {
+            active_map.remove(name);
+        }
+        // else: rule 3 — the member deleted the directory without
+        // archiving it, so the base's row (or absence) is kept unchanged.
+
+        if owners.len() > 1 {
+            let labels: Vec<&str> = owners.iter().map(|(w, _, _)| w.label.as_str()).collect();
+            problems.push(format!(
+                "change {name} is modified in worktrees {}; showing {}",
+                join_labels(&labels),
+                labels[0]
+            ));
+        }
+    }
+
+    let mut active: Vec<Change> = active_map.into_values().collect();
+    sort_by_name_byte_order(&mut active);
+
+    let mut archived = base_archived;
+    let mut archived_total = base_archived_total;
+    let mut added_dirs: std::collections::HashSet<String> =
+        base_archive_dirs.iter().cloned().collect();
+
+    for (_, _, owned) in members {
+        for entry in &owned.archived {
+            if !added_dirs.insert(entry.dir_name.clone()) {
+                continue;
+            }
+            archived_total += 1;
+            if let Some(change) = &entry.change {
+                archived.push(change.clone());
+            }
+        }
+    }
+    archived.sort_by(archived_change_order);
+
+    ChangeSet {
+        active,
+        archived,
+        problems,
+        archived_total,
+        worktrees: members.iter().map(|(w, _, _)| w.clone()).collect(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::conformance::{assert_invariants, assert_set_invariants};

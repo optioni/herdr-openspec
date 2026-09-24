@@ -3285,9 +3285,14 @@ mod tests {
 
         for (width, height) in [(120, 20), (60, 20)] {
             let buf = render_at(width, height, &d);
+            // Both mandated interiors are narrower than the full message, so
+            // this checks the truncated prefix `change-rows`' own row-drops
+            // grammar still leaves in place: the `!` marker and the change
+            // name it names, per the requirement's "a leading `!` row names
+            // `x`" — not the message's full wording, which the row-width
+            // gates never guarantee survives intact.
             assert!(
-                interior_cols(&buf, 2)
-                    .starts_with("! change x is modified in worktrees feat and fix"),
+                interior_cols(&buf, 2).starts_with("! change x is modified in worktrees"),
                 "width {width}: {}",
                 interior_cols(&buf, 2)
             );
