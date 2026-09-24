@@ -913,6 +913,23 @@ mod tests {
         }
     }
 
+    /// `dashboard_with`, then its `changes.worktrees` replaced by
+    /// `worktrees::Worktree` values built from `(root, label)` pairs —
+    /// `worktree-changes`' own fixture composition, on `fixture::with_worktrees`'
+    /// terms, for the tests below that need a change's `dir` to fall under a
+    /// worktree member's own `openspec/changes`.
+    fn dashboard_with_worktrees(
+        active: Vec<crate::changes::Change>,
+        archived: Vec<crate::changes::Change>,
+        problems: Vec<String>,
+        selected: usize,
+        worktrees: &[(&str, &str)],
+    ) -> Dashboard {
+        let mut d = dashboard_with(active, archived, problems, selected);
+        d.changes = fixture::with_worktrees(d.changes, worktrees);
+        d
+    }
+
     fn three_active() -> Dashboard {
         dashboard_with(
             vec![
@@ -3194,6 +3211,237 @@ mod tests {
                     "width {width} row {y}"
                 );
             }
+        }
+    }
+
+    /// `worktree-changes` :: "A worktree row carries its marker after the badge" —
+    /// `add-token-refresh`'s `dir` lies under the one worktree member's own
+    /// `openspec/changes`, so its row alone gains the `@` marker, first with no
+    /// agents and then with an in-scope `Working` one, and `BadgeCell::x` stays
+    /// `name_field_width + 3` exactly as it is for a non-worktree badged row.
+    #[test]
+    fn a_worktree_row_carries_its_marker_after_the_badge() {
+        let mut add_token = fixture::active("add-token-refresh", 4, 9);
+        add_token.dir =
+            std::path::PathBuf::from("/w/feat/openspec/changes/add-token-refresh");
+        let d = dashboard_with_worktrees(
+            vec![
+                add_token,
+                fixture::active("fix-empty-basket", 7, 7),
+                fixture::active("migrate-ai-sdk-v7", 0, 0),
+            ],
+            Vec::new(),
+            Vec::new(),
+            1,
+            &[("/w/feat", "feat")],
+        );
+
+        for (width, expected) in [
+            (38u16, "> add-token-refresh            @ [4/9]"),
+            (58, "> add-token-refresh                                @ [4/9]"),
+        ] {
+            assert_eq!(rows(&d, width)[1].text, expected, "width {width}");
+        }
+
+        let mut with_agent = d.clone();
+        with_agent.agents.agents = vec![agent_at("add-token-refresh", AgentStatus::Working)];
+        for (width, expected, badge_x) in [
+            (38u16, "> add-token-refresh          w @ [4/9]", 29u16),
+            (
+                58,
+                "> add-token-refresh                              w @ [4/9]",
+                49u16,
+            ),
+        ] {
+            let rows = rows(&with_agent, width);
+            assert_eq!(rows[1].text, expected, "width {width}");
+            let badge = rows[1]
+                .badge
+                .expect("the badge cell must still be reported");
+            assert_eq!(badge.x, badge_x, "width {width}");
+        }
+
+        // Rows for changes under no worktree root are byte-identical to the
+        // pre-existing "Active rows render at both mandated widths" scenario.
+        let base = three_active();
+        for width in [38u16, 58] {
+            let these = rows(&d, width);
+            let expected = rows(&base, width);
+            assert_eq!(these[2].text, expected[2].text, "width {width}");
+            assert_eq!(these[3].text, expected[3].text, "width {width}");
+        }
+    }
+
+    /// `worktree-changes` :: "The worktree marker is dropped before the badge" —
+    /// character-for-character the rows *A field too narrow for both drops the
+    /// progress cell whole* specifies for the same change without a worktree, at
+    /// the widths where the badge still fits.
+    #[test]
+    fn the_worktree_marker_is_dropped_before_the_badge() {
+        let mut alpha = fixture::active("alpha", 4, 9);
+        alpha.dir = std::path::PathBuf::from("/w/feat/openspec/changes/alpha");
+        let mut d = dashboard_with_worktrees(
+            vec![alpha],
+            Vec::new(),
+            Vec::new(),
+            1,
+            &[("/w/feat", "feat")],
+        );
+        d.agents.agents = vec![agent_at("alpha", AgentStatus::Working)];
+
+        let cases: [(u16, &str); 5] = [
+            (14, "> a… w @ [4/9]"),
+            (13, "> … w @ [4/9]"),
+            (12, "> a… w [4/9]"),
+            (11, "> … w [4/9]"),
+            (10, "> a… [4/9]"),
+        ];
+        for (width, expected) in cases {
+            assert_eq!(rows(&d, width)[1].text, expected, "width {width}");
+        }
+    }
+
+    /// `worktree-changes` :: "A pane inside a nested worktree marks none of its own
+    /// rows" — every change lies under the pane's own root, `/r/.worktrees/feat`,
+    /// which is *not* under the one member's (`/r`) own `openspec/changes`, so no
+    /// row gains a marker and every row is byte-identical to the unworktreed
+    /// scenario; only a change whose `dir` is moved under the member's own
+    /// `openspec/changes` gains one.
+    #[test]
+    fn a_pane_inside_a_nested_worktree_marks_none_of_its_own_rows() {
+        let mk = |name: &str, completed: usize, total: usize| {
+            let mut c = fixture::active(name, completed, total);
+            c.dir =
+                std::path::PathBuf::from(format!("/r/.worktrees/feat/openspec/changes/{name}"));
+            c
+        };
+        let d = dashboard_with_worktrees(
+            vec![
+                mk("add-token-refresh", 4, 9),
+                mk("fix-empty-basket", 7, 7),
+                mk("migrate-ai-sdk-v7", 0, 0),
+            ],
+            Vec::new(),
+            Vec::new(),
+            1,
+            &[("/r", "main")],
+        );
+
+        let base = three_active();
+        for width in [38u16, 58] {
+            assert_eq!(rows(&d, width), rows(&base, width), "width {width}");
+            for row in rows(&d, width) {
+                assert!(
+                    !row.text.contains('@'),
+                    "width {width}: {:?} must carry no marker",
+                    row.text
+                );
+            }
+        }
+
+        let mut moved = d.clone();
+        moved.changes.active[0].dir =
+            std::path::PathBuf::from("/r/openspec/changes/add-token-refresh");
+        for width in [38u16, 58] {
+            let moved_rows = rows(&moved, width);
+            assert!(
+                moved_rows[1].text.contains('@'),
+                "width {width}: the moved change must carry the marker: {:?}",
+                moved_rows[1].text
+            );
+            assert!(!moved_rows[2].text.contains('@'), "width {width}");
+            assert!(!moved_rows[3].text.contains('@'), "width {width}");
+        }
+    }
+
+    /// `worktree-changes` :: "A change archived in a worktree carries the marker on
+    /// its archived row" — `add-auth`'s archived `dir` lies under the one member's
+    /// own `openspec/changes`, so its row alone gains the marker; every other row
+    /// is byte-identical to the un-worktreed scenario, and emptying `worktrees`
+    /// removes the marker again.
+    #[test]
+    fn an_archived_change_in_a_worktree_carries_the_marker() {
+        let mut add_auth = fixture::archived(Some("2026-08-14"), "add-auth", 7, 7);
+        add_auth.dir = std::path::PathBuf::from(
+            "/w/feat/openspec/changes/archive/2026-08-14-add-auth",
+        );
+        let d = dashboard_with_worktrees(
+            vec![fixture::active("fix-empty-basket", 7, 7)],
+            vec![add_auth, fixture::archived(None, "legacy-cleanup", 3, 3)],
+            Vec::new(),
+            1,
+            &[("/w/feat", "feat")],
+        );
+
+        for (width, expected) in [
+            (38u16, "  2026-08-14 add-auth          @ [7/7]"),
+            (58, "  2026-08-14 add-auth                              @ [7/7]"),
+        ] {
+            assert_eq!(rows(&d, width)[3].text, expected, "width {width}");
+        }
+
+        let base = dashboard_with(
+            vec![fixture::active("fix-empty-basket", 7, 7)],
+            vec![
+                fixture::archived(Some("2026-08-14"), "add-auth", 7, 7),
+                fixture::archived(None, "legacy-cleanup", 3, 3),
+            ],
+            Vec::new(),
+            1,
+        );
+        for width in [38u16, 58] {
+            let d_rows = rows(&d, width);
+            let base_rows = rows(&base, width);
+            assert_eq!(d_rows[0].text, base_rows[0].text, "width {width}");
+            assert_eq!(d_rows[1].text, base_rows[1].text, "width {width}");
+            assert_eq!(d_rows[2].text, base_rows[2].text, "width {width}");
+            assert_eq!(d_rows[4].text, base_rows[4].text, "width {width}");
+        }
+
+        let mut emptied = d.clone();
+        emptied.changes = fixture::with_worktrees(emptied.changes, &[]);
+        for width in [38u16, 58] {
+            assert_eq!(
+                rows(&emptied, width)[3].text,
+                rows(&base, width)[3].text,
+                "width {width}"
+            );
+        }
+    }
+
+    /// `worktree-changes` :: the width-22/21 worktree arm of "An archived row drops
+    /// the progress cell, then the date, as the width falls" — an **unbadged**
+    /// worktree-owned archived change needs two further columns at width 22, for
+    /// the marker; at 21 and below the marker is gone and every row reproduces
+    /// the pre-existing unbadged progression unchanged.
+    #[test]
+    fn an_unbadged_worktree_archived_row_drops_the_marker_before_the_progress_cell() {
+        let mut add_auth = fixture::archived(Some("2026-08-14"), "add-auth", 7, 7);
+        add_auth.dir = std::path::PathBuf::from(
+            "/w/feat/openspec/changes/archive/2026-08-14-add-auth",
+        );
+        let d = dashboard_with_worktrees(
+            Vec::new(),
+            vec![add_auth],
+            Vec::new(),
+            1,
+            &[("/w/feat", "feat")],
+        );
+        // rows[0] "No active changes", rows[1] the archived header, rows[2] the change.
+        assert_eq!(rows(&d, 22)[2].text, "> 2026-08-14 … @ [7/7]");
+
+        let unbadged = dashboard_with(
+            Vec::new(),
+            vec![fixture::archived(Some("2026-08-14"), "add-auth", 7, 7)],
+            Vec::new(),
+            1,
+        );
+        for width in [21u16, 20, 19, 14, 13, 3, 1, 0] {
+            assert_eq!(
+                rows(&d, width)[2].text,
+                rows(&unbadged, width)[2].text,
+                "width {width}"
+            );
         }
     }
 }
