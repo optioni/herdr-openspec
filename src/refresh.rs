@@ -360,12 +360,30 @@ fn derive_family(repo: &Path, git: &dyn GitCli) -> FamilyDerivation {
         return FamilyDerivation::default();
     };
 
-    let members = crate::worktrees::family(&records, &canonical, repo);
+    // `<changes>`: the OpenSpec prefix joined to `openspec/changes`, per
+    // `worktree-overlay`'s "A member owns exactly the changes it touched since it
+    // forked from the base". Every member shares one prefix — the base's own record
+    // determines it — so it is computed once, not per member.
+    let (prefix, members_with_tops) =
+        crate::worktrees::family_with_tops(&records, &canonical, repo);
+    let changes = if prefix.as_os_str().is_empty() {
+        "openspec/changes".to_string()
+    } else {
+        format!("{}/openspec/changes", prefix.to_string_lossy())
+    };
+    let members: Vec<crate::worktrees::Worktree> = members_with_tops
+        .iter()
+        .map(|(_, worktree)| worktree.clone())
+        .collect();
     let mut touched = Vec::with_capacity(members.len());
     let mut problems = Vec::new();
 
-    for member in &members {
-        match git_call(git, &member.root, &["merge-base", "HEAD", &base_head]) {
+    // `top` is the member's own canonical top level — never `Worktree::root`, its
+    // OpenSpec root — because `-C` must point at the checkout `diff-tree`/`status`
+    // report paths relative to; `<changes>` above is the pathspec that recovers the
+    // OpenSpec prefix those reported paths carry.
+    for (top, _) in &members_with_tops {
+        match git_call(git, top, &["merge-base", "HEAD", &base_head]) {
             Ok(out) => {
                 let merge_base = out.trim();
                 if merge_base.is_empty() {
@@ -374,7 +392,7 @@ fn derive_family(repo: &Path, git: &dyn GitCli) -> FamilyDerivation {
                 }
                 let diff_out = match git_call(
                     git,
-                    &member.root,
+                    top,
                     &[
                         "diff-tree",
                         "-r",
@@ -384,19 +402,19 @@ fn derive_family(repo: &Path, git: &dyn GitCli) -> FamilyDerivation {
                         merge_base,
                         "HEAD",
                         "--",
-                        "openspec/changes",
+                        changes.as_str(),
                     ],
                 ) {
                     Ok(out) => out,
                     Err(err) => {
-                        problems.push(member_query_failed(&member.root, "diff-tree", &err));
+                        problems.push(member_query_failed(top, "diff-tree", &err));
                         touched.push(crate::worktrees::Touched::default());
                         continue;
                     }
                 };
                 let status_out = match git_call(
                     git,
-                    &member.root,
+                    top,
                     &[
                         "status",
                         "--porcelain=v1",
@@ -404,21 +422,17 @@ fn derive_family(repo: &Path, git: &dyn GitCli) -> FamilyDerivation {
                         "--no-renames",
                         "--untracked-files=all",
                         "--",
-                        "openspec/changes",
+                        changes.as_str(),
                     ],
                 ) {
                     Ok(out) => out,
                     Err(err) => {
-                        problems.push(member_query_failed(&member.root, "status", &err));
+                        problems.push(member_query_failed(top, "status", &err));
                         touched.push(crate::worktrees::Touched::default());
                         continue;
                     }
                 };
-                touched.push(crate::worktrees::touched(
-                    &diff_out,
-                    &status_out,
-                    "openspec/changes",
-                ));
+                touched.push(crate::worktrees::touched(&diff_out, &status_out, &changes));
             }
             // Unrelated history — an orphan-branch worktree is a normal thing to have,
             // per `worktree-overlay` — is silent, and the other two commands do not
@@ -427,7 +441,7 @@ fn derive_family(repo: &Path, git: &dyn GitCli) -> FamilyDerivation {
                 touched.push(crate::worktrees::Touched::default());
             }
             Err(err) => {
-                problems.push(member_query_failed(&member.root, "merge-base", &err));
+                problems.push(member_query_failed(top, "merge-base", &err));
                 touched.push(crate::worktrees::Touched::default());
             }
         }
@@ -2180,7 +2194,10 @@ apply:
             RefreshResult::Merged(set) => {
                 assert!(set.problems.is_empty(), "{:?}", set.problems);
                 let x = set.active.iter().find(|c| c.name == "x").unwrap();
-                assert_eq!(x.progress.completed, 1, "expected the member's own copy of x");
+                assert_eq!(
+                    x.progress.completed, 1,
+                    "expected the member's own copy of x"
+                );
                 assert!(
                     x.dir.starts_with(&member_root),
                     "expected x's dir under the member's OpenSpec root {}, got {:?}",
@@ -3174,6 +3191,102 @@ worktree {}\0HEAD eeee\0detached\0\0",
             before_worktree, after_worktree,
             "the worktree's own files changed"
         );
+    }
+
+    /// `worktree-overlay` -> "A member owns exactly the changes it touched since it
+    /// forked from the base", over a real repository whose pane root sits inside a
+    /// subdirectory (`sub`) of its checkout's top level: real `diff-tree`/`status`
+    /// output names paths relative to the top level (`sub/openspec/changes/x/...`),
+    /// so a `derive_family` that ran `-C` at the OpenSpec root or matched against the
+    /// bare `openspec/changes` pathspec would find `x` untouched.
+    #[test]
+    fn a_real_cycle_finds_a_members_change_when_the_panes_openspec_root_is_nested() {
+        assert_no_git_env_leak();
+        let git = real_git();
+
+        let scratch = crate::testutil::ScratchDir::new();
+        let base_top = scratch.path().join("base");
+        let worktree_top = scratch.path().join("feat");
+        std::fs::create_dir_all(&base_top).expect("create base dir");
+
+        real_git_setup(git.as_ref(), &base_top, &["init", "-q", "-b", "main"]);
+        real_git_setup(
+            git.as_ref(),
+            &base_top,
+            &["config", "core.fsmonitor", "false"],
+        );
+        real_git_setup(git.as_ref(), &base_top, &["config", "gc.auto", "0"]);
+        real_git_setup(
+            git.as_ref(),
+            &base_top,
+            &["config", "maintenance.auto", "false"],
+        );
+
+        vendor_tdd_schema(&base_top.join("sub"));
+        crate::testutil::write_with_mode(
+            &base_top.join("sub/openspec/changes/y/tasks.md"),
+            b"- [ ] a\n",
+            0o644,
+        );
+        real_git_setup(git.as_ref(), &base_top, &["add", "-A"]);
+        real_git_setup(git.as_ref(), &base_top, &["commit", "-q", "-m", "initial"]);
+
+        let worktree_str = worktree_top.to_string_lossy().into_owned();
+        real_git_setup(
+            git.as_ref(),
+            &base_top,
+            &["worktree", "add", "-q", "-b", "feat", &worktree_str],
+        );
+
+        // An uncommitted change under the worktree's own nested `sub/openspec/changes/x/`.
+        crate::testutil::write_with_mode(
+            &worktree_top.join("sub/openspec/changes/x/tasks.md"),
+            b"- [x] a\n",
+            0o644,
+        );
+
+        let base_canonical = crate::testutil::canonical(&base_top);
+        let base_root = base_canonical.join("sub");
+        let worktree_canonical = crate::testutil::canonical(&worktree_top);
+        let member_root = worktree_canonical.join("sub");
+
+        let openspec_fake = Arc::new(crate::cli::FakeCli::new());
+        openspec_fake.register_openspec(
+            &["list", "--json"],
+            Ok(format!(
+                r#"{{"changes":[],"root":{{"path":{:?},"source":"nearest"}}}}"#,
+                base_root.display().to_string()
+            )),
+        );
+        let cli: Arc<dyn OpenspecCli> = openspec_fake;
+
+        let (mut refresher, results_rx, _exit_rx) = worker_for_test(
+            base_root.clone(),
+            cli,
+            git.clone(),
+            Duration::from_millis(5),
+        );
+        refresher.request(Selection::All, ArchivedScope::Names);
+
+        let _files = results_rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("files");
+        let merged = results_rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("merged");
+        match merged {
+            RefreshResult::Merged(set) => {
+                assert!(set.problems.is_empty(), "{:?}", set.problems);
+                let x = set
+                    .active
+                    .iter()
+                    .find(|c| c.name == "x")
+                    .unwrap_or_else(|| panic!("x missing from active: {:?}", set.active));
+                assert!(x.dir.starts_with(&member_root), "{:?}", x.dir);
+                assert_eq!(set.worktrees.len(), 1);
+            }
+            other => panic!("expected Merged, got {other:?}"),
+        }
     }
 
     /// `worktree-overlay` -> "A worktree that forked before the base moved on owns

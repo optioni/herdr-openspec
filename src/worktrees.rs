@@ -171,6 +171,33 @@ pub fn family(
     canonical: &[Option<PathBuf>],
     pane_root: &Path,
 ) -> Vec<Worktree> {
+    family_with_tops(records, canonical, pane_root)
+        .1
+        .into_iter()
+        .map(|(_, worktree)| worktree)
+        .collect()
+}
+
+/// [`family`]'s own selection, additionally handing back the OpenSpec prefix
+/// (returned once, since every member shares the one prefix the base's own record
+/// determines) and, paired with each [`Worktree`], the member's own canonical top
+/// level — the path *before* the prefix was joined onto it to make `Worktree::root`.
+/// `family` is a thin wrapper over this that keeps its existing signature and drops
+/// both, so the two can never disagree about which records are members.
+///
+/// The refresh worker needs the top level, not the OpenSpec root, for `-C`: git's
+/// `merge-base`/`diff-tree`/`status` are run against a member's checkout, and
+/// `diff-tree`/`status` report paths relative to that checkout's own top, never
+/// relative to `-C`'s directory — so a pathspec and a `touched` prefix must be the
+/// OpenSpec prefix joined to `openspec/changes`, not `openspec/changes` alone, or
+/// every path a nonempty prefix produces silently fails to match. See
+/// specs/worktree-overlay/spec.md -> "A member owns exactly the changes it touched
+/// since it forked from the base".
+pub fn family_with_tops(
+    records: &[Record],
+    canonical: &[Option<PathBuf>],
+    pane_root: &Path,
+) -> (PathBuf, Vec<(PathBuf, Worktree)>) {
     let base_index = canonical
         .iter()
         .enumerate()
@@ -185,7 +212,7 @@ pub fn family(
         .map(Path::to_path_buf)
         .unwrap_or_default();
 
-    records
+    let members = records
         .iter()
         .zip(canonical.iter())
         .enumerate()
@@ -200,12 +227,17 @@ pub fn family(
             } else {
                 top_level.join(&prefix)
             };
-            Some(Worktree {
-                root,
-                label: label(record),
-            })
+            Some((
+                top_level.clone(),
+                Worktree {
+                    root,
+                    label: label(record),
+                },
+            ))
         })
-        .collect()
+        .collect();
+
+    (prefix, members)
 }
 
 /// Which change directories a member touched since it forked from the base:
