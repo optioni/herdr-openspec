@@ -2216,6 +2216,36 @@ pub fn overlay(
     }
 }
 
+/// `refresh::worker_body`'s own composition of [`from_files_owned`] and [`overlay`]: build
+/// every member's [`OwnedChanges`] afresh from its files under `scope`, then overlay them onto
+/// `base`. Lives here, not in `src/refresh.rs`, because a function returning `ChangeSet` by
+/// value outside this file is exactly what `NOLIT-CHANGE`'s own header names as a known false
+/// positive it does not weaken for — "the fix is to move the code" — and every `ChangeSet` this
+/// crate builds already lives in this one file. `members` and `touched` are parallel and
+/// index-aligned, on `worktree-overlay`'s own terms; `refresh::FamilyDerivation` stays private
+/// to `src/refresh.rs` and is never named here.
+pub(crate) fn overlay_family(
+    base: ChangeSet,
+    base_archive_dirs: &[String],
+    members: &[crate::worktrees::Worktree],
+    touched: &[crate::worktrees::Touched],
+    scope: ArchivedScope,
+) -> ChangeSet {
+    let owned: Vec<(
+        crate::worktrees::Worktree,
+        crate::worktrees::Touched,
+        OwnedChanges,
+    )> = members
+        .iter()
+        .zip(touched.iter())
+        .map(|(member, touched)| {
+            let owned = from_files_owned(&member.root, touched, scope);
+            (member.clone(), touched.clone(), owned)
+        })
+        .collect();
+    overlay(base, base_archive_dirs, &owned)
+}
+
 #[cfg(test)]
 mod tests {
     use super::conformance::{assert_invariants, assert_set_invariants};
