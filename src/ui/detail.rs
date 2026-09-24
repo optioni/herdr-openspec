@@ -93,6 +93,70 @@ pub fn header_row(
     crate::ui::list::pad_or_truncate_right(name, w as usize)
 }
 
+/// `header_row`, with a **branch cell** — `@` followed by `branch` cut to at
+/// most 16 display columns by `ui::list::truncate_right`'s own rule, the
+/// same glyph `ui::list`'s worktree row marker draws — inserted immediately
+/// after the name field, so the branch sits between the name and the schema.
+/// `worktree-changes`' addition; see
+/// `openspec/changes/worktree-changes/specs/detail-header/spec.md`.
+///
+/// Composes `header_row` rather than restating its bands (design.md ->
+/// Decision 13): `header_row` itself does not change in signature or
+/// output. The branch cell is drawn in full at `header_row(name, schema,
+/// progress, width - (b + 1))` — `b` the branch cell's own display-column
+/// width, `+ 1` its separating space — whenever that reduced width is still
+/// enough for `header_row` to draw its own **full** form; otherwise the
+/// branch is dropped **whole**, first of every cell and before the gauge,
+/// and the result is exactly `header_row(name, schema, progress, width)`,
+/// byte-identical to a change that came from no worktree at all.
+///
+/// The full-form threshold is computed independently here rather than by
+/// probing `header_row`'s own output, on the same terms `header_row`
+/// computes it for itself: `4 + schema cell + gauge cell + progress cell`
+/// when `progress.total > 0` (`header_row`'s own gauge band, requiring a
+/// non-empty name field), and `3 + schema cell + progress cell` when it is
+/// not (the gauge-less band immediately below it).
+pub fn branched_header_row(
+    name: &str,
+    branch: &str,
+    schema: &str,
+    progress: &crate::tasks::Progress,
+    width: u16,
+) -> String {
+    let (branch_shown, _) = crate::ui::list::truncate_right(branch, 16);
+    let branch_cell = format!("@{branch_shown}");
+    let b = columns(&branch_cell) as i64;
+
+    let progress_cell = crate::ui::list::progress_cell(progress);
+    let progress_len = columns(&progress_cell) as i64;
+    let schema_cell = format!("({schema})");
+    let schema_len = columns(&schema_cell) as i64;
+    let gauge_len = i64::from(HEADER_GAUGE_COLUMNS);
+
+    let min_full = if progress.total > 0 {
+        4 + schema_len + gauge_len + progress_len
+    } else {
+        3 + schema_len + progress_len
+    };
+
+    let w = i64::from(width);
+    let reduced = w - (b + 1);
+    if reduced >= min_full {
+        let reduced_width = reduced as u16;
+        let inner = header_row(name, schema, progress, reduced_width);
+        let name_len = if progress.total > 0 {
+            reduced - 3 - schema_len - gauge_len - progress_len
+        } else {
+            reduced - 2 - schema_len - progress_len
+        };
+        let split = truncate_columns(&inner, name_len as usize).len();
+        let (name_field, rest) = inner.split_at(split);
+        return format!("{name_field} {branch_cell}{rest}");
+    }
+
+    header_row(name, schema, progress, width)
+}
+
 /// One drawn tab cell: its label, its column offset from the interior's
 /// first column, its position in the artifact list (`None` for the
 /// zero-artifact placeholder), and whether it is the selected tab. Carries
@@ -2455,7 +2519,7 @@ mod tests {
             completed: 4,
             total: 42,
         };
-        for (width, name_field_width) in [(78u16, 46usize), (58, 26)] {
+        for (width, name_field_width) in [(78, 46usize), (58, 26)] {
             let got = branched_header_row("detail-view", "feat", "tdd", &progress, width);
             assert_eq!(columns(&got), width as usize, "width {width}");
             let expected_name_field =
@@ -2505,7 +2569,10 @@ mod tests {
             // Never cut short: any partial appearance of the branch marker
             // is the whole cell or nothing.
             if got.contains("@f") {
-                assert!(got.contains("@feat"), "width {w}: partial branch cell: {got:?}");
+                assert!(
+                    got.contains("@feat"),
+                    "width {w}: partial branch cell: {got:?}"
+                );
             }
         }
     }

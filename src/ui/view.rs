@@ -136,7 +136,14 @@ fn render_detail(frame: &mut Frame, area: Rect, gutters: Gutters, dashboard: &Da
         width: region_interior.width,
         height: area.height.min(1),
     };
-    render_detail_header(frame, header, change, dashboard.route == Route::Detail);
+    let worktree = crate::worktrees::member_of(&dashboard.changes.worktrees, &change.dir);
+    render_detail_header(
+        frame,
+        header,
+        change,
+        worktree,
+        dashboard.route == Route::Detail,
+    );
     let (tabs, rule, content) = split_detail(region_interior);
     render_detail_tabs(frame, tabs, change, dashboard.detail.tab);
     render_detail_rule(frame, rule);
@@ -147,10 +154,19 @@ fn render_detail(frame: &mut Frame, area: Rect, gutters: Gutters, dashboard: &Da
 /// when the detail region is routed, else `Role::RegionHeading` — the same
 /// region-heading pair every other region's heading takes (`view-palette` ->
 /// draw-span mapping). Draws nothing at zero width or zero height.
+///
+/// `worktree-changes`' addition: `worktree` is `render_detail`'s own
+/// `worktrees::member_of` lookup, already made with `dashboard.changes` in
+/// hand — `ui::detail` reads no `ChangeSet` — and is `Some` exactly when
+/// `change.dir` lies under that member's `openspec/changes`. `Some` draws
+/// `detail::branched_header_row` with the member's own label; `None` draws
+/// plain `detail::header_row`, byte-identical to a change that came from no
+/// worktree at all.
 fn render_detail_header(
     frame: &mut Frame,
     header: Rect,
     change: &crate::changes::Change,
+    worktree: Option<&crate::worktrees::Worktree>,
     focused: bool,
 ) {
     if header.width == 0 || header.height == 0 {
@@ -161,7 +177,16 @@ fn render_detail_header(
     } else {
         Role::RegionHeading
     };
-    let text = detail::header_row(&change.name, &change.schema, &change.progress, header.width);
+    let text = match worktree {
+        Some(member) => detail::branched_header_row(
+            &change.name,
+            &member.label,
+            &change.schema,
+            &change.progress,
+            header.width,
+        ),
+        None => detail::header_row(&change.name, &change.schema, &change.progress, header.width),
+    };
     frame
         .buffer_mut()
         .set_string(header.x, header.y, &text, palette::style(role));
@@ -9334,10 +9359,11 @@ mod tests {
     fn the_view_draws_the_branch_only_for_a_worktree_copy() {
         let mut worktree_change = fixture::active("x", 1, 2);
         worktree_change.dir = std::path::PathBuf::from("/w/feat/openspec/changes/x");
+        // `list-sections`: 1, not 0 — target 0 is the active section header.
         let with_worktree = dashboard_with_worktrees(
             vec![worktree_change],
             Vec::new(),
-            0,
+            1,
             Route::Detail,
             &[("/w/feat", "feat")],
         );
@@ -9346,11 +9372,11 @@ mod tests {
         let without_worktree = dashboard_with_worktrees(
             vec![plain_change.clone()],
             Vec::new(),
-            0,
+            1,
             Route::Detail,
             &[("/w/feat", "feat")],
         );
-        let baseline = dashboard_with(vec![plain_change], Vec::new(), 0, Route::Detail);
+        let baseline = dashboard_with(vec![plain_change], Vec::new(), 1, Route::Detail);
 
         for (width, height) in [(120u16, 20u16), (60, 20)] {
             let with_buf = render_at(width, height, &with_worktree);
@@ -9378,7 +9404,7 @@ mod tests {
         let nested = dashboard_with_worktrees(
             vec![nested_change],
             Vec::new(),
-            0,
+            1,
             Route::Detail,
             &[("/r", "main")],
         );
