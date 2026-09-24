@@ -863,10 +863,19 @@ mod tests {
         assert_eq!(inline, Ok("ok".to_string()));
 
         let herdr: std::sync::Arc<dyn super::HerdrCli> =
-            std::sync::Arc::new(super::RealHerdrCli::new(prog));
+            std::sync::Arc::new(super::RealHerdrCli::new(prog.clone()));
         let inline = herdr.run(&[]);
         let h = herdr.clone();
         let handle = std::thread::spawn(move || h.run(&[]));
+        let threaded = handle.join().expect("thread panicked");
+        assert_eq!(inline, threaded);
+        assert_eq!(inline, Ok("ok".to_string()));
+
+        let git: std::sync::Arc<dyn super::GitCli> =
+            std::sync::Arc::new(super::RealGitCli::new(prog));
+        let inline = git.run(&[]);
+        let g = git.clone();
+        let handle = std::thread::spawn(move || g.run(&[]));
         let threaded = handle.join().expect("thread panicked");
         assert_eq!(inline, threaded);
         assert_eq!(inline, Ok("ok".to_string()));
@@ -1010,6 +1019,36 @@ mod tests {
         );
         let message = panic_message(err.as_ref());
         assert!(message.contains("list"), "message: {message}");
+        assert!(
+            message.to_lowercase().contains("herdr"),
+            "message should name the HerdrCli program: {message}"
+        );
+
+        // `subprocess-seam`: "the same holds between the GitCli side and each of the other
+        // two: a vector registered for `git` alone panics when called through `OpenspecCli`
+        // or `HerdrCli`, naming the program addressed."
+        let fake = super::FakeCli::new();
+        fake.register_git(&["worktree", "list"], Ok("git answer".to_string()));
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            super::OpenspecCli::run(&fake, &["worktree", "list"])
+        }));
+        let err = result
+            .expect_err("should have panicked rather than answering from the git registration");
+        let message = panic_message(err.as_ref());
+        assert!(message.contains("worktree"), "message: {message}");
+        assert!(
+            message.to_lowercase().contains("openspec"),
+            "message should name the OpenspecCli program: {message}"
+        );
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            super::HerdrCli::run(&fake, &["worktree", "list"])
+        }));
+        let err = result
+            .expect_err("should have panicked rather than answering from the git registration");
+        let message = panic_message(err.as_ref());
+        assert!(message.contains("worktree"), "message: {message}");
         assert!(
             message.to_lowercase().contains("herdr"),
             "message should name the HerdrCli program: {message}"
@@ -1465,6 +1504,98 @@ mod tests {
             }
             other => panic!("expected two Failed results, got {other:?}"),
         }
+    }
+
+    // --- worktree-changes group 6: git_cli_via — on agent_cli_via's exact terms ---
+
+    /// `subprocess-seam`: "The binding spawns the program it was given" — the nine-argument
+    /// vector `worktree-overlay`'s `worktree list` call uses, echoed back one argument per
+    /// line so the test can assert order and count without a real `git`.
+    #[test]
+    fn git_cli_via_spawns_the_program_it_was_given() {
+        let scratch = ScratchDir::new();
+        let prog = script(
+            &scratch,
+            "prog",
+            "for a in \"$@\"; do printf '%s\\n' \"$a\"; done\n",
+        );
+        let cli = super::git_cli_via(&prog);
+        let args = [
+            "--no-optional-locks",
+            "-c",
+            "core.fsmonitor=false",
+            "-C",
+            "/r",
+            "worktree",
+            "list",
+            "--porcelain",
+            "-z",
+        ];
+        assert_eq!(args.len(), 9);
+        let result = cli.run(&args);
+        assert_eq!(
+            result,
+            Ok(
+                "--no-optional-locks\n-c\ncore.fsmonitor=false\n-C\n/r\nworktree\nlist\n\
+                 --porcelain\n-z\n"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn git_cli_via_reports_a_nonzero_exit() {
+        let scratch = ScratchDir::new();
+        let prog = script(
+            &scratch,
+            "prog",
+            "printf 'fatal: not a git repository' >&2; exit 128\n",
+        );
+        let cli = super::git_cli_via(&prog);
+        let args = [
+            "--no-optional-locks",
+            "-c",
+            "core.fsmonitor=false",
+            "-C",
+            "/r",
+            "worktree",
+            "list",
+            "--porcelain",
+            "-z",
+        ];
+        let result = cli.run(&args);
+        match result {
+            Err(super::CliError::Failed {
+                code, stderr, args, ..
+            }) => {
+                assert_eq!(code, Some(128));
+                assert!(stderr.contains("fatal: not a git repository"), "{stderr}");
+                assert_eq!(args.len(), 9);
+            }
+            other => panic!("expected Failed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn git_cli_via_reports_a_missing_program() {
+        let scratch = ScratchDir::new();
+        let missing = scratch.path().join("does-not-exist");
+        assert!(!missing.exists());
+        let cli = super::git_cli_via(&missing);
+        let result = cli.run(&["worktree", "list"]);
+        match result {
+            Err(super::CliError::NotStarted { program, .. }) => {
+                assert_eq!(program, missing.display().to_string());
+            }
+            other => panic!("expected NotStarted, got {other:?}"),
+        }
+    }
+
+    /// `subprocess-seam`: "The default program name is written down once" — `GIT_PROGRAM`
+    /// itself; `WIRED`'s leg over `run` is a `make gates` concern, not this one.
+    #[test]
+    fn the_default_git_program_name_is_git() {
+        assert_eq!(super::GIT_PROGRAM, "git");
     }
 
     // --- seam-resilience group 2: a working directory, an environment overlay, and a
