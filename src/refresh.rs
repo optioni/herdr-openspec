@@ -2072,6 +2072,169 @@ apply:
         let _ = member_scratch;
     }
 
+    /// `worktree-overlay` -> "A member owns exactly the changes it touched since it
+    /// forked from the base": when the pane's own root sits inside a subdirectory of
+    /// its checkout's top level (a nonempty OpenSpec prefix, `sub`), every member
+    /// query SHALL run `-C` against the member's own canonical **top level** — never
+    /// its OpenSpec root, which the top level joined with `sub` — and the pathspec
+    /// SHALL be `sub/openspec/changes`. `diff-tree`/`status` report paths relative to
+    /// the repository top, not to `-C`'s directory, so a `diff-tree` answer naming
+    /// `sub/openspec/changes/x/tasks.md` overlays the member's own copy of `x` only
+    /// when both are right.
+    #[test]
+    fn a_member_query_runs_at_the_members_top_level_when_the_pane_has_a_nested_openspec_root() {
+        let base_scratch = crate::testutil::ScratchDir::new();
+        let base_top = crate::testutil::canonical(base_scratch.path());
+        let base_root = base_top.join("sub");
+        vendor_tdd_schema(&base_root);
+        crate::testutil::write_with_mode(
+            &base_root.join("openspec/changes/x/tasks.md"),
+            b"- [ ] a\n",
+            0o644,
+        );
+
+        let member_scratch = crate::testutil::ScratchDir::new();
+        let member_top = crate::testutil::canonical(member_scratch.path());
+        let member_root = member_top.join("sub");
+        vendor_tdd_schema(&member_root);
+        crate::testutil::write_with_mode(
+            &member_root.join("openspec/changes/x/tasks.md"),
+            b"- [x] a\n",
+            0o644,
+        );
+
+        let openspec_fake = Arc::new(crate::cli::FakeCli::new());
+        openspec_fake.register_openspec(
+            &["list", "--json"],
+            Ok(format!(
+                r#"{{"changes":[],"root":{{"path":{:?},"source":"nearest"}}}}"#,
+                base_root.display().to_string()
+            )),
+        );
+        let cli: Arc<dyn OpenspecCli> = openspec_fake;
+
+        let base_root_str = base_root.display().to_string();
+        let member_top_str = member_top.display().to_string();
+        let git_fake = Arc::new(crate::cli::FakeCli::new());
+        let list_args = git_args(&base_root_str, &["worktree", "list", "--porcelain", "-z"]);
+        git_fake.register_git(
+            &list_args,
+            Ok(format!(
+                "{}{}",
+                wt_record(&base_top, "aaaa", "main"),
+                wt_record(&member_top, "bbbb", "feat"),
+            )),
+        );
+        // Registered only at the member's own top level, never at its OpenSpec root
+        // (`member_top.join("sub")`) — a `derive_family` that still runs `-C` against
+        // the OpenSpec root finds no registered response and the fake panics inside
+        // the worker thread, which is this test's RED failure.
+        git_fake.register_git(
+            &git_args(&member_top_str, &["merge-base", "HEAD", "aaaa"]),
+            Ok("msha".to_string()),
+        );
+        git_fake.register_git(
+            &git_args(
+                &member_top_str,
+                &[
+                    "diff-tree",
+                    "-r",
+                    "--name-only",
+                    "-z",
+                    "--no-renames",
+                    "msha",
+                    "HEAD",
+                    "--",
+                    "sub/openspec/changes",
+                ],
+            ),
+            Ok("sub/openspec/changes/x/tasks.md\0".to_string()),
+        );
+        git_fake.register_git(
+            &git_args(
+                &member_top_str,
+                &[
+                    "status",
+                    "--porcelain=v1",
+                    "-z",
+                    "--no-renames",
+                    "--untracked-files=all",
+                    "--",
+                    "sub/openspec/changes",
+                ],
+            ),
+            Ok(String::new()),
+        );
+        let git: Arc<dyn GitCli> = git_fake.clone();
+
+        let (mut refresher, results_rx, _exit_rx) =
+            worker_for_test(base_root.clone(), cli, git, Duration::from_millis(5));
+        refresher.request(Selection::All, ArchivedScope::Names);
+        let _files = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("files");
+        let merged = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("merged");
+        match merged {
+            RefreshResult::Merged(set) => {
+                assert!(set.problems.is_empty(), "{:?}", set.problems);
+                let x = set.active.iter().find(|c| c.name == "x").unwrap();
+                assert_eq!(x.progress.completed, 1, "expected the member's own copy of x");
+                assert!(
+                    x.dir.starts_with(&member_root),
+                    "expected x's dir under the member's OpenSpec root {}, got {:?}",
+                    member_root.display(),
+                    x.dir
+                );
+            }
+            other => panic!("expected Merged, got {other:?}"),
+        }
+
+        let expected_calls: Vec<Vec<String>> = [
+            git_args(&member_top_str, &["merge-base", "HEAD", "aaaa"]),
+            git_args(
+                &member_top_str,
+                &[
+                    "diff-tree",
+                    "-r",
+                    "--name-only",
+                    "-z",
+                    "--no-renames",
+                    "msha",
+                    "HEAD",
+                    "--",
+                    "sub/openspec/changes",
+                ],
+            ),
+            git_args(
+                &member_top_str,
+                &[
+                    "status",
+                    "--porcelain=v1",
+                    "-z",
+                    "--no-renames",
+                    "--untracked-files=all",
+                    "--",
+                    "sub/openspec/changes",
+                ],
+            ),
+        ]
+        .into_iter()
+        .map(|args| args.into_iter().map(str::to_string).collect())
+        .collect();
+        let calls = git_fake.calls();
+        for expected in expected_calls {
+            assert!(
+                calls.contains(&(crate::cli::Program::Git, expected.clone())),
+                "expected a call {expected:?} at the member's top level {member_top_str}, got {calls:?}"
+            );
+        }
+
+        let _ = base_scratch;
+        let _ = member_scratch;
+    }
+
     /// `refresh-worker` -> "No re-check before the first cycle".
     #[test]
     fn no_re_check_before_the_first_cycle() {
