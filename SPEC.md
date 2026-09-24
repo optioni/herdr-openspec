@@ -94,6 +94,7 @@ binding, not its only one — `NOBLOCK` leg 2 covers it identically.
 | `agents` | Poll `herdr agent list`, parse its envelope into agent values, and attribute live Herdr agents to changes |
 | `launch` | Split a pane, resolve the agent kind once per session, start an agent, send the CLI-driven prompt |
 | `watch` | The recursive `notify` watch, the debounce, and classifying a touched path to a per-change `Selection` |
+| `worktrees` | The worktree family value type and the one derivation of which member a change's directory belongs to |
 | `refresh` | The worker thread and the non-blocking `Refresher` seam it answers through |
 | `open` | The `open` and `open-tab` subcommands that open or focus the dashboard pane through `herdr plugin pane`; the crate's third `HerdrCli` consumer |
 | `ui` | Views (the change-row grammar, the detail region's header/tab-bar/content grammar, markdown rendering, `ui::tasks`' checklist-and-progress-bar grammar for the tracked-tasks tab, and `ui::help`'s help band — its row grammar and, in `ui::help::INVENTORY`, the crate's one list of what every key and gesture does, which `?` renders and `tests/doc_contract.rs` binds back to the driver), the semantic-role colour palette (`ui::palette`, the one table from a role to a `Style` and the crate's only `ratatui::style::Color` — see Colour and style), layout, the dashboard's own state (selection, the `/` filter, the detail region's section list — one section per resolved file and, inside a spec-shaped or tracked task file, one per heading, a tracked task file's document title excepted, each carrying a `depth` — and its fold set, the detail cursor, the width of the content area last drawn — the one piece of geometry the dashboard stores, and only so a keypress taken between frames can resolve against what the last frame did, never as a source of what is drawn — the selected artifact tab, the live tier's refresh flag and standing problems, the help overlay's own layer state — open or not, and its scroll — and the injected artifact-read binding), key handling, terminal lifecycle, and the event loop |
@@ -1267,6 +1268,12 @@ is tested against scratch `#!/bin/sh` programs rather than the real `openspec`,
   instant, never the real clock; `watch::start` and `RealFsEvents` are the
   one filesystem edge, tested against a real `ScratchDir` and against a path
   that does not exist
+- `worktrees::member_of` — the worktree family's own value type and the one
+  function that decides which member a change's directory belongs to,
+  matching against `<root>/openspec/changes` rather than `<root>` alone so a
+  member whose root is an ancestor of the pane's own root does not falsely
+  claim the pane's own rows. Pure over `&[Worktree]` and `&Path` with no
+  filesystem edge at all
 - `refresh::start`, `refresh::none`, and the worker body — one of the
   crate's **three** worker threads, tested through a `#[cfg(test)]` constructor
   (`worker_for_test`) that hands the test the worker's own result and exit
