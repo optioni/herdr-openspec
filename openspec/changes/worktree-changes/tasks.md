@@ -105,17 +105,17 @@
 ## 5. The overlay
 <!-- kind: behavior -->
 
-- [ ] 5.1 RED: Write in `src/changes.rs`'s tests the six overlay scenarios, the two conflict
+- [x] 5.1 RED: Write in `src/changes.rs`'s tests the six overlay scenarios, the two conflict
       scenarios (the first named `two_owners_show_the_first_and_name_both`), and a
       `from_files_owned` test proving it opens nothing beneath an unowned change through the
       existing thread-local path recorder; and in `src/ui/view.rs` (60/120) the rendered half of
       *Two worktrees touching one proposal*.
-- [ ] 5.2 GREEN: Add `from_files_owned(root, &Touched, ArchivedScope)` over the private
+- [x] 5.2 GREEN: Add `from_files_owned(root, &Touched, ArchivedScope)` over the private
       `build_change`, "holds" as membership in the member's own archived enumeration, and
       `overlay(base, base_archive_dirs, members)`, per `worktree-overlay` and design.md → D4/D5.
-- [ ] 5.3 CHECK: Confirm the artifact cache, keyed on `(change directory, tab)`, re-reads when a
+- [x] 5.3 CHECK: Confirm the artifact cache, keyed on `(change directory, tab)`, re-reads when a
       row's copy moves between base and member — or name the existing test that proves it.
-- [ ] 5.4 Run `cargo test --lib changes::` and `cargo test --lib ui::view` — green, with
+- [x] 5.4 Run `cargo test --lib changes::` and `cargo test --lib ui::view` — green, with
       `assert_set_invariants` called on every set the new tests build; no refactor needed.
 
 ## 6. The git seam
