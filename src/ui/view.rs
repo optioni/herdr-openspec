@@ -9406,7 +9406,7 @@ mod tests {
         );
         let baseline = dashboard_with(vec![plain_change], Vec::new(), 1, Route::Detail);
 
-        for (width, height) in [(120u16, 20u16), (60, 20)] {
+        for (width, height) in [(120, 20), (60, 20)] {
             let with_buf = render_at(width, height, &with_worktree);
             let with_row = row_text(&with_buf, 0);
             assert!(with_row.contains("@feat"), "width {width}: {with_row:?}");
@@ -9436,7 +9436,7 @@ mod tests {
             Route::Detail,
             &[("/r", "main")],
         );
-        for (width, height) in [(120u16, 20u16), (60, 20)] {
+        for (width, height) in [(120, 20), (60, 20)] {
             let buf = render_at(width, height, &nested);
             let row = row_text(&buf, 0);
             assert!(!row.contains('@'), "width {width}: {row:?}");
