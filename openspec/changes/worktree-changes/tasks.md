@@ -121,13 +121,13 @@
 ## 6. The git seam
 <!-- kind: behavior -->
 
-- [ ] 6.1 RED: Write in `src/cli.rs`'s tests *The binding spawns the program it was given* (the
+- [x] 6.1 RED: Write in `src/cli.rs`'s tests *The binding spawns the program it was given* (the
       nine-argument vector), *The default program name is written down once*, the `GitCli` arm of
       *A trait object crosses a thread boundary*, and the `GitCli`-side arms of *An `openspec`
       call is not answered from a `herdr` registration*.
-- [ ] 6.2 GREEN: Add `GitCli`, `RealGitCli`, `GIT_PROGRAM`, and `git_cli_via` on `RealHerdrCli`'s
+- [x] 6.2 GREEN: Add `GitCli`, `RealGitCli`, `GIT_PROGRAM`, and `git_cli_via` on `RealHerdrCli`'s
       exact shape, and `Program::Git` with `impl GitCli for FakeCli`.
-- [ ] 6.3 Run `cargo test --lib cli::` — green (56 at HEAD, plus this group's); no refactor needed.
+- [x] 6.3 Run `cargo test --lib cli::` — green (56 at HEAD, plus this group's); no refactor needed.
 
 ## 7. The gates see the git seam
 <!-- kind: operational -->
