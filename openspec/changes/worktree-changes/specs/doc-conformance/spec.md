@@ -3,9 +3,11 @@
 ### Requirement: `src/worktrees.rs`' freedom from I/O is the seventeenth claim
 
 `tests/doc_contract.rs` SHALL carry a **seventeenth** claim: that the production slice of
-`src/worktrees.rs` names no filesystem, process, environment, network, or standard-I/O API, no
-clock, no `ratatui` type, and no CLI handle — none of `GitCli`, `OpenspecCli`, `HerdrCli`,
-`git_cli_via`, or `crate::cli`.
+`src/worktrees.rs` names none of these needles — the eleventh claim's I/O set (`std::fs`,
+`std::io`, `std::env`, `std::process`, `std::net`, `File::`, `read_to_string`, `Command`); the
+path methods that reach the filesystem without naming `std::fs` (`canonicalize`, `.exists(`,
+`.is_dir(`, `metadata(`, `read_dir`); the clocks (`Instant`, `SystemTime`); `ratatui`; and the
+CLI handles (`GitCli`, `OpenspecCli`, `HerdrCli`, `git_cli_via`, `crate::cli`).
 
 It is owed for exactly the reason the eleventh (`src/specs.rs`), the fourteenth
 (`src/integration.rs`), and the sixteenth (`src/settings.rs`) are owed. `src/worktrees.rs` is a
@@ -20,19 +22,22 @@ The check SHALL read the file's production slice — the text above its first li
 `#[cfg(test)]`, by the same helper the eleventh claim uses — and SHALL fail naming both the
 needle and the line when one occurs.
 
-Adding this claim moves the same **four** sites the sixteenth moved, and `cargo test --test
-doc_contract` stays red until all four agree: `CLAIM_COUNT` from 16 to 17; `CLAIM_COUNT_WORDS`
-extended with `("seventeen", 17)`; `AGENTS.md`'s "sixteen further claims" and its enumerated
-list; and a new bullet under `SPEC.md` → `### Doc-conformance checks`, inserted **above** the
-trailing meta-statement.
+Adding this claim moves the same **four** sites the sixteenth moved, **in one commit**, and
+`cargo test --test doc_contract` stays red until all four agree: `CLAIM_COUNT` from 16 to 17;
+`CLAIM_COUNT_WORDS` from a `[(&str, usize); 7]` to an 8-entry array ending
+`("seventeen", 17)`; `AGENTS.md`'s "sixteen further claims" and its enumerated list; and a new
+bullet under `SPEC.md` → `### Doc-conformance checks`, inserted **above** the trailing
+meta-statement. Its negative controls SHALL be in-file tests over string literals, as the
+sixteenth claim's `settings_rs_production_slice_check_*` tests are, so they run on every
+`cargo test` rather than once in a scratch copy.
 
 #### Scenario: A planted I/O name or CLI handle fails the claim
 
 - **WHEN** `use std::fs;` is added above `src/worktrees.rs`' first line-anchored `#[cfg(test)]`
 - **THEN** `cargo test --test doc_contract` fails, naming both the needle and the line
 - **AND** removing it makes the claim pass again
-- **AND** the same holds for a planted `std::fs::canonicalize`, a planted `Instant::now()`, and a
-  planted `use crate::cli::GitCli;`
+- **AND** the same holds for a planted `root.canonicalize()` — the spelling that names no
+  `std::fs` — a planted `Instant::now()`, and a planted `use crate::cli::GitCli;`
 
 #### Scenario: An I/O name in the test module alone does not fail the claim
 

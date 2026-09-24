@@ -7,9 +7,9 @@
 columns, pure and total on `header_row`'s own terms, with no `ratatui` type. `header_row` itself
 SHALL NOT change in signature or output.
 
-The **branch cell** is `@` followed by `branch` truncated to at most **16** display columns by
-`layout::truncate_columns`, a trailing `…` marking a cut, so the cell is at most 17 columns wide
-and `b` below names its actual width. `@` is the same glyph `change-rows` draws as a worktree
+The **branch cell** is `@` followed by `branch` cut to at most **16** display columns by
+`ui::list::truncate_right`'s rule — when it is longer, its first 15 columns and a trailing `…` —
+so the cell is at most 17 columns wide and `b` below names its actual width. `@` is the same glyph `change-rows` draws as a worktree
 row's marker, so the list and the header name one fact with one character.
 
 The result SHALL be:
@@ -28,9 +28,12 @@ The branch is therefore never cut short once drawn and never costs the name a co
 every other cell already fits. It takes no colour of its own: `ui::view` styles the whole row as
 it already does.
 
-`ui::view` SHALL call `branched_header_row` exactly when the selected change's `dir` lies under
-the root of an entry in `dashboard.changes.worktrees`, passing that entry's label, and
-`header_row` otherwise. The call site stays in `ui::view`, which already holds the `Dashboard`;
+`ui::view` SHALL call `branched_header_row` exactly when
+`worktrees::member_of(&dashboard.changes.worktrees, &change.dir)` is `Some`, passing that
+member's label, and `header_row` otherwise — the one derivation `worktree-overlay` defines, so
+the header and the list's `@` marker cannot disagree. Every other rule this capability states
+for the header row — where it is drawn, the bold-or-dim palette role it takes, and that none is
+drawn when the visible list is empty — applies to `branched_header_row`'s output unchanged. The call site stays in `ui::view`, which already holds the `Dashboard`;
 `ui::detail` reads no `ChangeSet`.
 
 #### Scenario: A worktree change's header at both mandated interior widths
@@ -72,3 +75,6 @@ the root of an entry in `dashboard.changes.worktrees`, passing that entry's labe
   and at 60x20, and then selects a change whose `dir` lies under the pane's own root
 - **THEN** the first two frames' detail heading rows contain `@feat`, and the second pair's
   contain no `@` at all and equal the frames the same dashboard drew before `worktree-changes`
+- **AND** with the repository root at `/r/.worktrees/feat`, `changes.worktrees` holding
+  `(/r, "main")`, and a selected change whose `dir` is `/r/.worktrees/feat/openspec/changes/x`,
+  the heading row contains no `@` at either width

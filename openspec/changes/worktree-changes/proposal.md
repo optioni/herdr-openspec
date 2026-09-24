@@ -18,17 +18,21 @@ limitation (row 30); the change half has never been written down at all.
 - For each member other than the pane's own root, it derives which change directories that
   member has **touched** since it forked: `git merge-base` against the pane's own `HEAD`, then
   `git diff-tree` from that base to the member's `HEAD`, plus `git status` for uncommitted and
-  untracked work — with rename detection off and optional locks off, so the pane never writes
-  `.git/index` and never contends for `index.lock` with an agent committing in that worktree.
+  untracked work — with rename detection, optional locks, and fsmonitor off, so the pane never
+  writes `.git/index` and never contends for `index.lock` with an agent committing in that
+  worktree. A worktree with unrelated history (an orphan `gh-pages`) simply owns nothing.
 - Those touched changes are **overlaid** onto the pane's own change set: a member's copy of an
   active change **replaces** the pane's copy of the same name, or is **added** when the pane has
   none; a change the member **archived** leaves the active list and appears in the archived list;
   a member's archived directory the pane's archive lacks is added. A change nobody touched shows
   the pane's own copy, so a stale or long-lived worktree resurrects nothing and hides nothing.
 - Two members touching the **same** change is reported as a problem row naming both; the first
-  member in `git worktree list` order wins.
+  member in `git worktree list` order — the main checkout, then by path — wins.
 - A change shown from a worktree carries a one-column **worktree marker** in its list row, and
-  the detail header names the worktree's **branch** (or its short `HEAD` when detached).
+  the detail header names the worktree's **branch** (or its short `HEAD` when detached). One pure
+  function, `worktrees::member_of`, decides which member's copy a row is by matching the change's
+  directory against each member's `openspec/changes`, so a pane opened inside a worktree nested
+  under the main checkout never mistakes its own rows for the main checkout's.
 - The refresh worker computes the overlay on every cycle and, while idle, **re-checks the
   family every two seconds**, sending a fresh set only when the overlay changed — so a worktree
   created after the pane opened, and an agent ticking tasks inside one, reach the pane without
@@ -91,9 +95,10 @@ grammar gains a cell only on worktree-sourced rows; every other row is byte-iden
   `start_collaborators`), `src/ui/list.rs`, `src/ui/detail.rs`, `src/ui/view.rs`, `src/lib.rs`.
 - Gates: `NOCLI-SHELL`'s pattern gains `GitCli`; the new module joins the module map and the
   tested-modules list and becomes the seventeenth doc-contract claim; no new gate script, no new
-  thread (the worker already exists), no new dependency. `git` becomes a program the test suite
-  runs — one real-repository test proves the no-write claim — so it joins `AGENTS.md` →
-  Environment.
+  thread (the worker already exists), no new dependency. `LAUNCHSEAM` gains a third invocation
+  confining the git handle, and `WIRED` gains the git binding. The suite already runs `git`
+  (`tests/gate_controls.rs`); two real-repository tests are added, and `git` is named in
+  `AGENTS.md` → Environment and `README.md` → Development.
 - `SPEC.md` (module map, degraded-states table, the worktree paragraph beside row 30),
   `AGENTS.md`, `README.md` if it describes what the pane shows, and
   `tests/degraded-coverage.toml` for every new degraded row.

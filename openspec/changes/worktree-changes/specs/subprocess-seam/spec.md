@@ -26,13 +26,19 @@ scratch program rather than the installed `git`. `ui::start_collaborators` SHALL
 handle only through `git_cli_via` and SHALL hand it to `refresh::start`; it SHALL never spell
 the trait's name.
 
-The `GitCli` handle SHALL be named in production code by exactly three files: `src/cli.rs`,
-which declares and constructs it; `src/refresh.rs`, whose worker body runs the four
-`worktree-overlay` commands; and `src/ui/mod.rs`, which composes it through `git_cli_via`.
-`src/worktrees.rs` SHALL name no CLI handle at all — it parses stdout it is given, on
-`src/integration.rs`'s terms. `NOCLI-SHELL`'s pattern SHALL gain `GitCli`, so no file under
-`src/ui/` names the trait, `src/ui/mod.rs` included; `git_cli_via` does not contain that token,
-which is what lets the composition root call it.
+The handle's three names — `GitCli`, `RealGitCli`, and `git_cli_via` — SHALL appear in the
+production code of exactly three files: `src/cli.rs`, which declares and constructs it;
+`src/refresh.rs`, whose worker body runs the four `worktree-overlay` commands; and
+`src/ui/mod.rs`, which composes it and names `git_cli_via` alone, never the trait.
+`src/worktrees.rs` SHALL name none of them — it parses stdout it is given, on
+`src/integration.rs`' terms. This is checked on `LAUNCHSEAM`'s terms: `launchseam.sh`'s handle
+pattern becomes an environment parameter defaulting to today's Herdr names, and a third
+`make gates` invocation runs it with `LAUNCH=src/refresh.rs`, the git names, and those three
+files as `ALLOWED`. `NOCLI-SHELL`'s pattern SHALL also gain `GitCli`, so no file under `src/ui/`
+names the trait. `WIRED` SHALL require `git_cli_via` in `start_collaborators` and
+`cli::GIT_PROGRAM` in `run`, on exactly its `agent_cli_via` and `HERDR_PROGRAM` terms, so a
+composition root that stopped wiring git — or spelled the program name itself — fails
+`make gates`.
 
 The seam SHALL gain no parsing: `git_cli_via` returns stdout verbatim through the existing
 `run_and_map`, and every parse of git's output lives in `src/worktrees.rs`.
@@ -40,20 +46,21 @@ The seam SHALL gain no parsing: `git_cli_via` returns stdout verbatim through th
 #### Scenario: The binding spawns the program it was given
 
 - **WHEN** `git_cli_via` is given a scratch `#!/bin/sh` program that prints its arguments one
-  per line and exits `0`, and `run(&["--no-optional-locks", "-C", "/r", "worktree", "list",
-  "--porcelain", "-z"])` is called on the result
-- **THEN** it returns `Ok` holding exactly those seven arguments in order, one per line, and
+  per line and exits `0`, and `run(&["--no-optional-locks", "-c", "core.fsmonitor=false",
+  "-C", "/r", "worktree", "list", "--porcelain", "-z"])` is called on the result
+- **THEN** it returns `Ok` holding exactly those nine arguments in order, one per line, and
   nothing else
 - **AND** the same call against a scratch program that exits `128` after writing `fatal: not a
   git repository` to stderr returns `Err(CliError::Failed { code: Some(128), .. })` carrying
-  that stderr and those seven arguments
+  that stderr and those nine arguments
 - **AND** the same call against a path that does not exist returns `Err(CliError::NotStarted)`
   naming that path, rather than panicking
 
 #### Scenario: The default program name is written down once
 
 - **WHEN** `cli::GIT_PROGRAM` is read
-- **THEN** it is `"git"`, and it is what `ui::run` passes as its `Startup::git`
+- **THEN** it is `"git"`, and it is what `ui::run` passes as its `Startup::git` — `WIRED`
+  requires `cli::GIT_PROGRAM` in `run`'s body and fails on a planted `"git"` literal there
 - **AND** no other production file in the crate holds that literal as a program name
 
 #### Scenario: The shell names no git trait
@@ -62,8 +69,14 @@ The seam SHALL gain no parsing: `git_cli_via` returns stdout verbatim through th
   includes `GitCli`
 - **THEN** there is no match, with `src/ui/mod.rs` calling `git_cli_via`
 - **AND** planting `use crate::cli::GitCli;` in `src/ui/list.rs` makes `NOCLI-SHELL` exit
-  non-zero, recorded as that gate's plant in `tests/gate-controls.toml` or asserted beside the
-  existing one
+  non-zero, recorded as a second plant for that gate in `tests/gate-controls.toml`
+
+#### Scenario: The git handle is confined to three files
+
+- **WHEN** `make gates` runs `LAUNCHSEAM`'s git invocation over the tree
+- **THEN** it passes, and planting `crate::cli::git_cli_via(p)` in `src/ui/list.rs` — which
+  `NOCLI-SHELL` does not see, since the call names no trait — makes it exit non-zero naming
+  that file, recorded as a plant in `tests/gate-controls.toml`
 
 ## MODIFIED Requirements
 
@@ -278,3 +291,23 @@ denominator.
   each is called once
 - **THEN** each returns its own response and each records exactly one call, proving the
   recording is per-value rather than process-global
+
+### Requirement: Running a program writes nothing
+
+Starting a program through any of the three traits, and probing the npm prefix, SHALL create no file
+and no directory of this crate's own making — not beside the program, not in the working
+directory, and not in a temporary location.
+
+#### Scenario: A run and a probe leave the scratch tree byte-identical
+
+- **WHEN** a scratch tree holding the scratch programs, a prefix directory with
+  `bin/openspec`, and an **empty** directory is snapshotted — every path, including every
+  directory, every file's bytes, and every entry's modification time — and a successful
+  run, a failing run, an unstartable run, and a full npm probe are then performed against
+  it
+- **THEN** a second snapshot equals the first exactly, with no entry added, removed, or
+  modified
+- **AND** a snapshot of the test process's **own working directory**, taken around the
+  same four operations, is likewise unchanged, so "not in the working directory" is
+  covered by evidence rather than left to the scratch tree's snapshot to imply
+

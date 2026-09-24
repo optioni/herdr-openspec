@@ -21,9 +21,11 @@ suppresses the other.
 `archived_total` is `list-sections`' addition and exists because `archived` is no longer
 always populated: `change-enumeration` resolves the archived tier only when the archived
 section is shown, and a collapsed section's header still has to say how many changes are
-behind it. It SHALL be the count the archive **enumeration** produced, before any change was
-built, so it is the same number under either scope. Two invariants therefore hold on every
-`ChangeSet` either producer returns, and a **new** `#[cfg(test)]` function
+behind it. On a set `changes::from_files` returns it SHALL be the count the archive
+**enumeration** produced, before any change was built, so it is the same number under either
+scope; on a set `changes::overlay` returns it additionally counts the archived directories
+worktree members added, per `worktree-overlay`, under either scope alike. Two invariants
+therefore hold on every `ChangeSet` either producer or the overlay returns, and a **new** `#[cfg(test)]` function
 `conformance::assert_set_invariants(set: &ChangeSet)` SHALL check both: `archived.len()` is
 either `0` or exactly `archived_total`, and `archived_total` is never less than
 `archived.len()`.
@@ -44,14 +46,15 @@ them; `worktree-overlay` owns how the list is derived. It SHALL be empty on ever
 `changes::from_files` returns, on `changes::empty_set()`, and whenever no family was read —
 no `git`, no repository, file mode — and `changes::merge` SHALL carry the file result's
 `worktrees` through untouched, on exactly `archived_total`'s terms. It is how a view learns that
-a change came from a worktree: a `Change` whose `dir` lies under an entry's root is that
-member's copy. That is **derived**, never stored on `Change` — the "no producer discriminant"
+a change came from a worktree: `worktrees::member_of(&set.worktrees, &change.dir)`, the one
+derivation `worktree-overlay` defines, matching `dir` against each member's
+`<root>/openspec/changes`. That is **derived**, never stored on `Change` — the "no producer discriminant"
 rule above holds, because a `dir` is a location, not a statement of which producer built the
 value. `conformance::assert_set_invariants` SHALL bind `worktrees` in its exhaustive
 destructure and assert a third invariant: no two entries share a root.
 
 `archived_total` and `worktrees` are **not** fields of `Change` and do not weaken the seven-field rule
-above: it is a property of the set, like `problems`, and `ChangeSet` derives no `Default`
+above: each is a property of the set, like `problems`, and `ChangeSet` derives no `Default`
 either, so adding it is a compile error at every construction site rather than a silent `0`
 at one of them.
 

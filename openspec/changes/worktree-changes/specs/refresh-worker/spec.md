@@ -8,9 +8,13 @@ declared beside the module's other items and never written as a bare literal at 
 When the wait times out and at least one cycle has completed, the worker SHALL re-derive the
 family and every member's ownership through `GitCli`, re-read every owned change from its
 member's files, overlay the result onto the **remembered** un-overlaid merged set under the
-remembered `ArchivedScope`, and — only when that set differs from the set it last sent — send
-it as `RefreshResult::Files`. An unchanged overlay SHALL send nothing, so an idle pane beside an
-idle worktree receives no result and adopts nothing.
+remembered `ArchivedScope` and the remembered base archive directory names, and — only when
+that set differs from the set it last sent — send it as `RefreshResult::Files`. An unchanged
+overlay SHALL send nothing, so an idle pane beside an idle worktree receives no result and
+adopts nothing. Whether or not it sends, a re-check SHALL **replace** the remembered family and
+ownership with what it derived, and a sent set SHALL replace the remembered last-sent set, so the
+next request's fast answer overlays with what the pane last saw and a row the re-check brought in
+never drops out of it.
 
 The re-check SHALL NOT run the `openspec` CLI and SHALL NOT re-read the base's own changes: the
 base is watched, and its changes arrive through the ordinary request path. It exists because
@@ -33,27 +37,48 @@ overlay onto.
 - **THEN** `results_rx.recv_timeout(Duration::from_secs(10))` yields an unsolicited
   `RefreshResult::Files` holding `beta` and listing the member, with no further `request` made
 - **AND** the fake `OpenspecCli` recorded no call after the first cycle's
+- **AND** the base's own `alpha`, which its files count at 4 of 9 and the CLI corrected to 7 of 9
+  in the first cycle, is still at 7 of 9 in that unsolicited result, so the re-check overlaid the
+  remembered merged base rather than re-reading the base's files
 
 #### Scenario: An unchanged overlay sends nothing
 
-- **WHEN** the same worker's fake `GitCli` keeps answering identically for twenty re-check
-  intervals after the first cycle
-- **THEN** the result channel holds nothing beyond the first cycle's `Files` and `Merged`, and a
+- **WHEN** a worker whose family holds two members that both own active `x` — so the overlaid set
+  carries `x` from the first and a conflict problem — has answered one request, and its fake
+  `GitCli` keeps answering identically for twenty re-check intervals
+- **THEN** the result channel holds nothing beyond that cycle's `Files` and `Merged`, and a
   `recv_timeout` of twenty intervals returns `Err(RecvTimeoutError::Timeout)`
-- **AND** the fake `GitCli` recorded at least one further `worktree list`, so the absence of a
-  result is the comparison and not a re-check that never ran
+- **AND** the fake `GitCli` recorded at least **two** further `worktree list` calls — the worker
+  is sequential, so the second proves the first re-check reached its comparison — and no
+  unsolicited result was sent, so the comparison is against the remembered base and not against
+  an accumulating set
 
 #### Scenario: A ticked task inside a worktree reaches the pane
 
-- **WHEN** after the first cycle a scratch member's owned `tasks.md` changes from 5 of 9 to 6 of 9
-  on disk, with the fake `GitCli`'s answers unchanged
-- **THEN** the next unsolicited `Files` result shows that change at 6 of 9, and its `dir` is the
-  member's
+- **WHEN** after the first cycle a scratch member's owned `tasks.md` is replaced — written to a
+  sibling file and renamed over it, so no read sees it half-written — changing it from 5 of 9 to
+  6 of 9, with the fake `GitCli`'s answers unchanged
+- **THEN** within a 10 s `recv_timeout` deadline an unsolicited `Files` result shows that change at
+  6 of 9, and its `dir` is the member's
 
 #### Scenario: No re-check before the first cycle
 
-- **WHEN** a worker is constructed with a 5 ms `recheck` and given no request for 50 ms
-- **THEN** its fake `GitCli` has recorded no call and its result channel is empty
+- **WHEN** a worker is constructed with a 5 ms `recheck` and given no request
+- **THEN** `results_rx.recv_timeout(Duration::from_millis(50))` returns
+  `Err(RecvTimeoutError::Timeout)` and its fake `GitCli` has recorded no call
+
+#### Scenario: A re-check's discovery survives the next request's fast answer
+
+- **WHEN** a worker has sent the unsolicited `Files` of *A worktree created after the last cycle
+  appears without a request*, holding `beta`, and a request then arrives
+- **THEN** that request's `Files` result already holds `beta`, and so does its `Merged`
+
+#### Scenario: A worker that has cycled still returns when its refresher is dropped
+
+- **WHEN** a worker constructed through `worker_for_test` with a 5 ms `recheck` has answered one
+  request, and its `Refresher` is then dropped
+- **THEN** its exit channel reports `Err(RecvTimeoutError::Disconnected)` within 10 s, so a
+  disconnect during the timed wait ends the worker rather than being read as a timeout
 
 #### Scenario: The render path gains no clock and no wait
 
@@ -216,9 +241,9 @@ remains the crate's only spawn site, checked tree-wide by `NOSPAWN-GREP`.
 
 For each request the worker SHALL, in this order:
 
-1. run `changes::from_files(repo, request.archived)`, overlay it with the worktree family and
-   ownership the **previous** cycle derived — reading each member's owned changes afresh from
-   its files — and send `RefreshResult::Files(overlaid)`; on the worker's first cycle there is
+1. run `changes::from_files(repo, request.archived)`, overlay it with the **remembered** worktree family
+   and ownership — whatever the previous cycle or idle re-check last derived — reading each
+   member's owned changes afresh from its files, and send `RefreshResult::Files(overlaid)`; on the worker's first cycle there is
    no previous family, and the file result is sent un-overlaid;
 2. derive the family and every member's ownership afresh through `GitCli`, per
    `worktree-overlay`; run `changes::from_cli_cached(cli, repo, &request.selection, &mut cache)`
@@ -228,8 +253,8 @@ For each request the worker SHALL, in this order:
    only and a worktree copy is never corrected by it.
 
 The worker SHALL remember step 2's un-overlaid merged set, the request's `ArchivedScope`, the
-family it derived, and the set it sent, for `worktree-overlay`'s idle re-check and for the next
-cycle's step 1.
+base archive's directory names step 1's enumeration read, the family and ownership it derived,
+and the set it sent, for `worktree-overlay`'s idle re-check and for the next cycle's step 1.
 
 Sending the file result **before** the CLI call is what makes the dual-source model
 mechanical rather than described: the cheap, always-available answer is on the channel within
@@ -274,7 +299,7 @@ when its body returns. Dropping the returned `Refresher` drops the request `Send
 which is what makes the disconnection observable on the third element.
 
 `worker_for_test` SHALL be declared **after** `start` — below the file's single
-`thread::spawn` and above `mod tests` — because `READONLY-UI` and `NOBLOCK` build a file's
+`thread::spawn`, inside `mod tests`, which is where it lives — because `READONLY-UI` and `NOBLOCK` build a file's
 production slice by discarding everything from its **first** line-anchored `#[cfg(test)]` to
 EOF. A `#[cfg(test)]` item placed above `start` would hide the worker's whole body from both
 sweeps: measured, a `std::fs::write` in the worker's start path is then reported **green** by
