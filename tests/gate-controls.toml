@@ -408,6 +408,24 @@ expect = "LAUNCHSEAM FAIL (leg 3)"
 why = "worktree-changes: HANDLE_RE is now an environment parameter, and the git-specific value (GitCli|RealGitCli|git_cli_via) must catch the git handle named outside the allowed files on exactly the terms the default Herdr pattern already does - LAUNCH and ALLOWED are left at their defaults here because env_overrides splits this field on whitespace and cannot carry the real recipe's space-separated ALLOWED list (src/cli.rs src/refresh.rs src/ui/mod.rs); src/ui/list.rs is outside every ALLOWED set this gate has ever used, so the plant fails leg 3 regardless"
 
 [[control]]
+id = "wired-git-literal"
+script = "wired.sh"
+plant_file = "src/ui/mod.rs"
+plant_find = "git: Path::new(crate::cli::GIT_PROGRAM),"
+plant_replace = 'git: Path::new("git"),'
+expect = "WIRED FAIL"
+why = "worktree-changes: leg 7 - `run` must supply Startup.git from cli::GIT_PROGRAM; a hardcoded \"git\" literal there must fail, so the program name stays defined once in src/cli.rs"
+
+[[control]]
+id = "wired-git-cli-via-dropped"
+script = "wired.sh"
+plant_file = "src/ui/mod.rs"
+plant_find = "let _git_cli = crate::cli::git_cli_via(git);"
+plant_replace = "let _git_cli = git;"
+expect = "WIRED FAIL"
+why = "worktree-changes: leg 1 now names git_cli_via beside agent_cli_via; start_collaborators that stops building the git handle through the seam must fail"
+
+[[control]]
 id = "nodefault-ui-dashboard"
 script = "nodefault-ui.sh"
 env = "SCAN_MIN=135"
