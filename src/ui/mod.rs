@@ -210,12 +210,12 @@ pub fn start_collaborators(
     state_dir: Option<&Path>,
     env: &dyn Fn(&str) -> Option<String>,
     npm_hook: &dyn Fn() -> Option<std::path::PathBuf>,
-    // `worktree-changes` group 0/7: built into a git CLI handle below (`WIRED`'s leg 1 needs
-    // `git_cli_via` named here), but not yet passed anywhere — `refresh::start` does not take
-    // one until group 8 wires it in (design.md -> Decision 14).
+    // `worktree-changes` group 8: built into a git CLI handle and passed into
+    // `refresh::start`, never optional (design.md -> Decision 14) — an absent `git`
+    // binary is a degraded state the worker itself absorbs.
     git: &Path,
 ) -> Collaborators {
-    let _git_cli = crate::cli::git_cli_via(git);
+    let git_cli = crate::cli::git_cli_via(git);
     let mut problems = config.problems.clone();
 
     let resolution = crate::resolve::openspec_bin(config.openspec_bin.as_deref(), env, npm_hook);
@@ -251,7 +251,7 @@ pub fn start_collaborators(
     // `list-sections` group 2 note: `refresh::start` no longer takes
     // `archived_count` — the archived scope is now a property of each
     // request (`refresh::Request`), not of the worker itself.
-    let refresher = crate::refresh::start(repo, cli);
+    let refresher = crate::refresh::start(repo, cli, git_cli);
     let agents = crate::agents::start(crate::cli::agent_cli_via(herdr));
     // `agent-launch`: the launcher, on the watcher's and the worker's terms rather than the
     // poller's — every launch argument vector carries the repository root as `--cwd`, and a

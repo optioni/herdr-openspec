@@ -4,12 +4,13 @@
 //! `Arc<dyn crate::cli::OpenspecCli>` — it spawns no process, and
 //! `src/cli.rs` stays the crate's one spawn site.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc;
+use std::time::Duration;
 
 use crate::changes::{ArchivedScope, ChangeSet, Selection};
-use crate::cli::OpenspecCli;
+use crate::cli::{CliError, GitCli, OpenspecCli};
 
 /// One refresh cycle's two inputs, folded together: `list-sections`'
 /// addition, replacing the bare `Selection` the channel used to carry. The
@@ -45,6 +46,14 @@ pub enum RefreshResult {
 
 /// The reason a latched dead worker's one `Stopped` result carries.
 const WORKER_STOPPED_REASON: &str = "the refresh worker has stopped answering";
+
+/// `worktree-overlay`'s idle re-check cadence (design.md -> Decision 6): how long the
+/// worker waits with no request arriving before it re-derives the worktree family and
+/// re-reads every owned change from its member's files. Never written as a bare literal
+/// at the worker's own timed-wait call site; a test drives `worker_for_test`'s own
+/// `recheck` parameter with a few milliseconds instead, so no scenario waits two
+/// seconds.
+const WORKTREE_RECHECK: Duration = Duration::from_secs(2);
 
 /// The non-blocking seam between the render path and the worker thread.
 /// Neither method may block, sleep, join a thread, or wait on a channel. See
@@ -184,9 +193,13 @@ impl Refresher for RealRefresher {
 /// Start the worker: the inert `Refresher` when either `repo` or `cli` is
 /// `None` — the no-binary and no-repository cases cost nothing, no thread
 /// and no process — otherwise one `thread::spawn` running [`worker_body`].
+/// `git` is never optional (`worktree-overlay` design.md -> Decision 14): an
+/// absent `git` binary is a degraded state the worker itself absorbs, not a
+/// second way to say "no worker".
 pub fn start(
     repo: Option<&std::path::Path>,
     cli: Option<Arc<dyn OpenspecCli>>,
+    git: Arc<dyn GitCli>,
 ) -> Box<dyn Refresher> {
     let (Some(repo), Some(cli)) = (repo, cli) else {
         return none();
@@ -194,7 +207,9 @@ pub fn start(
     let repo = repo.to_path_buf();
     let (request_tx, request_rx) = mpsc::channel();
     let (result_tx, result_rx) = mpsc::channel();
-    std::thread::spawn(move || worker_body(repo, cli, request_rx, result_tx));
+    std::thread::spawn(move || {
+        worker_body(repo, cli, git, WORKTREE_RECHECK, request_rx, result_tx)
+    });
     Box::new(RealRefresher {
         request_tx,
         result_rx,
@@ -235,34 +250,356 @@ fn drain_and_fold(first: Request, rx: &mpsc::Receiver<Request>) -> Request {
     acc
 }
 
-/// The worker's whole body: fold any queued requests into one, send the
-/// file-sourced result under the folded request's `archived` scope, then
-/// the CLI-merged one, and repeat until either channel disconnects. Owns
-/// one `CliCache` for its whole lifetime.
+/// One cycle's worktree derivation: the family in `git worktree list`'s own order
+/// (never the base), each member's `Touched` set — parallel and index-aligned with
+/// `members` — and every problem the derivation itself produced (a `git` too old to
+/// accept `worktree list -z`, or one member's failing query). Shared, unchanged, by an
+/// ordinary cycle's step 2 and by the idle re-check (design.md -> Decision 6 and task
+/// 8.5's REFACTOR): the two can never derive a family by two different rules because
+/// both call exactly [`derive_family`].
+#[derive(Debug, Clone, Default)]
+struct FamilyDerivation {
+    members: Vec<crate::worktrees::Worktree>,
+    touched: Vec<crate::worktrees::Touched>,
+    problems: Vec<String>,
+}
+
+/// The one problem `derive_family` records when `git worktree list --porcelain -z`
+/// itself fails with exit `129` — a `git` too old to accept `-z`, and per design.md ->
+/// D16 the one absence of a family the reader can fix by upgrading.
+const TOO_OLD_GIT_PROBLEM: &str = "git worktree list --porcelain -z failed: git is too old to accept -z, so worktree \
+     changes are not shown";
+
+/// Run `git` through `GitCli`, with `--no-optional-locks -c core.fsmonitor=false -C
+/// <dir>` ahead of `rest` on every call — `worktree-overlay`'s one shared invocation
+/// shape (its own "Reading the family writes nothing" requirement), so every git call
+/// this module makes begins with the same five elements before its own command name.
+fn git_call(git: &dyn GitCli, dir: &Path, rest: &[&str]) -> Result<String, CliError> {
+    let dir_str = dir.to_string_lossy().into_owned();
+    let mut args: Vec<&str> = vec![
+        "--no-optional-locks",
+        "-c",
+        "core.fsmonitor=false",
+        "-C",
+        &dir_str,
+    ];
+    args.extend_from_slice(rest);
+    git.run(&args)
+}
+
+/// The index of the record whose canonical top level is the longest one that is equal
+/// to, or an ancestor of, `pane_root` — `worktrees::family`'s own base-selection rule,
+/// duplicated here because that pure module does not hand back which record it chose
+/// as the base, and this is the one extra fact the worker needs from it: the base's own
+/// `HEAD`, which every member's `merge-base` is compared against. `None` when no record
+/// contains `pane_root` at all — an ordinary repository without git, or a listing that
+/// never named it.
+fn base_record_index(canonical: &[Option<PathBuf>], pane_root: &Path) -> Option<usize> {
+    canonical
+        .iter()
+        .enumerate()
+        .filter_map(|(index, top)| top.as_ref().map(|path| (index, path)))
+        .filter(|(_, top)| pane_root.starts_with(top.as_path()))
+        .max_by_key(|(_, top)| top.as_os_str().len())
+        .map(|(index, _)| index)
+}
+
+/// The one problem shape for a member whose `merge-base` (other than the
+/// unrelated-history exit), `diff-tree`, or `status` call failed: names the member's
+/// top level and the failing command's reason.
+fn member_query_failed(top: &Path, command: &str, err: &CliError) -> String {
+    let reason = match err {
+        CliError::NotStarted { reason, .. } => reason.clone(),
+        CliError::Failed { code, stderr, .. } => {
+            let code = code
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            match stderr.lines().find(|line| !line.trim().is_empty()) {
+                Some(line) => format!("exited with code {code}: {line}"),
+                None => format!("exited with code {code}"),
+            }
+        }
+        CliError::TimedOut { after, .. } => format!("timed out after {after:?}"),
+    };
+    format!("worktree {}: git {command} failed: {reason}", top.display())
+}
+
+/// The full family derivation: `git worktree list`, then, per member, `merge-base`,
+/// `diff-tree`, and `status`, in that order — `worktree-overlay`'s exactly four
+/// commands — degrading per its own "Without git, or without a family, the pane is
+/// exactly what it was" requirement. Shared by an ordinary cycle's step 2 and by the
+/// idle re-check.
+fn derive_family(repo: &Path, git: &dyn GitCli) -> FamilyDerivation {
+    let stdout = match git_call(git, repo, &["worktree", "list", "--porcelain", "-z"]) {
+        Ok(stdout) => stdout,
+        Err(CliError::Failed {
+            code: Some(129), ..
+        }) => {
+            return FamilyDerivation {
+                members: Vec::new(),
+                touched: Vec::new(),
+                problems: vec![TOO_OLD_GIT_PROBLEM.to_string()],
+            };
+        }
+        // No git binary, not a git repository, a timeout, or any other failure: an
+        // ordinary repository without git, or without worktrees, silently.
+        Err(_) => return FamilyDerivation::default(),
+    };
+
+    let records = crate::worktrees::parse_list(&stdout);
+    let canonical: Vec<Option<PathBuf>> = records
+        .iter()
+        .map(|record| std::fs::canonicalize(&record.path).ok())
+        .collect();
+
+    let Some(base_index) = base_record_index(&canonical, repo) else {
+        // No record contains the pane's own root at all.
+        return FamilyDerivation::default();
+    };
+    let Some(base_head) = records[base_index].head.clone() else {
+        return FamilyDerivation::default();
+    };
+
+    let members = crate::worktrees::family(&records, &canonical, repo);
+    let mut touched = Vec::with_capacity(members.len());
+    let mut problems = Vec::new();
+
+    for member in &members {
+        match git_call(git, &member.root, &["merge-base", "HEAD", &base_head]) {
+            Ok(out) => {
+                let merge_base = out.trim();
+                if merge_base.is_empty() {
+                    touched.push(crate::worktrees::Touched::default());
+                    continue;
+                }
+                let diff_out = match git_call(
+                    git,
+                    &member.root,
+                    &[
+                        "diff-tree",
+                        "-r",
+                        "--name-only",
+                        "-z",
+                        "--no-renames",
+                        merge_base,
+                        "HEAD",
+                        "--",
+                        "openspec/changes",
+                    ],
+                ) {
+                    Ok(out) => out,
+                    Err(err) => {
+                        problems.push(member_query_failed(&member.root, "diff-tree", &err));
+                        touched.push(crate::worktrees::Touched::default());
+                        continue;
+                    }
+                };
+                let status_out = match git_call(
+                    git,
+                    &member.root,
+                    &[
+                        "status",
+                        "--porcelain=v1",
+                        "-z",
+                        "--no-renames",
+                        "--untracked-files=all",
+                        "--",
+                        "openspec/changes",
+                    ],
+                ) {
+                    Ok(out) => out,
+                    Err(err) => {
+                        problems.push(member_query_failed(&member.root, "status", &err));
+                        touched.push(crate::worktrees::Touched::default());
+                        continue;
+                    }
+                };
+                touched.push(crate::worktrees::touched(
+                    &diff_out,
+                    &status_out,
+                    "openspec/changes",
+                ));
+            }
+            // Unrelated history — an orphan-branch worktree is a normal thing to have,
+            // per `worktree-overlay` — is silent, and the other two commands do not
+            // run for this member.
+            Err(CliError::Failed { code: Some(1), .. }) => {
+                touched.push(crate::worktrees::Touched::default());
+            }
+            Err(err) => {
+                problems.push(member_query_failed(&member.root, "merge-base", &err));
+                touched.push(crate::worktrees::Touched::default());
+            }
+        }
+    }
+
+    FamilyDerivation {
+        members,
+        touched,
+        problems,
+    }
+}
+
+/// The base's own archive directory names, read the same way `changes::from_files`'s
+/// own enumeration does — `worktree-overlay`'s "the base archive directory names step
+/// 1's enumeration read" — so `overlay` never re-adds a directory the base already
+/// holds.
+fn base_archive_dir_names(repo: &Path) -> Vec<String> {
+    crate::changes::archived_entries(repo, false)
+        .0
+        .into_iter()
+        .filter_map(|entry| {
+            entry
+                .dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_string)
+        })
+        .collect()
+}
+
+/// Everything the worker remembers between cycles: for `worktree-overlay`'s idle
+/// re-check, which has no request of its own, and for the next cycle's fast,
+/// file-sourced answer, which overlays with whatever family the previous cycle or
+/// re-check last derived rather than deriving one of its own.
+struct Remembered {
+    /// Step 2's un-overlaid `merge(files, cli_changes)` — what the idle re-check
+    /// overlays onto, never `files` alone, so a re-check's answer still carries the
+    /// CLI's own corrections.
+    merged: ChangeSet,
+    /// The request's own `ArchivedScope`, since the idle re-check has none of its own
+    /// to read.
+    archived: ArchivedScope,
+    base_archive_dirs: Vec<String>,
+    family: FamilyDerivation,
+    /// The last set actually sent — whichever of `Files`/`Merged` was sent last — so
+    /// the idle re-check's "unchanged" comparison is against what the pane last saw,
+    /// not against an accumulating value.
+    last_sent: ChangeSet,
+}
+
+/// The worker's whole body: fold any queued requests into one, send the file-sourced
+/// result under the folded request's `archived` scope, then the CLI-merged one, and
+/// repeat until either channel disconnects — waiting for the next request with a plain
+/// `recv` until the first cycle completes, and with `recv_timeout(recheck)` afterwards
+/// so an idle interval re-derives the worktree family and re-reads every owned change
+/// from its member's files (`worktree-overlay`'s idle re-check). Owns one `CliCache`
+/// for its whole lifetime.
 fn worker_body(
     repo: PathBuf,
     cli: Arc<dyn OpenspecCli>,
+    git: Arc<dyn GitCli>,
+    recheck: Duration,
     request_rx: mpsc::Receiver<Request>,
     result_tx: mpsc::Sender<RefreshResult>,
 ) {
     let mut cache = crate::changes::CliCache::default();
-    loop {
-        let Ok(first) = request_rx.recv() else {
-            return; // the Refresher was dropped
-        };
-        let request = drain_and_fold(first, &request_rx);
+    let mut remembered: Option<Remembered> = None;
 
+    loop {
+        let has_cycled = remembered.is_some();
+        let request = if !has_cycled {
+            match request_rx.recv() {
+                Ok(first) => drain_and_fold(first, &request_rx),
+                Err(_) => return, // the Refresher was dropped
+            }
+        } else {
+            match request_rx.recv_timeout(recheck) {
+                Ok(first) => drain_and_fold(first, &request_rx),
+                Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    let rem = remembered
+                        .as_mut()
+                        .expect("has_cycled implies remembered is Some");
+                    let derivation = derive_family(&repo, git.as_ref());
+                    // `crate::changes::overlay_family` composes `from_files_owned` and
+                    // `overlay` and hands back the freshly built `ChangeSet` — kept in
+                    // `src/changes.rs`, on `NOLIT-CHANGE`'s own terms, rather than
+                    // wrapped in a function here that would return one by value itself.
+                    let mut overlaid = crate::changes::overlay_family(
+                        rem.merged.clone(),
+                        &rem.base_archive_dirs,
+                        &derivation.members,
+                        &derivation.touched,
+                        rem.archived,
+                    );
+                    overlaid
+                        .problems
+                        .extend(derivation.problems.iter().cloned());
+                    if overlaid != rem.last_sent {
+                        if result_tx
+                            .send(RefreshResult::Files(overlaid.clone()))
+                            .is_err()
+                        {
+                            return;
+                        }
+                        rem.last_sent = overlaid;
+                    }
+                    rem.family = derivation;
+                    continue;
+                }
+            }
+        };
+
+        // Step 1: the fast, file-sourced answer, overlaid with whatever family the
+        // previous cycle or an idle re-check last derived; on the worker's first
+        // cycle there is no previous family, and the file result is sent un-overlaid.
         let files = crate::changes::from_files(&repo, request.archived);
-        if result_tx.send(RefreshResult::Files(files.clone())).is_err() {
+        let base_archive_dirs = base_archive_dir_names(&repo);
+        let files_overlaid = match &remembered {
+            Some(rem) => {
+                let mut overlaid = crate::changes::overlay_family(
+                    files.clone(),
+                    &base_archive_dirs,
+                    &rem.family.members,
+                    &rem.family.touched,
+                    request.archived,
+                );
+                overlaid
+                    .problems
+                    .extend(rem.family.problems.iter().cloned());
+                overlaid
+            }
+            None => files.clone(),
+        };
+        if result_tx
+            .send(RefreshResult::Files(files_overlaid))
+            .is_err()
+        {
             return; // nobody reads the result any more
         }
 
+        // Step 2: derive the family afresh through `GitCli`, ask the CLI, and send the
+        // authoritative, merged answer — `files` here is step 1's own un-overlaid set,
+        // so the CLI is layered over the pane's own changes only.
+        let derivation = derive_family(&repo, git.as_ref());
         let cli_changes =
             crate::changes::from_cli_cached(cli.as_ref(), &repo, &request.selection, &mut cache);
         let merged = crate::changes::merge(files, cli_changes);
-        if result_tx.send(RefreshResult::Merged(merged)).is_err() {
+        let mut merged_overlaid = crate::changes::overlay_family(
+            merged.clone(),
+            &base_archive_dirs,
+            &derivation.members,
+            &derivation.touched,
+            request.archived,
+        );
+        merged_overlaid
+            .problems
+            .extend(derivation.problems.iter().cloned());
+        if result_tx
+            .send(RefreshResult::Merged(merged_overlaid.clone()))
+            .is_err()
+        {
             return;
         }
+
+        remembered = Some(Remembered {
+            merged,
+            archived: request.archived,
+            base_archive_dirs,
+            family: derivation,
+            last_sent: merged_overlaid,
+        });
     }
 }
 
@@ -329,6 +666,8 @@ apply:
     pub(crate) fn worker_for_test(
         repo: PathBuf,
         cli: Arc<dyn OpenspecCli>,
+        git: Arc<dyn GitCli>,
+        recheck: Duration,
     ) -> (
         Box<dyn Refresher>,
         mpsc::Receiver<RefreshResult>,
@@ -343,9 +682,45 @@ apply:
         let (exit_tx, exit_rx) = mpsc::channel::<()>();
         std::thread::spawn(move || {
             let _exit_tx = exit_tx;
-            worker_body(repo, cli, request_rx, result_tx);
+            worker_body(repo, cli, git, recheck, request_rx, result_tx);
         });
         (Box::new(TestRefresher { request_tx }), result_rx, exit_rx)
+    }
+
+    /// The common five-element prefix every git call this crate makes begins with,
+    /// followed by `rest` — the same shape `git_call` builds in production, restated
+    /// here so a test can register a `FakeCli` response with the exact argument vector
+    /// the worker will send.
+    fn git_args<'a>(dir: &'a str, rest: &[&'a str]) -> Vec<&'a str> {
+        let mut args: Vec<&str> = vec![
+            "--no-optional-locks",
+            "-c",
+            "core.fsmonitor=false",
+            "-C",
+            dir,
+        ];
+        args.extend_from_slice(rest);
+        args
+    }
+
+    /// A `git worktree list --porcelain -z` record for one member: `worktree <path>`,
+    /// `HEAD <head>`, and `branch refs/heads/<label>` — matching `worktrees::Record`'s
+    /// own shape for every scenario in this module, none of which needs a detached or
+    /// bare record.
+    fn wt_record(path: &std::path::Path, head: &str, branch: &str) -> String {
+        format!(
+            "worktree {}\0HEAD {head}\0branch refs/heads/{branch}\0\0",
+            path.display()
+        )
+    }
+
+    /// A scratch OpenSpec root — repository or worktree member alike — vendored with
+    /// the `tdd` schema, ready for `from_files`/`from_files_owned` to read.
+    fn scratch_root() -> (crate::testutil::ScratchDir, PathBuf) {
+        let scratch = crate::testutil::ScratchDir::new();
+        let root = crate::testutil::canonical(scratch.path());
+        vendor_tdd_schema(&root);
+        (scratch, root)
     }
 
     #[test]
@@ -560,17 +935,51 @@ apply:
     #[test]
     fn start_without_a_binary_is_inert() {
         let scratch = crate::testutil::ScratchDir::new();
-        let mut r = start(Some(scratch.path()), None);
+        let git = Arc::new(crate::cli::FakeCli::new());
+        let mut r = start(Some(scratch.path()), None, git.clone());
         r.request(Selection::All, ArchivedScope::Names);
         assert_eq!(r.take_result(), None);
+        assert!(
+            git.calls().is_empty(),
+            "no binary means no worker, so the git seam is never reached either"
+        );
     }
 
     #[test]
     fn start_without_a_repo_is_inert() {
-        let fake: Arc<dyn OpenspecCli> = Arc::new(crate::cli::FakeCli::new());
-        let mut r = start(None, Some(fake));
+        let cli: Arc<dyn OpenspecCli> = Arc::new(crate::cli::FakeCli::new());
+        let git = Arc::new(crate::cli::FakeCli::new());
+        let mut r = start(None, Some(cli), git.clone());
         r.request(Selection::All, ArchivedScope::Names);
         assert_eq!(r.take_result(), None);
+        assert!(
+            git.calls().is_empty(),
+            "no repository means no worker, so the git seam is never reached either"
+        );
+    }
+
+    /// `refresh-worker` -> "No binary means no worker": both the no-`cli` and the
+    /// no-`repo` cases return the inert `Refresher` and never touch `GitCli` at all —
+    /// file mode never reads the worktree family.
+    #[test]
+    fn file_mode_reads_no_worktree_family() {
+        let scratch = crate::testutil::ScratchDir::new();
+        let cli: Arc<dyn OpenspecCli> = Arc::new(crate::cli::FakeCli::new());
+        let git_a = Arc::new(crate::cli::FakeCli::new());
+        let mut r = start(Some(scratch.path()), None, git_a.clone());
+        for _ in 0..10 {
+            r.request(Selection::All, ArchivedScope::Names);
+            assert_eq!(r.take_result(), None);
+        }
+        assert!(git_a.calls().is_empty());
+
+        let git_b = Arc::new(crate::cli::FakeCli::new());
+        let mut r = start(None, Some(cli), git_b.clone());
+        for _ in 0..10 {
+            r.request(Selection::All, ArchivedScope::Names);
+            assert_eq!(r.take_result(), None);
+        }
+        assert!(git_b.calls().is_empty());
     }
 
     #[test]
@@ -599,8 +1008,20 @@ apply:
             )),
         );
         let cli: Arc<dyn OpenspecCli> = Arc::new(fake);
+        let root_str = root.display().to_string();
+        let git_fake = crate::cli::FakeCli::new();
+        git_fake.register_git(
+            &git_args(&root_str, &["worktree", "list", "--porcelain", "-z"]),
+            Err(crate::cli::CliError::NotStarted {
+                program: "git".to_string(),
+                args: vec!["worktree".to_string(), "list".to_string()],
+                reason: "not found".to_string(),
+            }),
+        );
+        let git: Arc<dyn GitCli> = Arc::new(git_fake);
 
-        let (mut refresher, results_rx, _exit_rx) = worker_for_test(root, cli);
+        let (mut refresher, results_rx, _exit_rx) =
+            worker_for_test(root, cli, git, WORKTREE_RECHECK);
         refresher.request(Selection::All, ArchivedScope::Names);
 
         let files = results_rx
@@ -649,8 +1070,20 @@ apply:
             }),
         );
         let cli: Arc<dyn OpenspecCli> = Arc::new(fake);
+        let root_str = root.display().to_string();
+        let git_fake = crate::cli::FakeCli::new();
+        git_fake.register_git(
+            &git_args(&root_str, &["worktree", "list", "--porcelain", "-z"]),
+            Err(crate::cli::CliError::NotStarted {
+                program: "git".to_string(),
+                args: vec!["worktree".to_string(), "list".to_string()],
+                reason: "not found".to_string(),
+            }),
+        );
+        let git: Arc<dyn GitCli> = Arc::new(git_fake);
 
-        let (mut refresher, results_rx, _exit_rx) = worker_for_test(root, cli);
+        let (mut refresher, results_rx, _exit_rx) =
+            worker_for_test(root, cli, git, WORKTREE_RECHECK);
         refresher.request(Selection::All, ArchivedScope::Names);
 
         let files = results_rx
@@ -705,8 +1138,20 @@ apply:
             }),
         );
         let cli: Arc<dyn OpenspecCli> = Arc::new(fake);
+        let root_str = root.display().to_string();
+        let git_fake = crate::cli::FakeCli::new();
+        git_fake.register_git(
+            &git_args(&root_str, &["worktree", "list", "--porcelain", "-z"]),
+            Err(crate::cli::CliError::NotStarted {
+                program: "git".to_string(),
+                args: vec!["worktree".to_string(), "list".to_string()],
+                reason: "not found".to_string(),
+            }),
+        );
+        let git: Arc<dyn GitCli> = Arc::new(git_fake);
 
-        let (mut refresher, results_rx, _exit_rx) = worker_for_test(root, cli);
+        let (mut refresher, results_rx, _exit_rx) =
+            worker_for_test(root, cli, git, WORKTREE_RECHECK);
         refresher.request(Selection::All, ArchivedScope::Names);
 
         let files = results_rx
@@ -776,8 +1221,20 @@ apply:
             )),
         );
         let cli: Arc<dyn OpenspecCli> = Arc::new(fake);
+        let root_str = root.display().to_string();
+        let git_fake = crate::cli::FakeCli::new();
+        git_fake.register_git(
+            &git_args(&root_str, &["worktree", "list", "--porcelain", "-z"]),
+            Err(crate::cli::CliError::NotStarted {
+                program: "git".to_string(),
+                args: vec!["worktree".to_string(), "list".to_string()],
+                reason: "not found".to_string(),
+            }),
+        );
+        let git: Arc<dyn GitCli> = Arc::new(git_fake);
 
-        let (mut refresher, results_rx, _exit_rx) = worker_for_test(root, cli);
+        let (mut refresher, results_rx, _exit_rx) =
+            worker_for_test(root, cli, git, WORKTREE_RECHECK);
 
         refresher.request(Selection::All, ArchivedScope::Names);
         let names_files = results_rx
@@ -914,8 +1371,9 @@ apply:
         let scratch = crate::testutil::ScratchDir::new();
         let root = crate::testutil::canonical(scratch.path());
         let fake: Arc<dyn OpenspecCli> = Arc::new(crate::cli::FakeCli::new());
+        let git: Arc<dyn GitCli> = Arc::new(crate::cli::FakeCli::new());
 
-        let (refresher, _results_rx, exit_rx) = worker_for_test(root, fake);
+        let (refresher, _results_rx, exit_rx) = worker_for_test(root, fake, git, WORKTREE_RECHECK);
         drop(refresher);
 
         match exit_rx.recv_timeout(std::time::Duration::from_secs(10)) {
@@ -945,9 +1403,21 @@ apply:
             )),
         );
         let cli: Arc<dyn OpenspecCli> = Arc::new(fake);
+        let root_str = root.display().to_string();
+        let git_fake = crate::cli::FakeCli::new();
+        git_fake.register_git(
+            &git_args(&root_str, &["worktree", "list", "--porcelain", "-z"]),
+            Err(crate::cli::CliError::NotStarted {
+                program: "git".to_string(),
+                args: vec!["worktree".to_string(), "list".to_string()],
+                reason: "not found".to_string(),
+            }),
+        );
+        let git: Arc<dyn GitCli> = Arc::new(git_fake);
 
         let before = crate::testutil::snapshot(&root);
-        let (mut refresher, results_rx, exit_rx) = worker_for_test(root.clone(), cli);
+        let (mut refresher, results_rx, exit_rx) =
+            worker_for_test(root.clone(), cli, git, WORKTREE_RECHECK);
         refresher.request(Selection::All, ArchivedScope::Names);
         results_rx
             .recv_timeout(std::time::Duration::from_secs(10))
@@ -962,5 +1432,1702 @@ apply:
         }
         let after = crate::testutil::snapshot(&root);
         assert_eq!(before, after, "the worker wrote inside the repository");
+    }
+    // --- group 8: `worktree-overlay` reaches the refresh worker ---
+
+    /// `refresh-worker` -> "A worktree copy reaches the merged result first and the
+    /// file result after".
+    #[test]
+    fn a_worktree_copy_reaches_the_merged_result_first_and_the_file_result_after() {
+        let (base_scratch, base_root) = scratch_root();
+        crate::testutil::write_with_mode(
+            &base_root.join("openspec/changes/alpha/tasks.md"),
+            "- [ ] a\n".repeat(9).as_bytes(),
+            0o644,
+        );
+        let (member_scratch, member_root) = scratch_root();
+        let mut member_tasks = "- [x] a\n".repeat(5);
+        member_tasks.push_str(&"- [ ] a\n".repeat(4));
+        crate::testutil::write_with_mode(
+            &member_root.join("openspec/changes/alpha/tasks.md"),
+            member_tasks.as_bytes(),
+            0o644,
+        );
+
+        let openspec_fake = Arc::new(crate::cli::FakeCli::new());
+        openspec_fake.register_openspec(
+            &["list", "--json"],
+            Ok(format!(
+                r#"{{"changes":[{{"name":"alpha","completedTasks":0,"totalTasks":9,"lastModified":"x","status":"y"}}],"root":{{"path":{:?},"source":"nearest"}}}}"#,
+                base_root.display().to_string()
+            )),
+        );
+        openspec_fake.register_openspec(
+            &["instructions", "apply", "--change", "alpha", "--json"],
+            Ok(format!(
+                r#"{{"schemaName":"tdd","changeDir":{:?},"contextFiles":{{}}}}"#,
+                base_root
+                    .join("openspec/changes/alpha")
+                    .display()
+                    .to_string()
+            )),
+        );
+        let cli: Arc<dyn OpenspecCli> = openspec_fake.clone();
+
+        let base_str = base_root.display().to_string();
+        let member_str = member_root.display().to_string();
+        let git_fake = Arc::new(crate::cli::FakeCli::new());
+        git_fake.register_git(
+            &git_args(&base_str, &["worktree", "list", "--porcelain", "-z"]),
+            Ok(format!(
+                "{}{}",
+                wt_record(&base_root, "aaaa", "main"),
+                wt_record(&member_root, "bbbb", "feat"),
+            )),
+        );
+        git_fake.register_git(
+            &git_args(&member_str, &["merge-base", "HEAD", "aaaa"]),
+            Ok("basecommit".to_string()),
+        );
+        git_fake.register_git(
+            &git_args(
+                &member_str,
+                &[
+                    "diff-tree",
+                    "-r",
+                    "--name-only",
+                    "-z",
+                    "--no-renames",
+                    "basecommit",
+                    "HEAD",
+                    "--",
+                    "openspec/changes",
+                ],
+            ),
+            Ok(String::new()),
+        );
+        git_fake.register_git(
+            &git_args(
+                &member_str,
+                &[
+                    "status",
+                    "--porcelain=v1",
+                    "-z",
+                    "--no-renames",
+                    "--untracked-files=all",
+                    "--",
+                    "openspec/changes",
+                ],
+            ),
+            Ok(" M openspec/changes/alpha/tasks.md\0".to_string()),
+        );
+        let git: Arc<dyn GitCli> = git_fake.clone();
+
+        let (mut refresher, results_rx, _exit_rx) =
+            worker_for_test(base_root, cli, git, Duration::from_millis(5));
+        refresher.request(Selection::All, ArchivedScope::Names);
+
+        let first_files = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("first files");
+        match first_files {
+            RefreshResult::Files(set) => {
+                let alpha = set.active.iter().find(|c| c.name == "alpha").unwrap();
+                assert_eq!(alpha.progress.completed, 0);
+                assert!(set.worktrees.is_empty());
+            }
+            other => panic!("expected Files, got {other:?}"),
+        }
+        let first_merged = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("first merged");
+        match first_merged {
+            RefreshResult::Merged(set) => {
+                let alpha = set.active.iter().find(|c| c.name == "alpha").unwrap();
+                assert_eq!(alpha.progress.completed, 5);
+                assert_eq!(alpha.progress.total, 9);
+                assert!(alpha.dir.starts_with(&member_root));
+                assert_eq!(set.worktrees.len(), 1);
+                assert_eq!(set.worktrees[0].label, "feat");
+            }
+            other => panic!("expected Merged, got {other:?}"),
+        }
+
+        refresher.request(Selection::All, ArchivedScope::Names);
+        let second_files = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("second files");
+        match second_files {
+            RefreshResult::Files(set) => {
+                let alpha = set.active.iter().find(|c| c.name == "alpha").unwrap();
+                assert_eq!(
+                    alpha.progress.completed, 5,
+                    "the fast answer must not regress a worktree row to the base's copy"
+                );
+            }
+            other => panic!("expected Files, got {other:?}"),
+        }
+        let _second_merged = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("second merged");
+
+        assert!(
+            openspec_fake
+                .calls()
+                .iter()
+                .all(|(_, args)| !args.iter().any(|a| a.contains(&member_str))),
+            "the openspec CLI must be asked about the base only"
+        );
+        let _ = base_scratch;
+        let _ = member_scratch;
+    }
+
+    /// `refresh-worker` -> "A worktree created after the last cycle appears without a
+    /// request".
+    #[test]
+    fn a_worktree_created_after_the_last_cycle_appears_without_a_request() {
+        let (base_scratch, base_root) = scratch_root();
+        crate::testutil::write_with_mode(
+            &base_root.join("openspec/changes/alpha/tasks.md"),
+            format!("{}{}", "- [x] a\n".repeat(4), "- [ ] a\n".repeat(5)).as_bytes(),
+            0o644,
+        );
+        let (member_scratch, member_root) = scratch_root();
+        crate::testutil::write_with_mode(
+            &member_root.join("openspec/changes/beta/tasks.md"),
+            b"- [ ] a\n",
+            0o644,
+        );
+
+        let openspec_fake = Arc::new(crate::cli::FakeCli::new());
+        openspec_fake.register_openspec(
+            &["list", "--json"],
+            Ok(format!(
+                r#"{{"changes":[{{"name":"alpha","completedTasks":7,"totalTasks":9,"lastModified":"x","status":"y"}}],"root":{{"path":{:?},"source":"nearest"}}}}"#,
+                base_root.display().to_string()
+            )),
+        );
+        openspec_fake.register_openspec(
+            &["instructions", "apply", "--change", "alpha", "--json"],
+            Ok(format!(
+                r#"{{"schemaName":"tdd","changeDir":{:?},"contextFiles":{{}}}}"#,
+                base_root
+                    .join("openspec/changes/alpha")
+                    .display()
+                    .to_string()
+            )),
+        );
+        let cli: Arc<dyn OpenspecCli> = openspec_fake.clone();
+
+        let base_str = base_root.display().to_string();
+        let member_str = member_root.display().to_string();
+        let git_fake = Arc::new(crate::cli::FakeCli::new());
+        let list_args = git_args(&base_str, &["worktree", "list", "--porcelain", "-z"]);
+        git_fake.register_git(&list_args, Ok(wt_record(&base_root, "aaaa", "main")));
+        git_fake.register_git(
+            &list_args,
+            Ok(format!(
+                "{}{}",
+                wt_record(&base_root, "aaaa", "main"),
+                wt_record(&member_root, "bbbb", "feat"),
+            )),
+        );
+        git_fake.register_git(
+            &git_args(&member_str, &["merge-base", "HEAD", "aaaa"]),
+            Ok("msha".to_string()),
+        );
+        git_fake.register_git(
+            &git_args(
+                &member_str,
+                &[
+                    "diff-tree",
+                    "-r",
+                    "--name-only",
+                    "-z",
+                    "--no-renames",
+                    "msha",
+                    "HEAD",
+                    "--",
+                    "openspec/changes",
+                ],
+            ),
+            Ok(String::new()),
+        );
+        git_fake.register_git(
+            &git_args(
+                &member_str,
+                &[
+                    "status",
+                    "--porcelain=v1",
+                    "-z",
+                    "--no-renames",
+                    "--untracked-files=all",
+                    "--",
+                    "openspec/changes",
+                ],
+            ),
+            Ok("?? openspec/changes/beta/tasks.md\0".to_string()),
+        );
+        let git: Arc<dyn GitCli> = git_fake.clone();
+
+        let (mut refresher, results_rx, _exit_rx) =
+            worker_for_test(base_root, cli, git, Duration::from_millis(5));
+        refresher.request(Selection::All, ArchivedScope::Names);
+
+        let files = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("first files");
+        assert!(matches!(files, RefreshResult::Files(_)));
+        let merged = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("first merged");
+        match merged {
+            RefreshResult::Merged(set) => {
+                let alpha = set.active.iter().find(|c| c.name == "alpha").unwrap();
+                assert_eq!(alpha.progress.completed, 7);
+                assert!(set.worktrees.is_empty());
+            }
+            other => panic!("expected Merged, got {other:?}"),
+        }
+
+        let unsolicited = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the re-check did not report the new member within 10s");
+        match unsolicited {
+            RefreshResult::Files(set) => {
+                assert!(set.active.iter().any(|c| c.name == "beta"));
+                assert_eq!(set.worktrees.len(), 1);
+                assert_eq!(set.worktrees[0].label, "feat");
+                let alpha = set.active.iter().find(|c| c.name == "alpha").unwrap();
+                assert_eq!(
+                    alpha.progress.completed, 7,
+                    "the re-check overlaid the remembered merged base, not a fresh file read"
+                );
+            }
+            other => panic!("expected an unsolicited Files, got {other:?}"),
+        }
+
+        assert_eq!(
+            openspec_fake.calls().len(),
+            2,
+            "the re-check must not call the openspec CLI"
+        );
+        let _ = base_scratch;
+        let _ = member_scratch;
+    }
+
+    /// `refresh-worker` -> "A re-check's discovery survives the next request's fast
+    /// answer".
+    #[test]
+    fn a_re_checks_discovery_survives_the_next_requests_fast_answer() {
+        let (base_scratch, base_root) = scratch_root();
+        crate::testutil::write_with_mode(
+            &base_root.join("openspec/changes/alpha/tasks.md"),
+            format!("{}{}", "- [x] a\n".repeat(4), "- [ ] a\n".repeat(5)).as_bytes(),
+            0o644,
+        );
+        let (member_scratch, member_root) = scratch_root();
+        crate::testutil::write_with_mode(
+            &member_root.join("openspec/changes/beta/tasks.md"),
+            b"- [ ] a\n",
+            0o644,
+        );
+
+        let openspec_fake = Arc::new(crate::cli::FakeCli::new());
+        openspec_fake.register_openspec(
+            &["list", "--json"],
+            Ok(format!(
+                r#"{{"changes":[{{"name":"alpha","completedTasks":7,"totalTasks":9,"lastModified":"x","status":"y"}}],"root":{{"path":{:?},"source":"nearest"}}}}"#,
+                base_root.display().to_string()
+            )),
+        );
+        openspec_fake.register_openspec(
+            &["instructions", "apply", "--change", "alpha", "--json"],
+            Ok(format!(
+                r#"{{"schemaName":"tdd","changeDir":{:?},"contextFiles":{{}}}}"#,
+                base_root
+                    .join("openspec/changes/alpha")
+                    .display()
+                    .to_string()
+            )),
+        );
+        let cli: Arc<dyn OpenspecCli> = openspec_fake.clone();
+
+        let base_str = base_root.display().to_string();
+        let member_str = member_root.display().to_string();
+        let git_fake = Arc::new(crate::cli::FakeCli::new());
+        let list_args = git_args(&base_str, &["worktree", "list", "--porcelain", "-z"]);
+        git_fake.register_git(&list_args, Ok(wt_record(&base_root, "aaaa", "main")));
+        git_fake.register_git(
+            &list_args,
+            Ok(format!(
+                "{}{}",
+                wt_record(&base_root, "aaaa", "main"),
+                wt_record(&member_root, "bbbb", "feat"),
+            )),
+        );
+        git_fake.register_git(
+            &git_args(&member_str, &["merge-base", "HEAD", "aaaa"]),
+            Ok("msha".to_string()),
+        );
+        git_fake.register_git(
+            &git_args(
+                &member_str,
+                &[
+                    "diff-tree",
+                    "-r",
+                    "--name-only",
+                    "-z",
+                    "--no-renames",
+                    "msha",
+                    "HEAD",
+                    "--",
+                    "openspec/changes",
+                ],
+            ),
+            Ok(String::new()),
+        );
+        git_fake.register_git(
+            &git_args(
+                &member_str,
+                &[
+                    "status",
+                    "--porcelain=v1",
+                    "-z",
+                    "--no-renames",
+                    "--untracked-files=all",
+                    "--",
+                    "openspec/changes",
+                ],
+            ),
+            Ok("?? openspec/changes/beta/tasks.md\0".to_string()),
+        );
+        let git: Arc<dyn GitCli> = git_fake.clone();
+
+        let (mut refresher, results_rx, _exit_rx) =
+            worker_for_test(base_root, cli, git, Duration::from_millis(5));
+        refresher.request(Selection::All, ArchivedScope::Names);
+        let _files = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("first files");
+        let _merged = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("first merged");
+        let unsolicited = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the re-check did not report the new member within 10s");
+        assert!(
+            matches!(&unsolicited, RefreshResult::Files(set) if set.active.iter().any(|c| c.name == "beta"))
+        );
+
+        refresher.request(Selection::All, ArchivedScope::Names);
+        let third_files = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("third files");
+        match third_files {
+            RefreshResult::Files(set) => {
+                assert!(set.active.iter().any(|c| c.name == "beta"))
+            }
+            other => panic!("expected Files, got {other:?}"),
+        }
+        let third_merged = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("third merged");
+        match third_merged {
+            RefreshResult::Merged(set) => {
+                assert!(set.active.iter().any(|c| c.name == "beta"))
+            }
+            other => panic!("expected Merged, got {other:?}"),
+        }
+        let _ = base_scratch;
+        let _ = member_scratch;
+    }
+
+    /// `refresh-worker` -> "An unchanged overlay sends nothing".
+    #[test]
+    fn an_unchanged_overlay_sends_nothing() {
+        let (base_scratch, base_root) = scratch_root();
+        let (feat_scratch, feat_root) = scratch_root();
+        crate::testutil::write_with_mode(
+            &feat_root.join("openspec/changes/x/tasks.md"),
+            b"- [ ] a\n",
+            0o644,
+        );
+        let (fix_scratch, fix_root) = scratch_root();
+        crate::testutil::write_with_mode(
+            &fix_root.join("openspec/changes/x/tasks.md"),
+            b"- [x] a\n",
+            0o644,
+        );
+
+        let openspec_fake = Arc::new(crate::cli::FakeCli::new());
+        openspec_fake.register_openspec(
+            &["list", "--json"],
+            Ok(format!(
+                r#"{{"changes":[],"root":{{"path":{:?},"source":"nearest"}}}}"#,
+                base_root.display().to_string()
+            )),
+        );
+        let cli: Arc<dyn OpenspecCli> = openspec_fake.clone();
+
+        let base_str = base_root.display().to_string();
+        let feat_str = feat_root.display().to_string();
+        let fix_str = fix_root.display().to_string();
+        let git_fake = Arc::new(crate::cli::FakeCli::new());
+        let list_args = git_args(&base_str, &["worktree", "list", "--porcelain", "-z"]);
+        git_fake.register_git(
+            &list_args,
+            Ok(format!(
+                "{}{}{}",
+                wt_record(&base_root, "aaaa", "main"),
+                wt_record(&feat_root, "bbbb", "feat"),
+                wt_record(&fix_root, "cccc", "fix"),
+            )),
+        );
+        for (root_str, sha) in [(&feat_str, "bbbb"), (&fix_str, "cccc")] {
+            git_fake.register_git(
+                &git_args(root_str, &["merge-base", "HEAD", "aaaa"]),
+                Ok(format!("base-{sha}")),
+            );
+            git_fake.register_git(
+                &git_args(
+                    root_str,
+                    &[
+                        "diff-tree",
+                        "-r",
+                        "--name-only",
+                        "-z",
+                        "--no-renames",
+                        &format!("base-{sha}"),
+                        "HEAD",
+                        "--",
+                        "openspec/changes",
+                    ],
+                ),
+                Ok(String::new()),
+            );
+            git_fake.register_git(
+                &git_args(
+                    root_str,
+                    &[
+                        "status",
+                        "--porcelain=v1",
+                        "-z",
+                        "--no-renames",
+                        "--untracked-files=all",
+                        "--",
+                        "openspec/changes",
+                    ],
+                ),
+                Ok("?? openspec/changes/x/tasks.md\0".to_string()),
+            );
+        }
+        let git: Arc<dyn GitCli> = git_fake.clone();
+
+        let (mut refresher, results_rx, _exit_rx) =
+            worker_for_test(base_root, cli, git, Duration::from_millis(5));
+        refresher.request(Selection::All, ArchivedScope::Names);
+        let _files = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("files");
+        let merged = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("merged");
+        match merged {
+            RefreshResult::Merged(set) => assert_eq!(set.problems.len(), 1, "{:?}", set.problems),
+            other => panic!("expected Merged, got {other:?}"),
+        }
+
+        match results_rx.recv_timeout(Duration::from_millis(150)) {
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            other => panic!("expected no further result, got {other:?}"),
+        }
+
+        let list_key: Vec<String> = list_args.iter().map(|s| s.to_string()).collect();
+        let list_calls = git_fake
+            .calls()
+            .into_iter()
+            .filter(|(program, args)| *program == crate::cli::Program::Git && *args == list_key)
+            .count();
+        assert!(
+            list_calls >= 3,
+            "expected at least 3 `worktree list` calls (1 cycle + >=2 re-checks), got {list_calls}"
+        );
+        let _ = base_scratch;
+        let _ = feat_scratch;
+        let _ = fix_scratch;
+    }
+
+    /// `refresh-worker` -> "A ticked task inside a worktree reaches the pane".
+    #[test]
+    fn a_ticked_task_inside_a_worktree_reaches_the_pane() {
+        let (base_scratch, base_root) = scratch_root();
+        let (member_scratch, member_root) = scratch_root();
+        let mut tasks = "- [x] a\n".repeat(5);
+        tasks.push_str(&"- [ ] a\n".repeat(4));
+        crate::testutil::write_with_mode(
+            &member_root.join("openspec/changes/gamma/tasks.md"),
+            tasks.as_bytes(),
+            0o644,
+        );
+
+        let openspec_fake = Arc::new(crate::cli::FakeCli::new());
+        openspec_fake.register_openspec(
+            &["list", "--json"],
+            Ok(format!(
+                r#"{{"changes":[],"root":{{"path":{:?},"source":"nearest"}}}}"#,
+                base_root.display().to_string()
+            )),
+        );
+        let cli: Arc<dyn OpenspecCli> = openspec_fake.clone();
+
+        let base_str = base_root.display().to_string();
+        let member_str = member_root.display().to_string();
+        let git_fake = Arc::new(crate::cli::FakeCli::new());
+        git_fake.register_git(
+            &git_args(&base_str, &["worktree", "list", "--porcelain", "-z"]),
+            Ok(format!(
+                "{}{}",
+                wt_record(&base_root, "aaaa", "main"),
+                wt_record(&member_root, "bbbb", "feat"),
+            )),
+        );
+        git_fake.register_git(
+            &git_args(&member_str, &["merge-base", "HEAD", "aaaa"]),
+            Ok("msha".to_string()),
+        );
+        git_fake.register_git(
+            &git_args(
+                &member_str,
+                &[
+                    "diff-tree",
+                    "-r",
+                    "--name-only",
+                    "-z",
+                    "--no-renames",
+                    "msha",
+                    "HEAD",
+                    "--",
+                    "openspec/changes",
+                ],
+            ),
+            Ok(String::new()),
+        );
+        git_fake.register_git(
+            &git_args(
+                &member_str,
+                &[
+                    "status",
+                    "--porcelain=v1",
+                    "-z",
+                    "--no-renames",
+                    "--untracked-files=all",
+                    "--",
+                    "openspec/changes",
+                ],
+            ),
+            Ok("?? openspec/changes/gamma/tasks.md\0".to_string()),
+        );
+        let git: Arc<dyn GitCli> = git_fake.clone();
+
+        let (mut refresher, results_rx, _exit_rx) =
+            worker_for_test(base_root, cli, git, Duration::from_millis(5));
+        refresher.request(Selection::All, ArchivedScope::Names);
+        let _files = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("files");
+        let merged = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("merged");
+        match merged {
+            RefreshResult::Merged(set) => {
+                let gamma = set.active.iter().find(|c| c.name == "gamma").unwrap();
+                assert_eq!(gamma.progress.completed, 5);
+            }
+            other => panic!("expected Merged, got {other:?}"),
+        }
+
+        let mut ticked = "- [x] a\n".repeat(6);
+        ticked.push_str(&"- [ ] a\n".repeat(3));
+        let sibling = member_root.join("openspec/changes/gamma/tasks.md.next");
+        std::fs::write(&sibling, ticked).expect("write sibling");
+        std::fs::rename(
+            &sibling,
+            member_root.join("openspec/changes/gamma/tasks.md"),
+        )
+        .expect("rename over tasks.md");
+
+        let unsolicited = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the re-check did not report the ticked task within 10s");
+        match unsolicited {
+            RefreshResult::Files(set) => {
+                let gamma = set.active.iter().find(|c| c.name == "gamma").unwrap();
+                assert_eq!(gamma.progress.completed, 6);
+                assert!(gamma.dir.starts_with(&member_root));
+            }
+            other => panic!("expected an unsolicited Files, got {other:?}"),
+        }
+        let _ = base_scratch;
+        let _ = member_scratch;
+    }
+
+    /// `refresh-worker` -> "No re-check before the first cycle".
+    #[test]
+    fn no_re_check_before_the_first_cycle() {
+        let (base_scratch, base_root) = scratch_root();
+        let cli: Arc<dyn OpenspecCli> = Arc::new(crate::cli::FakeCli::new());
+        let git_fake = Arc::new(crate::cli::FakeCli::new());
+        let git: Arc<dyn GitCli> = git_fake.clone();
+
+        let (_refresher, results_rx, _exit_rx) =
+            worker_for_test(base_root, cli, git, Duration::from_millis(5));
+
+        match results_rx.recv_timeout(Duration::from_millis(50)) {
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            other => panic!("expected Timeout, got {other:?}"),
+        }
+        assert!(git_fake.calls().is_empty());
+        let _ = base_scratch;
+    }
+
+    /// `refresh-worker` -> "A worker that has cycled still returns when its refresher
+    /// is dropped".
+    #[test]
+    fn a_worker_that_has_cycled_still_returns_when_its_refresher_is_dropped() {
+        let (base_scratch, base_root) = scratch_root();
+        let openspec_fake = Arc::new(crate::cli::FakeCli::new());
+        openspec_fake.register_openspec(
+            &["list", "--json"],
+            Ok(format!(
+                r#"{{"changes":[],"root":{{"path":{:?},"source":"nearest"}}}}"#,
+                base_root.display().to_string()
+            )),
+        );
+        let cli: Arc<dyn OpenspecCli> = openspec_fake;
+        let base_str = base_root.display().to_string();
+        let git_fake = Arc::new(crate::cli::FakeCli::new());
+        git_fake.register_git(
+            &git_args(&base_str, &["worktree", "list", "--porcelain", "-z"]),
+            Err(crate::cli::CliError::NotStarted {
+                program: "git".to_string(),
+                args: vec!["worktree".to_string(), "list".to_string()],
+                reason: "not found".to_string(),
+            }),
+        );
+        let git: Arc<dyn GitCli> = git_fake;
+
+        let (mut refresher, results_rx, exit_rx) =
+            worker_for_test(base_root, cli, git, Duration::from_millis(5));
+        refresher.request(Selection::All, ArchivedScope::Names);
+        results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("files");
+        results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("merged");
+
+        drop(refresher);
+        match exit_rx.recv_timeout(Duration::from_secs(10)) {
+            Err(mpsc::RecvTimeoutError::Disconnected) => {}
+            other => panic!(
+                "the worker did not return within 10s after its Refresher was dropped: {other:?}"
+            ),
+        }
+        let _ = base_scratch;
+    }
+
+    /// `worktree-overlay` -> "No git binary".
+    #[test]
+    fn no_git_binary_leaves_the_set_unoverlaid() {
+        let (base_scratch, base_root) = scratch_root();
+        crate::testutil::write_with_mode(
+            &base_root.join("openspec/changes/alpha/tasks.md"),
+            b"- [x] a\n- [ ] b\n",
+            0o644,
+        );
+        let openspec_fake = Arc::new(crate::cli::FakeCli::new());
+        openspec_fake.register_openspec(
+            &["list", "--json"],
+            Ok(format!(
+                r#"{{"changes":[{{"name":"alpha","completedTasks":1,"totalTasks":2,"lastModified":"x","status":"y"}}],"root":{{"path":{:?},"source":"nearest"}}}}"#,
+                base_root.display().to_string()
+            )),
+        );
+        openspec_fake.register_openspec(
+            &["instructions", "apply", "--change", "alpha", "--json"],
+            Ok(format!(
+                r#"{{"schemaName":"tdd","changeDir":{:?},"contextFiles":{{}}}}"#,
+                base_root
+                    .join("openspec/changes/alpha")
+                    .display()
+                    .to_string()
+            )),
+        );
+        let cli: Arc<dyn OpenspecCli> = openspec_fake;
+        let base_str = base_root.display().to_string();
+        let git_fake = Arc::new(crate::cli::FakeCli::new());
+        git_fake.register_git(
+            &git_args(&base_str, &["worktree", "list", "--porcelain", "-z"]),
+            Err(crate::cli::CliError::NotStarted {
+                program: "git".to_string(),
+                args: vec!["worktree".to_string(), "list".to_string()],
+                reason: "not found".to_string(),
+            }),
+        );
+        let git: Arc<dyn GitCli> = git_fake;
+
+        let (mut refresher, results_rx, _exit_rx) =
+            worker_for_test(base_root, cli, git, WORKTREE_RECHECK);
+        refresher.request(Selection::All, ArchivedScope::Names);
+        let _files = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("files");
+        let merged = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("merged");
+        match merged {
+            RefreshResult::Merged(set) => {
+                assert!(set.worktrees.is_empty());
+                assert!(
+                    !set.problems
+                        .iter()
+                        .any(|p| p.to_lowercase().contains("git")),
+                    "{:?}",
+                    set.problems
+                );
+            }
+            other => panic!("expected Merged, got {other:?}"),
+        }
+        let _ = base_scratch;
+    }
+
+    /// `worktree-overlay` -> "Not a git repository, a timeout, or no record for the
+    /// root".
+    #[test]
+    fn not_a_git_repository_a_timeout_or_no_record_for_the_root() {
+        fn assert_unoverlaid(response: Result<String, crate::cli::CliError>) {
+            let (base_scratch, base_root) = scratch_root();
+            let openspec_fake = Arc::new(crate::cli::FakeCli::new());
+            openspec_fake.register_openspec(
+                &["list", "--json"],
+                Ok(format!(
+                    r#"{{"changes":[],"root":{{"path":{:?},"source":"nearest"}}}}"#,
+                    base_root.display().to_string()
+                )),
+            );
+            let cli: Arc<dyn OpenspecCli> = openspec_fake;
+            let base_str = base_root.display().to_string();
+            let git_fake = Arc::new(crate::cli::FakeCli::new());
+            git_fake.register_git(
+                &git_args(&base_str, &["worktree", "list", "--porcelain", "-z"]),
+                response,
+            );
+            let git: Arc<dyn GitCli> = git_fake;
+
+            let (mut refresher, results_rx, _exit_rx) =
+                worker_for_test(base_root, cli, git, WORKTREE_RECHECK);
+            refresher.request(Selection::All, ArchivedScope::Names);
+            let _files = results_rx
+                .recv_timeout(Duration::from_secs(10))
+                .expect("files");
+            let merged = results_rx
+                .recv_timeout(Duration::from_secs(10))
+                .expect("merged");
+            match merged {
+                RefreshResult::Merged(set) => {
+                    assert!(set.worktrees.is_empty());
+                    assert!(set.problems.is_empty(), "{:?}", set.problems);
+                }
+                other => panic!("expected Merged, got {other:?}"),
+            }
+            let _ = base_scratch;
+        }
+
+        assert_unoverlaid(Err(crate::cli::CliError::Failed {
+            program: "git".to_string(),
+            args: vec!["worktree".to_string(), "list".to_string()],
+            code: Some(128),
+            stderr: "fatal: not a git repository".to_string(),
+        }));
+        assert_unoverlaid(Err(crate::cli::CliError::TimedOut {
+            args: vec!["worktree".to_string(), "list".to_string()],
+            after: crate::cli::RUN_DEADLINE,
+        }));
+
+        let (elsewhere_scratch, elsewhere_root) = scratch_root();
+        assert_unoverlaid(Ok(wt_record(&elsewhere_root, "zzzz", "somewhere")));
+        let _ = elsewhere_scratch;
+    }
+
+    /// `worktree-overlay` -> "A git too old for the listing is named once".
+    #[test]
+    fn a_git_too_old_for_the_listing_is_named_once() {
+        let (base_scratch, base_root) = scratch_root();
+        let openspec_fake = Arc::new(crate::cli::FakeCli::new());
+        openspec_fake.register_openspec(
+            &["list", "--json"],
+            Ok(format!(
+                r#"{{"changes":[],"root":{{"path":{:?},"source":"nearest"}}}}"#,
+                base_root.display().to_string()
+            )),
+        );
+        let cli: Arc<dyn OpenspecCli> = openspec_fake;
+        let base_str = base_root.display().to_string();
+        let git_fake = Arc::new(crate::cli::FakeCli::new());
+        git_fake.register_git(
+            &git_args(&base_str, &["worktree", "list", "--porcelain", "-z"]),
+            Err(crate::cli::CliError::Failed {
+                program: "git".to_string(),
+                args: vec![
+                    "worktree".to_string(),
+                    "list".to_string(),
+                    "--porcelain".to_string(),
+                    "-z".to_string(),
+                ],
+                code: Some(129),
+                stderr: "error: unknown switch `z'".to_string(),
+            }),
+        );
+        let git: Arc<dyn GitCli> = git_fake;
+
+        let (mut refresher, results_rx, _exit_rx) =
+            worker_for_test(base_root, cli, git, WORKTREE_RECHECK);
+        refresher.request(Selection::All, ArchivedScope::Names);
+        let _files = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("files");
+        let merged = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("merged");
+        match merged {
+            RefreshResult::Merged(set) => {
+                assert!(set.worktrees.is_empty());
+                assert_eq!(set.problems.len(), 1, "{:?}", set.problems);
+                assert!(set.problems[0].contains("worktree list"));
+                assert!(set.problems[0].to_lowercase().contains("not shown"));
+            }
+            other => panic!("expected Merged, got {other:?}"),
+        }
+        let _ = base_scratch;
+    }
+
+    /// `worktree-overlay` -> "One member's query fails and the other still overlays".
+    #[test]
+    fn a_failing_member_contributes_nothing_and_is_named() {
+        let (base_scratch, base_root) = scratch_root();
+        let (feat_scratch, feat_root) = scratch_root();
+        crate::testutil::write_with_mode(
+            &feat_root.join("openspec/changes/x/tasks.md"),
+            b"- [ ] a\n",
+            0o644,
+        );
+        let (broken_scratch, broken_root) = scratch_root();
+
+        let openspec_fake = Arc::new(crate::cli::FakeCli::new());
+        openspec_fake.register_openspec(
+            &["list", "--json"],
+            Ok(format!(
+                r#"{{"changes":[],"root":{{"path":{:?},"source":"nearest"}}}}"#,
+                base_root.display().to_string()
+            )),
+        );
+        let cli: Arc<dyn OpenspecCli> = openspec_fake;
+
+        let base_str = base_root.display().to_string();
+        let feat_str = feat_root.display().to_string();
+        let broken_str = broken_root.display().to_string();
+        let git_fake = Arc::new(crate::cli::FakeCli::new());
+        git_fake.register_git(
+            &git_args(&base_str, &["worktree", "list", "--porcelain", "-z"]),
+            Ok(format!(
+                "{}{}{}",
+                wt_record(&base_root, "aaaa", "main"),
+                wt_record(&feat_root, "bbbb", "feat"),
+                wt_record(&broken_root, "cccc", "broken"),
+            )),
+        );
+        git_fake.register_git(
+            &git_args(&feat_str, &["merge-base", "HEAD", "aaaa"]),
+            Ok("fbase".to_string()),
+        );
+        git_fake.register_git(
+            &git_args(
+                &feat_str,
+                &[
+                    "diff-tree",
+                    "-r",
+                    "--name-only",
+                    "-z",
+                    "--no-renames",
+                    "fbase",
+                    "HEAD",
+                    "--",
+                    "openspec/changes",
+                ],
+            ),
+            Ok(String::new()),
+        );
+        git_fake.register_git(
+            &git_args(
+                &feat_str,
+                &[
+                    "status",
+                    "--porcelain=v1",
+                    "-z",
+                    "--no-renames",
+                    "--untracked-files=all",
+                    "--",
+                    "openspec/changes",
+                ],
+            ),
+            Ok("?? openspec/changes/x/tasks.md\0".to_string()),
+        );
+        git_fake.register_git(
+            &git_args(&broken_str, &["merge-base", "HEAD", "aaaa"]),
+            Err(crate::cli::CliError::Failed {
+                program: "git".to_string(),
+                args: vec![
+                    "merge-base".to_string(),
+                    "HEAD".to_string(),
+                    "aaaa".to_string(),
+                ],
+                code: Some(128),
+                stderr: "fatal: bad object aaaa".to_string(),
+            }),
+        );
+        let git: Arc<dyn GitCli> = git_fake;
+
+        let (mut refresher, results_rx, _exit_rx) =
+            worker_for_test(base_root, cli, git, WORKTREE_RECHECK);
+        refresher.request(Selection::All, ArchivedScope::Names);
+        let _files = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("files");
+        let merged = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("merged");
+        match merged {
+            RefreshResult::Merged(set) => {
+                let x = set.active.iter().find(|c| c.name == "x").unwrap();
+                assert!(x.dir.starts_with(&feat_root));
+                assert_eq!(set.worktrees.len(), 2);
+                assert_eq!(set.problems.len(), 1, "{:?}", set.problems);
+                assert!(set.problems[0].contains(&broken_str));
+                assert!(set.problems[0].contains("merge-base"));
+            }
+            other => panic!("expected Merged, got {other:?}"),
+        }
+        let _ = feat_scratch;
+        let _ = broken_scratch;
+        let _ = base_scratch;
+    }
+
+    /// `worktree-overlay` -> "A member with unrelated history owns nothing and is not
+    /// a problem".
+    #[test]
+    fn a_member_with_unrelated_history_owns_nothing_and_is_not_a_problem() {
+        let (base_scratch, base_root) = scratch_root();
+        let (orphan_scratch, orphan_root) = scratch_root();
+        let (broken_scratch, broken_root) = scratch_root();
+
+        let openspec_fake = Arc::new(crate::cli::FakeCli::new());
+        openspec_fake.register_openspec(
+            &["list", "--json"],
+            Ok(format!(
+                r#"{{"changes":[],"root":{{"path":{:?},"source":"nearest"}}}}"#,
+                base_root.display().to_string()
+            )),
+        );
+        let cli: Arc<dyn OpenspecCli> = openspec_fake;
+
+        let base_str = base_root.display().to_string();
+        let orphan_str = orphan_root.display().to_string();
+        let broken_str = broken_root.display().to_string();
+        let git_fake = Arc::new(crate::cli::FakeCli::new());
+        git_fake.register_git(
+            &git_args(&base_str, &["worktree", "list", "--porcelain", "-z"]),
+            Ok(format!(
+                "{}{}{}",
+                wt_record(&base_root, "aaaa", "main"),
+                wt_record(&orphan_root, "dddd", "gh-pages"),
+                wt_record(&broken_root, "cccc", "broken"),
+            )),
+        );
+        git_fake.register_git(
+            &git_args(&orphan_str, &["merge-base", "HEAD", "aaaa"]),
+            Err(crate::cli::CliError::Failed {
+                program: "git".to_string(),
+                args: vec![
+                    "merge-base".to_string(),
+                    "HEAD".to_string(),
+                    "aaaa".to_string(),
+                ],
+                code: Some(1),
+                stderr: String::new(),
+            }),
+        );
+        git_fake.register_git(
+            &git_args(&broken_str, &["merge-base", "HEAD", "aaaa"]),
+            Err(crate::cli::CliError::Failed {
+                program: "git".to_string(),
+                args: vec![
+                    "merge-base".to_string(),
+                    "HEAD".to_string(),
+                    "aaaa".to_string(),
+                ],
+                code: Some(128),
+                stderr: "fatal: bad object aaaa".to_string(),
+            }),
+        );
+        let git: Arc<dyn GitCli> = git_fake.clone();
+
+        let (mut refresher, results_rx, _exit_rx) =
+            worker_for_test(base_root, cli, git, WORKTREE_RECHECK);
+        refresher.request(Selection::All, ArchivedScope::Names);
+        let _files = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("files");
+        let merged = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("merged");
+        match merged {
+            RefreshResult::Merged(set) => {
+                assert_eq!(set.worktrees.len(), 2);
+                assert_eq!(set.problems.len(), 1, "{:?}", set.problems);
+                assert!(set.problems[0].contains(&broken_str));
+                assert!(!set.problems[0].contains(&orphan_str));
+            }
+            other => panic!("expected Merged, got {other:?}"),
+        }
+
+        let diff_or_status_for_orphan = git_fake.calls().into_iter().any(|(program, args)| {
+            program == crate::cli::Program::Git
+                && args.iter().any(|a| a == &orphan_str)
+                && (args.contains(&"diff-tree".to_string()) || args.contains(&"status".to_string()))
+        });
+        assert!(
+            !diff_or_status_for_orphan,
+            "no diff-tree/status call should be recorded for the unrelated-history member"
+        );
+        let _ = orphan_scratch;
+        let _ = broken_scratch;
+        let _ = base_scratch;
+    }
+
+    /// `worktree-overlay` -> "A prunable record and an unresolvable path record no
+    /// problem through the worker".
+    #[test]
+    fn a_prunable_record_and_an_unresolvable_path_record_no_problem() {
+        let (base_scratch, base_root) = scratch_root();
+        let (live_scratch, live_root) = scratch_root();
+        crate::testutil::write_with_mode(
+            &live_root.join("openspec/changes/x/tasks.md"),
+            b"- [ ] a\n",
+            0o644,
+        );
+
+        let openspec_fake = Arc::new(crate::cli::FakeCli::new());
+        openspec_fake.register_openspec(
+            &["list", "--json"],
+            Ok(format!(
+                r#"{{"changes":[],"root":{{"path":{:?},"source":"nearest"}}}}"#,
+                base_root.display().to_string()
+            )),
+        );
+        let cli: Arc<dyn OpenspecCli> = openspec_fake;
+
+        let base_str = base_root.display().to_string();
+        let live_str = live_root.display().to_string();
+        let gone_path = base_scratch.path().join("gone-worktree");
+        let prunable_path = base_scratch.path().join("prunable-worktree");
+        let git_fake = Arc::new(crate::cli::FakeCli::new());
+        git_fake.register_git(
+            &git_args(&base_str, &["worktree", "list", "--porcelain", "-z"]),
+            Ok(format!(
+                "worktree {}\0HEAD aaaa\0branch refs/heads/main\0\0\
+worktree {}\0HEAD bbbb\0branch refs/heads/feat\0\0\
+worktree {}\0HEAD dddd\0detached\0prunable gitdir file points to non-existent location\0\0\
+worktree {}\0HEAD eeee\0detached\0\0",
+                base_root.display(),
+                live_root.display(),
+                prunable_path.display(),
+                gone_path.display(),
+            )),
+        );
+        git_fake.register_git(
+            &git_args(&live_str, &["merge-base", "HEAD", "aaaa"]),
+            Ok("lbase".to_string()),
+        );
+        git_fake.register_git(
+            &git_args(
+                &live_str,
+                &[
+                    "diff-tree",
+                    "-r",
+                    "--name-only",
+                    "-z",
+                    "--no-renames",
+                    "lbase",
+                    "HEAD",
+                    "--",
+                    "openspec/changes",
+                ],
+            ),
+            Ok(String::new()),
+        );
+        git_fake.register_git(
+            &git_args(
+                &live_str,
+                &[
+                    "status",
+                    "--porcelain=v1",
+                    "-z",
+                    "--no-renames",
+                    "--untracked-files=all",
+                    "--",
+                    "openspec/changes",
+                ],
+            ),
+            Ok("?? openspec/changes/x/tasks.md\0".to_string()),
+        );
+        let git: Arc<dyn GitCli> = git_fake;
+
+        let (mut refresher, results_rx, _exit_rx) =
+            worker_for_test(base_root, cli, git, WORKTREE_RECHECK);
+        refresher.request(Selection::All, ArchivedScope::Names);
+        let _files = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("files");
+        let merged = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("merged");
+        match merged {
+            RefreshResult::Merged(set) => {
+                assert_eq!(set.worktrees.len(), 1);
+                assert_eq!(set.worktrees[0].label, "feat");
+                assert!(set.problems.is_empty(), "{:?}", set.problems);
+            }
+            other => panic!("expected Merged, got {other:?}"),
+        }
+        let _ = live_scratch;
+        let _ = base_scratch;
+    }
+
+    /// `worktree-overlay` -> "A member with no OpenSpec tree owns nothing".
+    #[test]
+    fn a_member_with_no_openspec_tree_owns_nothing() {
+        let (base_scratch, base_root) = scratch_root();
+        crate::testutil::write_with_mode(
+            &base_root.join("openspec/changes/x/tasks.md"),
+            b"- [ ] a\n",
+            0o644,
+        );
+        let bare_scratch = crate::testutil::ScratchDir::new();
+        let bare_root = crate::testutil::canonical(bare_scratch.path());
+        // No `openspec/` tree at all under `bare_root`.
+
+        let openspec_fake = Arc::new(crate::cli::FakeCli::new());
+        openspec_fake.register_openspec(
+            &["list", "--json"],
+            Ok(format!(
+                r#"{{"changes":[],"root":{{"path":{:?},"source":"nearest"}}}}"#,
+                base_root.display().to_string()
+            )),
+        );
+        let cli: Arc<dyn OpenspecCli> = openspec_fake;
+
+        let base_str = base_root.display().to_string();
+        let bare_str = bare_root.display().to_string();
+        let git_fake = Arc::new(crate::cli::FakeCli::new());
+        git_fake.register_git(
+            &git_args(&base_str, &["worktree", "list", "--porcelain", "-z"]),
+            Ok(format!(
+                "{}{}",
+                wt_record(&base_root, "aaaa", "main"),
+                wt_record(&bare_root, "bbbb", "empty"),
+            )),
+        );
+        git_fake.register_git(
+            &git_args(&bare_str, &["merge-base", "HEAD", "aaaa"]),
+            Ok("mbase".to_string()),
+        );
+        git_fake.register_git(
+            &git_args(
+                &bare_str,
+                &[
+                    "diff-tree",
+                    "-r",
+                    "--name-only",
+                    "-z",
+                    "--no-renames",
+                    "mbase",
+                    "HEAD",
+                    "--",
+                    "openspec/changes",
+                ],
+            ),
+            Ok(String::new()),
+        );
+        git_fake.register_git(
+            &git_args(
+                &bare_str,
+                &[
+                    "status",
+                    "--porcelain=v1",
+                    "-z",
+                    "--no-renames",
+                    "--untracked-files=all",
+                    "--",
+                    "openspec/changes",
+                ],
+            ),
+            Ok(String::new()),
+        );
+        let git: Arc<dyn GitCli> = git_fake;
+
+        let (mut refresher, results_rx, _exit_rx) =
+            worker_for_test(base_root, cli, git, WORKTREE_RECHECK);
+        refresher.request(Selection::All, ArchivedScope::Names);
+        let files = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("files");
+        let base_active_names: Vec<String> = match files {
+            RefreshResult::Files(set) => set.active.iter().map(|c| c.name.clone()).collect(),
+            other => panic!("expected Files, got {other:?}"),
+        };
+        let merged = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("merged");
+        match merged {
+            RefreshResult::Merged(set) => {
+                let names: Vec<String> = set.active.iter().map(|c| c.name.clone()).collect();
+                assert_eq!(
+                    names, base_active_names,
+                    "the empty member must own nothing"
+                );
+                assert_eq!(set.worktrees.len(), 1);
+                assert!(set.problems.is_empty(), "{:?}", set.problems);
+            }
+            other => panic!("expected Merged, got {other:?}"),
+        }
+        let _ = base_scratch;
+        let _ = bare_scratch;
+    }
+
+    /// `worktree-overlay` -> "Only the four commands are run".
+    #[test]
+    fn only_the_four_commands_are_run() {
+        let (base_scratch, base_root) = scratch_root();
+        let (feat_scratch, feat_root) = scratch_root();
+        crate::testutil::write_with_mode(
+            &feat_root.join("openspec/changes/x/tasks.md"),
+            b"- [ ] a\n",
+            0o644,
+        );
+        let (fix_scratch, fix_root) = scratch_root();
+        crate::testutil::write_with_mode(
+            &fix_root.join("openspec/changes/y/tasks.md"),
+            b"- [ ] a\n",
+            0o644,
+        );
+
+        let openspec_fake = Arc::new(crate::cli::FakeCli::new());
+        openspec_fake.register_openspec(
+            &["list", "--json"],
+            Ok(format!(
+                r#"{{"changes":[],"root":{{"path":{:?},"source":"nearest"}}}}"#,
+                base_root.display().to_string()
+            )),
+        );
+        let cli: Arc<dyn OpenspecCli> = openspec_fake;
+
+        let base_str = base_root.display().to_string();
+        let feat_str = feat_root.display().to_string();
+        let fix_str = fix_root.display().to_string();
+        let git_fake = Arc::new(crate::cli::FakeCli::new());
+        git_fake.register_git(
+            &git_args(&base_str, &["worktree", "list", "--porcelain", "-z"]),
+            Ok(format!(
+                "{}{}{}",
+                wt_record(&base_root, "aaaa", "main"),
+                wt_record(&feat_root, "bbbb", "feat"),
+                wt_record(&fix_root, "cccc", "fix"),
+            )),
+        );
+        for (root_str, sha) in [(&feat_str, "bbbb"), (&fix_str, "cccc")] {
+            git_fake.register_git(
+                &git_args(root_str, &["merge-base", "HEAD", "aaaa"]),
+                Ok(format!("base-{sha}")),
+            );
+            git_fake.register_git(
+                &git_args(
+                    root_str,
+                    &[
+                        "diff-tree",
+                        "-r",
+                        "--name-only",
+                        "-z",
+                        "--no-renames",
+                        &format!("base-{sha}"),
+                        "HEAD",
+                        "--",
+                        "openspec/changes",
+                    ],
+                ),
+                Ok(String::new()),
+            );
+            git_fake.register_git(
+                &git_args(
+                    root_str,
+                    &[
+                        "status",
+                        "--porcelain=v1",
+                        "-z",
+                        "--no-renames",
+                        "--untracked-files=all",
+                        "--",
+                        "openspec/changes",
+                    ],
+                ),
+                Ok(String::new()),
+            );
+        }
+        let git: Arc<dyn GitCli> = git_fake.clone();
+
+        let (mut refresher, results_rx, _exit_rx) =
+            worker_for_test(base_root, cli, git, WORKTREE_RECHECK);
+        refresher.request(Selection::All, ArchivedScope::Names);
+        let _files = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("files");
+        let _merged = results_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("merged");
+
+        let git_calls: Vec<Vec<String>> = git_fake
+            .calls()
+            .into_iter()
+            .filter(|(program, _)| *program == crate::cli::Program::Git)
+            .map(|(_, args)| args)
+            .collect();
+        assert_eq!(
+            git_calls.len(),
+            7,
+            "1 worktree list + 3 per member x 2 members"
+        );
+        for args in &git_calls {
+            assert_eq!(args[0], "--no-optional-locks");
+            assert_eq!(args[1], "-c");
+            assert_eq!(args[2], "core.fsmonitor=false");
+            assert_eq!(args[3], "-C");
+            assert!(
+                matches!(
+                    args[5].as_str(),
+                    "worktree" | "merge-base" | "diff-tree" | "status"
+                ),
+                "{args:?}"
+            );
+        }
+        let _ = base_scratch;
+        let _ = feat_scratch;
+        let _ = fix_scratch;
+    }
+
+    // --- group 8.2: real-git tests, driving the real `git` binary through `GitCli` ---
+
+    /// Refuses to run a real-git test if the process environment already names
+    /// `GIT_DIR`, `GIT_INDEX_FILE`, or `GIT_WORK_TREE` — design.md -> Test Boundaries:
+    /// these would redirect a scratch `-C`-qualified command at whatever repository
+    /// they name rather than at the scratch trees this test builds.
+    fn assert_no_git_env_leak() {
+        for var in ["GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE"] {
+            assert!(
+                std::env::var_os(var).is_none(),
+                "{var} is set in the test environment; refusing to run a real-git test \
+                 rather than risk touching the real repository"
+            );
+        }
+    }
+
+    fn real_git() -> Arc<dyn GitCli> {
+        crate::cli::git_cli_via(Path::new(crate::cli::GIT_PROGRAM))
+    }
+
+    /// Run a real `git` setup command in `dir` with a scratch identity and every
+    /// setting design.md -> Test Boundaries names, panicking on failure — test-only
+    /// scaffolding reached only through the crate's own `GitCli` seam, never a spawn
+    /// API named directly (`NOSPAWN-GREP` scans this file's test module too).
+    fn real_git_setup(git: &dyn GitCli, dir: &Path, args: &[&str]) {
+        let dir_str = dir.to_string_lossy().into_owned();
+        let mut full: Vec<&str> = vec![
+            "-C",
+            &dir_str,
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "init.defaultBranch=main",
+            "-c",
+            "user.email=scratch@example.com",
+            "-c",
+            "user.name=scratch",
+        ];
+        full.extend_from_slice(args);
+        git.run(&full)
+            .unwrap_or_else(|e| panic!("git {full:?} failed in {}: {e:?}", dir.display()));
+    }
+
+    /// `worktree-overlay` -> "A full cycle over a real repository and worktree leaves
+    /// git's files untouched".
+    #[test]
+    fn a_full_cycle_over_a_real_repository_and_worktree_leaves_gits_files_untouched() {
+        assert_no_git_env_leak();
+        let git = real_git();
+
+        let scratch = crate::testutil::ScratchDir::new();
+        let base_root = scratch.path().join("base");
+        let worktree_root = scratch.path().join("feat");
+        std::fs::create_dir_all(&base_root).expect("create base dir");
+
+        real_git_setup(git.as_ref(), &base_root, &["init", "-q", "-b", "main"]);
+        real_git_setup(
+            git.as_ref(),
+            &base_root,
+            &["config", "core.fsmonitor", "false"],
+        );
+        real_git_setup(git.as_ref(), &base_root, &["config", "gc.auto", "0"]);
+        real_git_setup(
+            git.as_ref(),
+            &base_root,
+            &["config", "maintenance.auto", "false"],
+        );
+
+        vendor_tdd_schema(&base_root);
+        crate::testutil::write_with_mode(
+            &base_root.join("openspec/changes/y/tasks.md"),
+            b"- [ ] a\n",
+            0o644,
+        );
+        real_git_setup(git.as_ref(), &base_root, &["add", "-A"]);
+        real_git_setup(git.as_ref(), &base_root, &["commit", "-q", "-m", "initial"]);
+
+        let worktree_str = worktree_root.to_string_lossy().into_owned();
+        real_git_setup(
+            git.as_ref(),
+            &base_root,
+            &["worktree", "add", "-q", "-b", "feat", &worktree_str],
+        );
+
+        // An uncommitted edit under the worktree's own `openspec/changes/x/`, and a
+        // file whose timestamp is moved without changing its bytes — design.md ->
+        // Test Boundaries' own two measured hazards.
+        crate::testutil::write_with_mode(
+            &worktree_root.join("openspec/changes/x/tasks.md"),
+            b"- [x] a\n- [ ] b\n",
+            0o644,
+        );
+        let y_path = worktree_root.join("openspec/changes/y/tasks.md");
+        let current = std::fs::metadata(&y_path)
+            .expect("stat committed y/tasks.md")
+            .modified()
+            .expect("modified time");
+        let advanced = current + std::time::Duration::from_secs(120);
+        let file = std::fs::File::options()
+            .write(true)
+            .open(&y_path)
+            .expect("open y/tasks.md for touching");
+        file.set_modified(advanced)
+            .expect("move y/tasks.md's mtime without touching its bytes");
+        drop(file);
+
+        let base_canonical = crate::testutil::canonical(&base_root);
+        let worktree_canonical = crate::testutil::canonical(&worktree_root);
+        let before_base = crate::testutil::snapshot(&base_canonical);
+        let before_worktree = crate::testutil::snapshot(&worktree_canonical);
+
+        let openspec_fake = Arc::new(crate::cli::FakeCli::new());
+        openspec_fake.register_openspec(
+            &["list", "--json"],
+            Ok(format!(
+                r#"{{"changes":[{{"name":"y","completedTasks":0,"totalTasks":1,"lastModified":"x","status":"y"}}],"root":{{"path":{:?},"source":"nearest"}}}}"#,
+                base_canonical.display().to_string()
+            )),
+        );
+        openspec_fake.register_openspec(
+            &["instructions", "apply", "--change", "y", "--json"],
+            Ok(format!(
+                r#"{{"schemaName":"tdd","changeDir":{:?},"contextFiles":{{}}}}"#,
+                base_canonical
+                    .join("openspec/changes/y")
+                    .display()
+                    .to_string()
+            )),
+        );
+        let cli: Arc<dyn OpenspecCli> = openspec_fake;
+
+        let (mut refresher, results_rx, _exit_rx) = worker_for_test(
+            base_canonical.clone(),
+            cli,
+            git.clone(),
+            Duration::from_millis(5),
+        );
+        refresher.request(Selection::All, ArchivedScope::Names);
+
+        let _files = results_rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("files");
+        let merged = results_rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("merged");
+        match merged {
+            RefreshResult::Merged(set) => {
+                let x = set.active.iter().find(|c| c.name == "x").unwrap();
+                assert!(x.dir.starts_with(&worktree_canonical), "{:?}", x.dir);
+                assert_eq!(set.worktrees.len(), 1);
+            }
+            other => panic!("expected Merged, got {other:?}"),
+        }
+
+        // No further request: wait long enough for several idle re-checks (5ms each)
+        // to run with nothing changing. A silent re-check leaves nothing on the
+        // channel to receive by design (`Files` is sent only when the overlay
+        // changes), so a `recv_timeout` on the result channel — never a sleep — is
+        // both the wait and the proof that nothing was written or corrupted while it
+        // ran, the same technique `an_unchanged_overlay_sends_nothing` uses.
+        match results_rx.recv_timeout(Duration::from_millis(200)) {
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            other => panic!("expected no further result, got {other:?}"),
+        }
+
+        let after_base = crate::testutil::snapshot(&base_canonical);
+        let after_worktree = crate::testutil::snapshot(&worktree_canonical);
+        assert_eq!(
+            before_base, after_base,
+            "the base's own files or git directory changed"
+        );
+        assert_eq!(
+            before_worktree, after_worktree,
+            "the worktree's own files changed"
+        );
+    }
+
+    /// `worktree-overlay` -> "A worktree that forked before the base moved on owns
+    /// nothing it did not touch".
+    #[test]
+    fn a_worktree_that_forked_before_the_base_moved_on_owns_nothing_it_did_not_touch() {
+        assert_no_git_env_leak();
+        let git = real_git();
+
+        let scratch = crate::testutil::ScratchDir::new();
+        let base_root = scratch.path().join("base");
+        let worktree_root = scratch.path().join("feat");
+        std::fs::create_dir_all(&base_root).expect("create base dir");
+
+        real_git_setup(git.as_ref(), &base_root, &["init", "-q", "-b", "main"]);
+        real_git_setup(
+            git.as_ref(),
+            &base_root,
+            &["config", "core.fsmonitor", "false"],
+        );
+        real_git_setup(git.as_ref(), &base_root, &["config", "gc.auto", "0"]);
+        real_git_setup(
+            git.as_ref(),
+            &base_root,
+            &["config", "maintenance.auto", "false"],
+        );
+
+        vendor_tdd_schema(&base_root);
+        crate::testutil::write_with_mode(
+            &base_root.join("openspec/changes/x/tasks.md"),
+            b"- [ ] a\n",
+            0o644,
+        );
+        crate::testutil::write_with_mode(
+            &base_root.join("openspec/changes/y/tasks.md"),
+            b"- [ ] a\n",
+            0o644,
+        );
+        real_git_setup(git.as_ref(), &base_root, &["add", "-A"]);
+        real_git_setup(git.as_ref(), &base_root, &["commit", "-q", "-m", "initial"]);
+
+        let worktree_str = worktree_root.to_string_lossy().into_owned();
+        real_git_setup(
+            git.as_ref(),
+            &base_root,
+            &["worktree", "add", "-q", "-b", "feat", &worktree_str],
+        );
+
+        // The base moves on after the fork: `x` is edited and `y` is archived, both
+        // committed — the member touches neither.
+        crate::testutil::write_with_mode(
+            &base_root.join("openspec/changes/x/tasks.md"),
+            b"- [x] a\n",
+            0o644,
+        );
+        std::fs::create_dir_all(base_root.join("openspec/changes/archive"))
+            .expect("create archive dir");
+        std::fs::rename(
+            base_root.join("openspec/changes/y"),
+            base_root.join("openspec/changes/archive/2026-09-24-y"),
+        )
+        .expect("archive y");
+        real_git_setup(git.as_ref(), &base_root, &["add", "-A"]);
+        real_git_setup(
+            git.as_ref(),
+            &base_root,
+            &["commit", "-q", "-m", "edit x, archive y"],
+        );
+
+        let base_canonical = crate::testutil::canonical(&base_root);
+        let worktree_canonical = crate::testutil::canonical(&worktree_root);
+
+        let openspec_fake = Arc::new(crate::cli::FakeCli::new());
+        openspec_fake.register_openspec(
+            &["list", "--json"],
+            Ok(format!(
+                r#"{{"changes":[{{"name":"x","completedTasks":1,"totalTasks":1,"lastModified":"x","status":"y"}}],"root":{{"path":{:?},"source":"nearest"}}}}"#,
+                base_canonical.display().to_string()
+            )),
+        );
+        openspec_fake.register_openspec(
+            &["instructions", "apply", "--change", "x", "--json"],
+            Ok(format!(
+                r#"{{"schemaName":"tdd","changeDir":{:?},"contextFiles":{{}}}}"#,
+                base_canonical
+                    .join("openspec/changes/x")
+                    .display()
+                    .to_string()
+            )),
+        );
+        let cli: Arc<dyn OpenspecCli> = openspec_fake;
+
+        let (mut refresher, results_rx, _exit_rx) =
+            worker_for_test(base_canonical.clone(), cli, git, WORKTREE_RECHECK);
+        refresher.request(Selection::All, ArchivedScope::Full);
+
+        let _files = results_rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("files");
+        let merged = results_rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("merged");
+        match merged {
+            RefreshResult::Merged(set) => {
+                assert_eq!(set.worktrees.len(), 1);
+                let x = set.active.iter().find(|c| c.name == "x").unwrap();
+                assert!(
+                    x.dir.starts_with(&base_canonical) && !x.dir.starts_with(&worktree_canonical),
+                    "the member forked before the edit and must not own x: {:?}",
+                    x.dir
+                );
+                assert_eq!(x.progress.completed, 1);
+                assert!(set.active.iter().all(|c| c.name != "y"));
+                assert!(set.archived.iter().any(|c| c.name == "y"));
+                assert!(set.problems.is_empty(), "{:?}", set.problems);
+            }
+            other => panic!("expected Merged, got {other:?}"),
+        }
     }
 }
