@@ -180,9 +180,7 @@ pub(crate) mod conformance {
             archived,
             problems: _,
             archived_total,
-            // Bound but not yet asserted on: the no-duplicate-root check is
-            // added in GREEN, once `worktrees::member_of` itself exists.
-            worktrees: _,
+            worktrees,
         } = set;
 
         assert!(
@@ -197,6 +195,16 @@ pub(crate) mod conformance {
              than archived.len() ({})",
             archived.len()
         );
+
+        let mut roots = std::collections::HashSet::new();
+        for member in worktrees {
+            assert!(
+                roots.insert(&member.root),
+                "ChangeSet::worktrees must not list the same root twice, \
+                 got a duplicate of {:?}",
+                member.root
+            );
+        }
     }
 }
 

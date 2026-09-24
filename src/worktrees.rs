@@ -38,7 +38,9 @@ pub struct Worktree {
 /// nest, so at most one member matches. See `specs/worktree-overlay/spec.md`
 /// -> "A change's worktree is found by its changes directory, in one place".
 pub fn member_of<'a>(members: &'a [Worktree], dir: &Path) -> Option<&'a Worktree> {
-    unimplemented!("member_of's real body is added in GREEN")
+    members
+        .iter()
+        .find(|member| dir.starts_with(member.root.join("openspec").join("changes")))
 }
 
 #[cfg(test)]
