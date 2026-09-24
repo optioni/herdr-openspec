@@ -80,14 +80,17 @@
 ## 3. The branch in the detail header
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: Write in `src/ui/detail.rs` (`DETAILWIDTHS`: `58` and `78` in every test) the
+- [x] 3.1 RED: Write in `src/ui/detail.rs` (`DETAILWIDTHS`: `58` and `78` in every test) the
       three `branched_header_row` scenarios, and in `src/ui/view.rs` (`60` and `120`) *The view
       draws the branch only for a worktree copy*, nested arm included.
-- [ ] 3.2 GREEN: Add `ui::detail::branched_header_row` composing `header_row` and cutting the
+- [x] 3.2 GREEN: Add `ui::detail::branched_header_row` composing `header_row` and cutting the
       label by `ui::list::truncate_right`'s rule, per design.md → D13, and choose it at
       `src/ui/view.rs:164` through `member_of`.
-- [ ] 3.3 Run `cargo test --lib ui::detail` and `cargo test --lib ui::view` — green, every
+- [x] 3.3 Run `cargo test --lib ui::detail` and `cargo test --lib ui::view` — green, every
       existing `header_row` test unchanged (17 references at HEAD); no refactor needed.
+      - Confirmed: `cargo test --lib ui::detail::` → 77 passed; `cargo test --lib ui::view::` →
+        167 passed, including the new `the_view_draws_the_branch_only_for_a_worktree_copy`
+        scenario.
 
 ## 4. Parsing git's answers
 <!-- kind: behavior -->
