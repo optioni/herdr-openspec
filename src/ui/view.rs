@@ -1182,6 +1182,24 @@ mod tests {
         }
     }
 
+    /// `dashboard_with`, then its `changes.worktrees` replaced by
+    /// `worktrees::Worktree` values built from `(root, label)` pairs —
+    /// `worktree-changes`' own fixture composition, matching
+    /// `ui::list`'s `dashboard_with_worktrees` on `fixture::with_worktrees`'
+    /// terms, for the detail-header scenario that needs a change's `dir` to
+    /// fall under a worktree member's own `openspec/changes`.
+    fn dashboard_with_worktrees(
+        active: Vec<Change>,
+        archived: Vec<Change>,
+        selected: usize,
+        route: Route,
+        worktrees: &[(&str, &str)],
+    ) -> Dashboard {
+        let mut d = dashboard_with(active, archived, selected, route);
+        d.changes = fixture::with_worktrees(d.changes, worktrees);
+        d
+    }
+
     /// `dashboard_with`, but with an explicit `Detail` — `detail-view`'s
     /// header/tab-bar/content scenarios need a selected change **and** a
     /// specific `detail.tab`, `detail.sections`, or `detail.problems`.
@@ -9303,6 +9321,71 @@ mod tests {
                 (first..=last).any(|x| cell(&buf, x, 2).style().bg != uncoloured().bg),
                 "width {width}: the tab bar carries no background at all"
             );
+        }
+    }
+
+    /// `worktree-changes` -> `specs/detail-header/spec.md` :: "The view draws
+    /// the branch only for a worktree copy": `worktrees::member_of` is the one
+    /// derivation deciding whether `render_detail_header` calls
+    /// `detail::branched_header_row` or plain `detail::header_row`, at both
+    /// mandated widths, and a nested worktree family must not claim the pane's
+    /// own rows either.
+    #[test]
+    fn the_view_draws_the_branch_only_for_a_worktree_copy() {
+        let mut worktree_change = fixture::active("x", 1, 2);
+        worktree_change.dir = std::path::PathBuf::from("/w/feat/openspec/changes/x");
+        let with_worktree = dashboard_with_worktrees(
+            vec![worktree_change],
+            Vec::new(),
+            0,
+            Route::Detail,
+            &[("/w/feat", "feat")],
+        );
+
+        let plain_change = fixture::active("y", 1, 2);
+        let without_worktree = dashboard_with_worktrees(
+            vec![plain_change.clone()],
+            Vec::new(),
+            0,
+            Route::Detail,
+            &[("/w/feat", "feat")],
+        );
+        let baseline = dashboard_with(vec![plain_change], Vec::new(), 0, Route::Detail);
+
+        for (width, height) in [(120u16, 20u16), (60, 20)] {
+            let with_buf = render_at(width, height, &with_worktree);
+            let with_row = row_text(&with_buf, 0);
+            assert!(with_row.contains("@feat"), "width {width}: {with_row:?}");
+
+            let without_buf = render_at(width, height, &without_worktree);
+            let without_row = row_text(&without_buf, 0);
+            assert!(!without_row.contains('@'), "width {width}: {without_row:?}");
+
+            let base_buf = render_at(width, height, &baseline);
+            assert_eq!(
+                without_row,
+                row_text(&base_buf, 0),
+                "width {width}: must equal the frame drawn before worktree-changes"
+            );
+        }
+
+        // The nested arm: the repository root is itself a worktree checkout
+        // (`/r/.worktrees/feat`), and the outer family's own member (`/r`,
+        // "main") must not claim a change nested under it but not under its
+        // own `openspec/changes`.
+        let mut nested_change = fixture::active("x", 1, 2);
+        nested_change.dir = std::path::PathBuf::from("/r/.worktrees/feat/openspec/changes/x");
+        let nested = dashboard_with_worktrees(
+            vec![nested_change],
+            Vec::new(),
+            0,
+            Route::Detail,
+            &[("/r", "main")],
+        );
+        for (width, height) in [(120u16, 20u16), (60, 20)] {
+            let buf = render_at(width, height, &nested);
+            let row = row_text(&buf, 0);
+            assert!(!row.contains('@'), "width {width}: {row:?}");
         }
     }
 

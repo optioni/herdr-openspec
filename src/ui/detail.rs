@@ -963,8 +963,8 @@ pub fn span_text(rows: &[ContentRow], anchor: (usize, u16), focus: (usize, u16))
 #[cfg(test)]
 mod tests {
     use super::{
-        ContentKind, ContentRow, Tab, content_lines, header, header_row, section_at, span_text,
-        tab_bar, word_at,
+        ContentKind, ContentRow, Tab, branched_header_row, content_lines, header, header_row,
+        section_at, span_text, tab_bar, word_at,
     };
     use crate::changes::fixture;
     use crate::tasks::Progress;
@@ -2442,6 +2442,106 @@ mod tests {
             let expected = format!("{expected_name_field} () ██████░░░░░░ [1/2]");
             assert_eq!(got, expected, "width {width}: {got:?}");
         }
+    }
+
+    /// `worktree-changes` -> `specs/detail-header/spec.md` :: "A worktree
+    /// change's header at both mandated interior widths": the branch cell is
+    /// inserted immediately after the name field, and removing its six
+    /// characters (` @feat`) yields exactly what `header_row` itself draws
+    /// at the six-columns-narrower width.
+    #[test]
+    fn a_worktree_changes_header_at_both_mandated_interior_widths() {
+        let progress = Progress {
+            completed: 4,
+            total: 42,
+        };
+        for (width, name_field_width) in [(78u16, 46usize), (58, 26)] {
+            let got = branched_header_row("detail-view", "feat", "tdd", &progress, width);
+            assert_eq!(columns(&got), width as usize, "width {width}");
+            let expected_name_field =
+                format!("{:<width$}", "detail-view", width = name_field_width);
+            let expected = format!("{expected_name_field} @feat (tdd) █░░░░░░░░░░░ [4/42]");
+            assert_eq!(got, expected, "width {width}: {got:?}");
+
+            let idx = got.find(" @feat").expect("branch cell present");
+            let mut without_branch = got.clone();
+            without_branch.replace_range(idx..idx + " @feat".len(), "");
+            assert_eq!(
+                without_branch,
+                header_row("detail-view", "tdd", &progress, width - 6),
+                "width {width}"
+            );
+        }
+    }
+
+    /// `worktree-changes` -> `specs/detail-header/spec.md` :: "The branch is
+    /// dropped whole before the gauge": at 78, 58, and 32 the branch cell and
+    /// the gauge both survive; at every width from 31 down to 0 the result is
+    /// byte-identical to `header_row` itself, so the gauge can still be drawn
+    /// at 31 and 26 with the branch already gone.
+    #[test]
+    fn the_branch_is_dropped_whole_before_the_gauge() {
+        let progress = Progress {
+            completed: 4,
+            total: 9,
+        };
+        for w in [78u16, 58, 32, 31, 26, 13, 7, 1, 0] {
+            let got = branched_header_row("add-token-refresh", "feat", "tdd", &progress, w);
+            assert_eq!(columns(&got), w as usize, "width {w}: {got:?}");
+            if matches!(w, 78 | 58 | 32) {
+                assert!(got.contains("@feat"), "width {w}: {got:?}");
+                assert_eq!(
+                    got.chars().filter(|&c| c == '█' || c == '░').count(),
+                    12,
+                    "width {w}: {got:?}"
+                );
+            } else {
+                assert_eq!(
+                    got,
+                    header_row("add-token-refresh", "tdd", &progress, w),
+                    "width {w}"
+                );
+            }
+            // Never cut short: any partial appearance of the branch marker
+            // is the whole cell or nothing.
+            if got.contains("@f") {
+                assert!(got.contains("@feat"), "width {w}: partial branch cell: {got:?}");
+            }
+        }
+    }
+
+    /// `worktree-changes` -> `specs/detail-header/spec.md` :: "A long branch
+    /// name is capped, and a detached head shows its commit".
+    #[test]
+    fn a_long_branch_name_is_capped_and_a_detached_head_shows_its_commit() {
+        let progress = Progress {
+            completed: 1,
+            total: 2,
+        };
+        let long = branched_header_row(
+            "alpha",
+            "feature/a-very-long-branch-name",
+            "tdd",
+            &progress,
+            78,
+        );
+        assert_eq!(columns(&long), 78, "{long:?}");
+        assert!(long.contains("@feature/a-very-…"), "{long:?}");
+        let name_field_end = long.find(" @feature").expect("branch cell present");
+        assert_eq!(columns(&long[..name_field_end]), 35, "{long:?}");
+
+        let detached = branched_header_row("alpha", "a1b2c3d", "tdd", &progress, 78);
+        assert_eq!(columns(&detached), 78, "{detached:?}");
+        assert!(detached.contains("@a1b2c3d"), "{detached:?}");
+
+        let at_58 = branched_header_row(
+            "alpha",
+            "feature/a-very-long-branch-name",
+            "tdd",
+            &progress,
+            58,
+        );
+        assert_eq!(columns(&at_58), 58, "{at_58:?}");
     }
 
     #[test]
