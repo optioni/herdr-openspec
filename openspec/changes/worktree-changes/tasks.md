@@ -11,7 +11,7 @@
 ## 0. Acceptance Test — Outer Loop RED
 <!-- kind: behavior -->
 
-- [ ] 0.1 Build the harness named in design.md → Test Boundaries in `src/ui/mod.rs`'s test
+- [x] 0.1 Build the harness named in design.md → Test Boundaries in `src/ui/mod.rs`'s test
       module: a `ScratchDir` base repository with active `x` at 0 of 3, a scratch member tree
       whose `x` counts 2 of 3, a scratch `#!/bin/sh` `git` answering the four `worktree-overlay`
       commands for that member and logging each call, and scratch `openspec` and `herdr`
@@ -19,10 +19,10 @@
       compile: `Startup::git`, set at the 6 `Startup {` literals and the 7 `ProbedStartup {`
       harness literals, and a `git: &Path` parameter on `start_collaborators`, unused until group
       8, passed at its 2 test calls (`src/ui/mod.rs:5669`, `:6169`).
-- [ ] 0.2 RED: Write `run_wired_shows_a_worktree_copy_with_its_marker`, driving `run_wired`
+- [x] 0.2 RED: Write `run_wired_shows_a_worktree_copy_with_its_marker`, driving `run_wired`
       through the existing `UntilReady` harness with the predicate "the scratch `git` log records
       a `status` call", then asserting a frame's list interior holds a row ending ` @ [2/3]`.
-- [ ] 0.3 Confirm it compiles and fails on the missing row — no `status` call is ever logged —
+- [x] 0.3 Confirm it compiles and fails on the missing row — no `status` call is ever logged —
       not on the harness. Record the failure line here.
       - Confirmed: `cargo test --lib ui::tests::wiring::run_wired_shows_a_worktree_copy_with_its_marker`
         compiles and fails (after the `UntilReady` 30s deadline, since the predicate — a
