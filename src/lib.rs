@@ -22,6 +22,7 @@ pub mod state;
 pub mod tasks;
 pub mod ui;
 pub mod watch;
+pub mod worktrees;
 
 /// The current process id. Exists so `state::record`'s temporary-file name
 /// can include it without `src/state.rs` itself naming the standard-library

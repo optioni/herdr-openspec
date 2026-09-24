@@ -3203,6 +3203,7 @@ fn sweep_dashboard(route: Route, overlay: OverlayPass, fixture: SweepFixture) ->
             )],
             problems: Vec::new(),
             archived_total: 1,
+            worktrees: Vec::new(),
         },
         route,
         quit: false,

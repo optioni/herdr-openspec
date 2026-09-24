@@ -157,6 +157,7 @@ fn one_artifact_dashboard(path: &Path) -> Dashboard {
             archived: Vec::new(),
             problems: Vec::new(),
             archived_total: 0,
+            worktrees: Vec::new(),
         },
         route: Route::Detail,
         quit: false,

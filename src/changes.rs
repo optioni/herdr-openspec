@@ -86,6 +86,17 @@ pub struct ChangeSet {
     /// `conformance::assert_set_invariants` for the two invariants this
     /// field and `archived` must satisfy together.
     pub archived_total: usize,
+    /// The worktree family the set was overlaid against, in the order
+    /// `git worktree list` gave them — the pane's own root is never among
+    /// them. `worktree-changes`' addition: empty on every set
+    /// `changes::from_files` returns, on `changes::empty_set()`, and
+    /// whenever no family was read; `changes::merge` carries the file
+    /// result's list through untouched, on exactly `archived_total`'s terms.
+    /// `worktrees::member_of(&set.worktrees, &change.dir)` is how a view
+    /// learns that a change came from one — derived, never stored on
+    /// `Change` itself. See `conformance::assert_set_invariants` for the
+    /// no-duplicate-root invariant this field must satisfy.
+    pub worktrees: Vec<crate::worktrees::Worktree>,
 }
 
 /// The shared gate that keeps `changes::from_files` and (from Phase 3)
@@ -159,8 +170,9 @@ pub(crate) mod conformance {
     /// destroy mechanism 2's `E0027` guard for every landed call site.
     /// Checks the two invariants `change-model` states on `archived_total`:
     /// `archived.len()` is either `0` or exactly `archived_total`, and
-    /// `archived_total` is never less than `archived.len()`. The opening
-    /// pattern is exhaustive with no `..` rest, so a sixth `ChangeSet` field
+    /// `archived_total` is never less than `archived.len()`. `worktree-changes`
+    /// adds a third: no two `worktrees` entries share a `root`. The opening
+    /// pattern is exhaustive with no `..` rest, so a further `ChangeSet` field
     /// makes this function fail to compile rather than silently pass unread.
     pub(crate) fn assert_set_invariants(set: &ChangeSet) {
         let ChangeSet {
@@ -168,6 +180,9 @@ pub(crate) mod conformance {
             archived,
             problems: _,
             archived_total,
+            // Bound but not yet asserted on: the no-duplicate-root check is
+            // added in GREEN, once `worktrees::member_of` itself exists.
+            worktrees: _,
         } = set;
 
         assert!(
@@ -416,6 +431,34 @@ pub(crate) mod fixture {
             archived,
             problems,
             archived_total,
+            worktrees: Vec::new(),
+        }
+    }
+
+    /// `set` with its `worktrees` replaced by `worktrees::Worktree` values
+    /// built from `(root, label)` pairs, in the given order —
+    /// `worktree-changes`' addition, on `with_problems`' "no `..` rest,
+    /// every field named" terms.
+    pub(crate) fn with_worktrees(set: ChangeSet, worktrees: &[(&str, &str)]) -> ChangeSet {
+        let ChangeSet {
+            active,
+            archived,
+            problems,
+            archived_total,
+            worktrees: _,
+        } = set;
+        ChangeSet {
+            active,
+            archived,
+            problems,
+            archived_total,
+            worktrees: worktrees
+                .iter()
+                .map(|(root, label)| crate::worktrees::Worktree {
+                    root: PathBuf::from(root),
+                    label: label.to_string(),
+                })
+                .collect(),
         }
     }
 
@@ -1787,13 +1830,16 @@ fn dedup_preserve_order(items: Vec<String>) -> Vec<String> {
 
 /// Layer `cli` over `files`: `change-merge`'s field table, applied per
 /// change paired by name. Pure — no filesystem, no CLI — and total: never a
-/// `Result`, never panics. See `change-merge` for the full contract.
+/// `Result`, never panics. `files.worktrees` is carried through untouched,
+/// on exactly `archived_total`'s terms — `worktree-changes`' addition. See
+/// `change-merge` for the full contract.
 pub fn merge(files: ChangeSet, cli: CliChanges) -> ChangeSet {
     let ChangeSet {
         active: file_active,
         archived,
         problems: file_problems,
         archived_total,
+        worktrees,
     } = files;
     let CliChanges {
         active: cli_active,
@@ -1844,6 +1890,7 @@ pub fn merge(files: ChangeSet, cli: CliChanges) -> ChangeSet {
         archived,
         problems,
         archived_total,
+        worktrees,
     }
 }
 
@@ -1858,6 +1905,7 @@ pub fn empty_set() -> ChangeSet {
         archived: Vec::new(),
         problems: Vec::new(),
         archived_total: 0,
+        worktrees: Vec::new(),
     }
 }
 
@@ -1922,6 +1970,7 @@ pub fn from_files(repo: &std::path::Path, archived: ArchivedScope) -> ChangeSet 
         archived,
         problems,
         archived_total,
+        worktrees: Vec::new(),
     }
 }
 
@@ -3985,8 +4034,71 @@ apply:
             ],
             problems: Vec::new(),
             archived_total: 22,
+            worktrees: Vec::new(),
         };
         assert_set_invariants(&bad);
+    }
+
+    /// change-model, "Archived changes are file-sourced only, and the two
+    /// lists stay separate" (the `worktrees` paragraph), and
+    /// worktree-overlay's "The worktree family travels with the set and
+    /// nowhere else" scenario: `from_files`, `empty_set`, and a set built by
+    /// hand all agree on what `worktrees` must and must not carry.
+    #[test]
+    fn the_worktree_family_travels_with_the_set_and_nowhere_else() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+        write_project_config(&repo, "tdd");
+
+        let from_files_set = from_files(&repo, ArchivedScope::Full);
+        assert!(
+            from_files_set.worktrees.is_empty(),
+            "changes::from_files must carry no worktree family"
+        );
+        assert_set_invariants(&from_files_set);
+
+        let empty = empty_set();
+        assert!(
+            empty.worktrees.is_empty(),
+            "changes::empty_set must carry no worktree family"
+        );
+        assert_set_invariants(&empty);
+
+        let with_family = fixture::with_worktrees(
+            fixture::set(Vec::new(), Vec::new(), Vec::new()),
+            &[("/w/feat", "feat")],
+        );
+        let cli = CliChanges {
+            active: Vec::new(),
+            problems: Vec::new(),
+        };
+        let merged = merge(with_family, cli);
+        assert_eq!(
+            merged.worktrees,
+            vec![crate::worktrees::Worktree {
+                root: PathBuf::from("/w/feat"),
+                label: "feat".to_string(),
+            }],
+            "changes::merge must carry the file result's worktrees through untouched"
+        );
+        assert_set_invariants(&merged);
+
+        let duplicated = fixture::with_worktrees(
+            fixture::set(Vec::new(), Vec::new(), Vec::new()),
+            &[("/w/feat", "feat"), ("/w/feat", "feat-again")],
+        );
+        let result = std::panic::catch_unwind(|| assert_set_invariants(&duplicated));
+        assert!(
+            result.is_err(),
+            "assert_set_invariants must reject a worktrees list with a duplicate root"
+        );
+
+        let single = fixture::with_worktrees(
+            fixture::set(Vec::new(), Vec::new(), Vec::new()),
+            &[("/w/feat", "feat")],
+        );
+        assert_set_invariants(&single);
     }
 
     #[test]
@@ -7647,6 +7759,7 @@ apply:
             archived: Vec::new(),
             problems: Vec::new(),
             archived_total: 0,
+            worktrees: Vec::new(),
         };
         files.active.push(Change {
             name: "alpha".to_string(),
@@ -7749,6 +7862,7 @@ apply:
             }],
             problems: Vec::new(),
             archived_total: 1,
+            worktrees: Vec::new(),
         };
 
         let cli = CliChanges {
