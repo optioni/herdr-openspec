@@ -132,7 +132,7 @@
 ## 7. The gates see the git seam
 <!-- kind: operational -->
 
-- [ ] 7.1 CHECK: At HEAD nothing catches a stray git handle. In a scratch copy of the tree:
+- [x] 7.1 CHECK: At HEAD nothing catches a stray git handle. In a scratch copy of the tree:
 
       ```
       /bin/sh scripts/gates/nocli-shell.sh      # + 'use crate::cli::GitCli;' in src/ui/list.rs → exit 0
@@ -143,13 +143,13 @@
       # control: + 'use crate::cli::HerdrCli;'  # nocli-shell → "NOCLI-SHELL FAIL … src/ui/list.rs:1"
       ```
 
-- [ ] 7.2 CHANGE: Add `GitCli` to `nocli-shell.sh`'s `CLI_RE`; make `launchseam.sh`'s
+- [x] 7.2 CHANGE: Add `GitCli` to `nocli-shell.sh`'s `CLI_RE`; make `launchseam.sh`'s
       `HANDLE_RE` an environment parameter defaulting to its current value and add a third
       `gates:` line with `LAUNCH=src/refresh.rs`, the git names, and `ALLOWED='src/cli.rs
       src/refresh.rs src/ui/mod.rs'`; extend `wired.sh` to require `git_cli_via` in
       `start_collaborators` and `cli::GIT_PROGRAM` in `run` and to reject a `"git"` literal there;
       add a plant for each to `tests/gate-controls.toml`.
-- [ ] 7.3 VERIFY: `make gates` green; `cargo test --test gate_controls` green with every new plant
+- [x] 7.3 VERIFY: `make gates` green; `cargo test --test gate_controls` green with every new plant
       executed. Keep the tree quiet while it runs.
 
 ## 8. The refresh worker overlays and re-checks
