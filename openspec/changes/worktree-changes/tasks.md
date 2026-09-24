@@ -24,6 +24,14 @@
       a `status` call", then asserting a frame's list interior holds a row ending ` @ [2/3]`.
 - [ ] 0.3 Confirm it compiles and fails on the missing row — no `status` call is ever logged —
       not on the harness. Record the failure line here.
+      - Confirmed: `cargo test --lib ui::tests::wiring::run_wired_shows_a_worktree_copy_with_its_marker`
+        compiles and fails (after the `UntilReady` 30s deadline, since the predicate — a
+        `status` line in the scratch git log — never goes true) at `src/ui/mod.rs:3701`:
+        `panicked at src/ui/mod.rs:3701:13: a frame's list interior must hold a row ending
+        ' @ [2/3]' for the worktree copy of change x: [...]` — the rendered rows show only the
+        base repository's own `x [0/3]`, never the member's `@ [2/3]` row, and the scratch git
+        log stays empty throughout (the preceding assertion, that no `status` call was ever
+        logged, passes), confirming `Startup::git` is plumbed but unread.
 
 ## 1. The worktree family on the change set
 <!-- kind: behavior -->

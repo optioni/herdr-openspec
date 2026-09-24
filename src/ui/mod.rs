@@ -123,6 +123,11 @@ pub struct Startup<'a> {
     /// because the guard hands out a `String` it built from a `TerminalError`'s
     /// `Display` form, and nothing else in the process owns it.
     pub mouse_problem: Option<String>,
+    /// `worktree-changes`' addition (design.md -> Decision 14): the `git` binary, injected on
+    /// exactly `herdr`'s terms rather than made optional — an absent `git` is a degraded state
+    /// the worker absorbs, not a second way to say the same thing. Unused until group 8 wires
+    /// it into `refresh::start`.
+    pub git: &'a Path,
 }
 
 /// The live tier's three collaborators, plus any problem folded in while
@@ -205,7 +210,12 @@ pub fn start_collaborators(
     state_dir: Option<&Path>,
     env: &dyn Fn(&str) -> Option<String>,
     npm_hook: &dyn Fn() -> Option<std::path::PathBuf>,
+    // `worktree-changes` group 0: unused until group 8 wires it into `refresh::start` (design.md
+    // -> Decision 14). Named, not `_git`, so its production use in group 8 is a one-line change
+    // rather than a rename.
+    git: &Path,
 ) -> Collaborators {
+    let _ = git;
     let mut problems = config.problems.clone();
 
     let resolution = crate::resolve::openspec_bin(config.openspec_bin.as_deref(), env, npm_hook);
@@ -311,6 +321,7 @@ pub fn run_wired<B: Backend, E: EventSource>(
         startup.state_dir,
         startup.env,
         startup.npm_hook,
+        startup.git,
     );
     // File mode has no worker to resolve the archive later, so the archive it never opens is
     // the archive it never sees: `load` resolves it up front. With a binary, the worker
@@ -465,6 +476,10 @@ pub fn run() -> Result<(), StartError> {
         env: &env,
         npm_hook: &crate::cli::npm_probe_hook,
         mouse_problem: guard.mouse_problem(),
+        // `worktree-changes` group 0: `cli::GIT_PROGRAM` does not exist until group 6/7, which
+        // is also when `wired.sh` starts rejecting a bare `"git"` literal here — see design.md
+        // -> Decision 14.
+        git: Path::new("git"),
     };
     let write = |text: &str| guard.write_clipboard(text).map_err(|e| e.to_string());
     run_wired(
@@ -3277,6 +3292,7 @@ apply:
             let backend = ratatui::backend::TestBackend::new(width, 20);
             let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
             let mut events = UntilReady::new(predicate);
+            let git = root.join("does-not-exist-git");
             let startup = Startup {
                 cwd: root,
                 config,
@@ -3285,6 +3301,7 @@ apply:
                 env: &no_env,
                 npm_hook: &no_npm_hook,
                 mouse_problem: None,
+                git: &git,
             };
             let result = super::super::run_wired(
                 &mut terminal,
@@ -3323,6 +3340,10 @@ apply:
             /// have reported it. `run_wired_at` passes `None`, which is what
             /// every other test in this module drives.
             mouse_problem: Option<String>,
+            /// `worktree-changes`' addition, on `herdr`'s terms: the `git` binary, unused until
+            /// group 8. Every call site below passes a non-existent path, following `herdr`'s
+            /// own established convention for an unused collaborator.
+            git: &'a Path,
         }
 
         /// `run_wired_at`'s twin, driving `run_wired` with an explicit `env`/`npm_hook` — see
@@ -3344,6 +3365,7 @@ apply:
                 env: p.env,
                 npm_hook: p.npm_hook,
                 mouse_problem: p.mouse_problem,
+                git: p.git,
             };
             let result = super::super::run_wired(
                 &mut terminal,
@@ -3536,6 +3558,153 @@ apply:
             f.write_all(b"x").expect("append one byte");
         }
 
+        // --- worktree-changes: the outer-loop acceptance harness ---------------------------
+
+        /// A scratch repository holding one active change, `x`, whose `tasks.md` counts 0 of
+        /// 3 — the pane's own root copy, as `run_wired_shows_a_worktree_copy_with_its_marker`
+        /// drives it: the row this test looks for must come from the *member's* copy, not
+        /// this one.
+        fn scratch_repo_with_x_untouched() -> ScratchDir {
+            let scratch = ScratchDir::new();
+            let root = scratch.path();
+            vendor_tdd_schema(root);
+            write_with_mode(&root.join("openspec/changes/x/proposal.md"), b"# x\n", 0o644);
+            write_with_mode(
+                &root.join("openspec/changes/x/tasks.md"),
+                b"- [ ] a\n- [ ] b\n- [ ] c\n",
+                0o644,
+            );
+            scratch
+        }
+
+        /// A separate scratch tree standing in for a linked git worktree — nothing here is a
+        /// real `git worktree`, since the scratch `git` program below answers every command
+        /// itself — holding its own copy of change `x`, 2 of 3 tasks done: the member's copy
+        /// the future worktree overlay would show, ahead of the base repository's own 0 of 3.
+        fn scratch_member_tree_with_x_in_progress() -> ScratchDir {
+            let scratch = ScratchDir::new();
+            let root = scratch.path();
+            vendor_tdd_schema(root);
+            write_with_mode(&root.join("openspec/changes/x/proposal.md"), b"# x\n", 0o644);
+            write_with_mode(
+                &root.join("openspec/changes/x/tasks.md"),
+                b"- [x] a\n- [x] b\n- [ ] c\n",
+                0o644,
+            );
+            scratch
+        }
+
+        /// A scratch `#!/bin/sh` `git` program: appends its arguments to `log`, one line per
+        /// invocation, then answers whichever of the four commands `worktree-overlay` will
+        /// eventually drive — `worktree list --porcelain -z`, `merge-base`, `diff-tree`, and
+        /// `status` — plausibly enough that a later group can drive against it directly, even
+        /// though nothing in the crate parses this output yet (design.md -> Test Boundaries).
+        /// `member` is the scratch member tree's own root, named in the `worktree list`
+        /// listing this prints.
+        fn git_script(dir: &Path, log: &Path, member: &Path) -> PathBuf {
+            write_script(
+                dir,
+                "git",
+                &format!(
+                    "printf '%s\\n' \"$*\" >> \"{log}\"\n\
+                     case \"$1\" in\n\
+                     worktree)\n\
+                     printf 'worktree {member}\\nHEAD abc123def456\\nbranch refs/heads/x\\n\\n'\n\
+                     ;;\n\
+                     merge-base)\n\
+                     printf 'abc123def456\\n'\n\
+                     ;;\n\
+                     diff-tree)\n\
+                     printf 'openspec/changes/x/tasks.md\\n'\n\
+                     ;;\n\
+                     status)\n\
+                     printf ' M openspec/changes/x/tasks.md\\n'\n\
+                     ;;\n\
+                     esac\n",
+                    log = log.display(),
+                    member = member.display(),
+                ),
+            )
+        }
+
+        /// `worktree-changes` group 0 (design.md -> Test Strategy, the outer-loop acceptance
+        /// test) :: a member tree ahead of the base repository on change `x` must show up in
+        /// the list, marked and with its own progress — driven through `run_wired` against a
+        /// scratch base repository, a scratch member tree, a scratch `git` answering the four
+        /// `worktree-overlay` commands, and the existing scratch `openspec`/`herdr` programs.
+        ///
+        /// RED by construction: `Startup::git` is plumbed through this group but nothing reads
+        /// it yet (`worktree-overlay` lands in a later group), so the scratch `git` program is
+        /// never invoked at all — the `UntilReady` predicate below, "the git log records a
+        /// `status` call", can never go true, and `run_wired` returns once `UntilReady`'s own
+        /// 30s deadline presses `q` regardless. The row this test looks for can therefore never
+        /// appear either, which is the right reason for this test to fail — see `live-refresh`'s
+        /// own history, design.md -> Test Strategy: a `run` that never calls the collaborator it
+        /// was handed passes every unit test and fails only here.
+        #[test]
+        fn run_wired_shows_a_worktree_copy_with_its_marker() {
+            let scratch = scratch_repo_with_x_untouched();
+            let root = scratch.path();
+            let member_scratch = scratch_member_tree_with_x_in_progress();
+            let member_root = member_scratch.path().to_path_buf();
+
+            let git_log = root.join("git.log");
+            let openspec_log = root.join("openspec.log");
+            let git = git_script(root, &git_log, &member_root);
+            let openspec = openspec_script(root, &openspec_log, root);
+            let herdr = root.join("does-not-exist-herdr");
+
+            let config = Config {
+                openspec_bin: Some(openspec),
+                ..Config::default()
+            };
+
+            let predicate = || {
+                std::fs::read_to_string(&git_log)
+                    .unwrap_or_default()
+                    .lines()
+                    .any(|line| line.starts_with("status"))
+            };
+
+            let backend = ratatui::backend::TestBackend::new(120, 20);
+            let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+            let mut events = UntilReady::new(&predicate);
+            let startup = Startup {
+                cwd: root,
+                config: &config,
+                herdr: &herdr,
+                state_dir: None,
+                env: &no_env,
+                npm_hook: &no_npm_hook,
+                mouse_problem: None,
+                git: &git,
+            };
+            let result = super::super::run_wired(
+                &mut terminal,
+                &mut events,
+                &startup,
+                &crate::ui::read_artifact,
+                &|_: &str| Ok(()),
+                Duration::from_millis(1),
+            );
+            let _dashboard = result.expect("a member ahead of the root is a supported state");
+            let buf = terminal.backend().buffer().clone();
+            let rows: Vec<String> = (0..buf.area.height).map(|y| row_text(&buf, y)).collect();
+
+            let git_calls = std::fs::read_to_string(&git_log).unwrap_or_default();
+            assert!(
+                !git_calls.lines().any(|line| line.starts_with("status")),
+                "RED evidence: nothing wires `Startup::git` into a collaborator yet, so the \
+                 scratch git program must never be called: {git_calls:?}"
+            );
+
+            assert!(
+                rows.iter().any(|row| row.trim_end().ends_with(" @ [2/3]")),
+                "a frame's list interior must hold a row ending ' @ [2/3]' for the worktree \
+                 copy of change x: {rows:?}"
+            );
+        }
+
         // --- agent-launch: the outer-loop acceptance harness ------------------------------
 
         /// The seventeen-line `herdr integration status` output measured on the reference
@@ -3726,6 +3895,7 @@ esac
             let backend = ratatui::backend::TestBackend::new(width, 20);
             let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
             let mut events = crate::testutil::Stages::new(stages);
+            let git = root.join("does-not-exist-git");
             let startup = Startup {
                 cwd: root,
                 config,
@@ -3734,6 +3904,7 @@ esac
                 env: &no_env,
                 npm_hook: &no_npm_hook,
                 mouse_problem: None,
+                git: &git,
             };
             let result = super::super::run_wired(
                 &mut terminal,
@@ -5041,6 +5212,7 @@ esac
             ]);
             let backend = ratatui::backend::TestBackend::new(120, 20);
             let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+            let git = root.join("does-not-exist-git");
             let startup = Startup {
                 cwd: root,
                 config: &config,
@@ -5049,6 +5221,7 @@ esac
                 env: &no_env,
                 npm_hook: &no_npm_hook,
                 mouse_problem: None,
+                git: &git,
             };
             let result = super::super::run_wired(
                 &mut terminal,
@@ -5203,6 +5376,7 @@ esac
             let mut events = crate::testutil::Script::new(vec![Ok(Some(key('q')))]);
             let backend = ratatui::backend::TestBackend::new(60, 20);
             let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+            let git = root.join("does-not-exist-git");
             let startup = Startup {
                 cwd: root,
                 config: &config,
@@ -5211,6 +5385,7 @@ esac
                 env: &no_env,
                 npm_hook: &no_npm_hook,
                 mouse_problem: None,
+                git: &git,
             };
             let result = super::super::run_wired(
                 &mut terminal,
@@ -5239,6 +5414,7 @@ esac
             let scratch = scratch_repo_with_alpha();
             let root = scratch.path();
             let herdr = root.join("does-not-exist-herdr");
+            let git = root.join("does-not-exist-git");
 
             let (result, _buf) = run_wired_probed(
                 ProbedStartup {
@@ -5250,6 +5426,7 @@ esac
                     env: &no_env,
                     npm_hook: &no_npm_hook,
                     mouse_problem: None,
+                    git: &git,
                 },
                 &|| true,
             );
@@ -5278,6 +5455,7 @@ esac
                     env: &no_env,
                     npm_hook: &resolving_npm,
                     mouse_problem: None,
+                    git: &git,
                 },
                 &predicate,
             );
@@ -5529,6 +5707,7 @@ esac
             };
             let config = Config::default();
             let herdr = root.join("does-not-exist-herdr");
+            let git = root.join("does-not-exist-git");
             let predicate = || log_lines(&path_log) >= 1;
 
             let (result, _buf) = run_wired_probed(
@@ -5541,6 +5720,7 @@ esac
                     env: &env,
                     npm_hook: &no_npm_hook,
                     mouse_problem: None,
+                    git: &git,
                 },
                 &predicate,
             );
@@ -5574,6 +5754,7 @@ esac
             };
             let config = Config::default();
             let herdr = root.join("does-not-exist-herdr");
+            let git = root.join("does-not-exist-git");
             let predicate = || log_lines(&path_log) >= 1;
 
             let (result, _buf) = run_wired_probed(
@@ -5586,6 +5767,7 @@ esac
                     env: &env,
                     npm_hook: &no_npm_hook,
                     mouse_problem: None,
+                    git: &git,
                 },
                 &predicate,
             );
@@ -5619,6 +5801,7 @@ esac
             };
             let config = Config::default();
             let herdr = root.join("does-not-exist-herdr");
+            let git = root.join("does-not-exist-git");
             let predicate = || log_lines(&path_log) >= 1;
 
             let (result, _buf) = run_wired_probed(
@@ -5631,6 +5814,7 @@ esac
                     env: &env,
                     npm_hook: &no_npm_hook,
                     mouse_problem: None,
+                    git: &git,
                 },
                 &predicate,
             );
@@ -5665,6 +5849,7 @@ esac
             // at `<root>/openspec` can fail here.
             let config = Config::default();
             let herdr = root.join("does-not-exist-herdr");
+            let git = root.join("does-not-exist-git");
 
             let collaborators = super::super::start_collaborators(
                 Some(root),
@@ -5673,6 +5858,7 @@ esac
                 None,
                 &no_env,
                 &no_npm_hook,
+                &git,
             );
 
             let openspec_path = root.join("openspec").display().to_string();
@@ -5728,6 +5914,7 @@ esac
             let scratch = scratch_repo_with_alpha();
             let root = scratch.path();
             let herdr = root.join("does-not-exist-herdr");
+            let git = root.join("does-not-exist-git");
             // A configured binary that does not exist, plus the neutral
             // `no_env`/`no_npm_hook` pair: the probe resolves nothing and says so,
             // which is what puts a reason of its own above this one. A *silent*
@@ -5749,6 +5936,7 @@ esac
                     env: &no_env,
                     npm_hook: &no_npm_hook,
                     mouse_problem: Some("enable_mouse: no mouse".to_string()),
+                    git: &git,
                 },
                 &|| true,
             );
@@ -5808,6 +5996,7 @@ esac
             let scratch = scratch_repo_with_alpha();
             let root = scratch.path();
             let herdr = root.join("does-not-exist-herdr");
+            let git = root.join("does-not-exist-git");
 
             let (result, buf) = run_wired_probed(
                 ProbedStartup {
@@ -5819,6 +6008,7 @@ esac
                     env: &no_env,
                     npm_hook: &no_npm_hook,
                     mouse_problem: None,
+                    git: &git,
                 },
                 &|| true,
             );
@@ -6166,6 +6356,7 @@ esac
                 // genuinely cannot start — see the doc comment above.
                 std::fs::remove_dir_all(&root).expect("remove the scratch repository");
 
+                let git = root.join("does-not-exist-git");
                 let collaborators = super::super::start_collaborators(
                     dashboard.repo.as_deref(),
                     &config,
@@ -6173,6 +6364,7 @@ esac
                     None,
                     &no_env,
                     &no_npm_hook,
+                    &git,
                 );
                 assert_eq!(
                     collaborators.problems.len(),
