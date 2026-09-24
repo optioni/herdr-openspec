@@ -36,22 +36,22 @@
 ## 1. The worktree family on the change set
 <!-- kind: behavior -->
 
-- [ ] 1.1 RED: Write `the_worktree_family_travels_with_the_set_and_nowhere_else` in
+- [x] 1.1 RED: Write `the_worktree_family_travels_with_the_set_and_nowhere_else` in
       `src/changes.rs`'s tests, and in `src/worktrees.rs`'s tests the three `member_of`
       scenarios of `worktree-overlay`.
-- [ ] 1.2 GREEN: Add `src/worktrees.rs` (the seventeenth `pub mod` in `src/lib.rs`) holding
+- [x] 1.2 GREEN: Add `src/worktrees.rs` (the seventeenth `pub mod` in `src/lib.rs`) holding
       `Worktree { root: PathBuf, label: String }` and `member_of`, per design.md → D11; in the
       same task add its `SPEC.md` Module-map row and a `worktrees::` entry under
       § Unit-tested modules, which `tests/doc_contract.rs`'s `module_map_matches_lib_rs` and
       `tested_modules_names_every_module` require.
-- [ ] 1.3 GREEN: Add `ChangeSet::worktrees` at `src/changes.rs`'s 7 literals (`:414, :1842,
+- [x] 1.3 GREEN: Add `ChangeSet::worktrees` at `src/changes.rs`'s 7 literals (`:414, :1842,
       :1856, :1920, :3979, :7645, :7734`) and 2 destructures (`:166, :1792`), carry it through
       `merge`, and set it at the two `tests/` literals (`tests/title_corpus.rs:155`,
       `tests/doc_contract.rs:3192`). Extend `assert_set_invariants`' destructure with the
       no-duplicate-root invariant, and add `fixture::with_worktrees(set, &[(root, label)])`.
-- [ ] 1.4 CHECK: Re-inspect every `ChangeSet` consumer the compiler names; none reads
+- [x] 1.4 CHECK: Re-inspect every `ChangeSet` consumer the compiler names; none reads
       `worktrees` yet — the field is additive.
-- [ ] 1.5 Run `cargo test --no-run`, `cargo test --lib changes::` (224 at HEAD, plus this
+- [x] 1.5 Run `cargo test --no-run`, `cargo test --lib changes::` (224 at HEAD, plus this
       group's), `cargo test --lib worktrees::`, and `cargo test --test doc_contract` — green; no
       refactor needed.
 
