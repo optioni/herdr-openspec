@@ -158,26 +158,32 @@ fn shorten_left_row(text: &str, width: usize) -> String {
 }
 
 /// The active-change grammar: `[marker][space][name field][space][badge]
-/// [space][progress]`, with the badge cell offered only together with the
-/// progress cell and dropped whole first (reclaiming its own separating
-/// space) as soon as the name field would fall below one column with it;
-/// the progress cell (and its separating space) drops next on the same
-/// condition; and the row degenerates to the first `width` display columns
-/// of `"{marker} "` below two columns. `badge` `None` reproduces exactly
-/// today's `[marker][space][name field][space][progress]` grammar, byte
-/// for byte — see `agent-attribution` -> Decisions 3. Shared,
-/// unparameterised by date, by both the active row and the final
-/// degenerate branch of the archived row.
+/// [space][@][space][progress]`, with the worktree marker `@` offered only
+/// together with the progress cell and dropped whole **first** (reclaiming
+/// its own separating space) as soon as the name field would fall below one
+/// column with it; the badge cell (and its separating space) drops next on
+/// the same condition; then the progress cell (and its separating space);
+/// and the row degenerates to the first `width` display columns of
+/// `"{marker} "` below two columns. `badge` `None` and `worktree` `false`
+/// reproduce exactly today's `[marker][space][name field][space][progress]`
+/// grammar, byte for byte — see `agent-attribution` -> Decisions 3 and
+/// `worktree-changes` design.md -> Decision 12. Shared, unparameterised by
+/// date, by both the active row and the final degenerate branch of the
+/// archived row.
 ///
 /// Returns the row's text together with the badge's own column, `None`
 /// whenever no badge was offered or the badge cell was dropped whole — the
 /// column is *reported* from the arithmetic that already placed the badge,
 /// never decided a second time (`color-palette` design.md -> Decision 4).
+/// The worktree marker's own column is never reported: it carries no
+/// palette role and is drawn in the row's own style (design.md -> Decision
+/// 12), so no `WorktreeCell` exists beside `BadgeCell`.
 fn active_style_row(
     marker: char,
     name: &str,
     progress: Option<&str>,
     badge: Option<char>,
+    worktree: bool,
     width: u16,
 ) -> (String, Option<u16>) {
     let w = i64::from(width);
@@ -188,6 +194,22 @@ fn active_style_row(
     if let Some(progress) = progress {
         let progress_len = columns(progress) as i64;
         if let Some(badge) = badge {
+            // Fullest: the badge and the worktree marker together — seven
+            // fixed columns beyond the name and progress fields (marker,
+            // its space, the name field's space, the badge, its space, `@`,
+            // its space).
+            if worktree {
+                let name_field_w = w - 7 - progress_len;
+                if name_field_w >= 1 {
+                    let name_field = pad_or_truncate_right(name, name_field_w as usize);
+                    return (
+                        format!("{marker} {name_field} {badge} @ {progress}"),
+                        Some(badge_column(2, name_field_w)),
+                    );
+                }
+            }
+            // The badge alone: the worktree marker was either never offered
+            // or has just been dropped.
             let name_field_w = w - 2 - 1 - 1 - 1 - progress_len;
             if name_field_w >= 1 {
                 let name_field = pad_or_truncate_right(name, name_field_w as usize);
@@ -196,7 +218,16 @@ fn active_style_row(
                     Some(badge_column(2, name_field_w)),
                 );
             }
+        } else if worktree {
+            // The worktree marker alone: no badge was ever offered.
+            let name_field_w = w - 2 - 1 - 1 - 1 - progress_len;
+            if name_field_w >= 1 {
+                let name_field = pad_or_truncate_right(name, name_field_w as usize);
+                return (format!("{marker} {name_field} @ {progress}"), None);
+            }
         }
+        // Neither the badge nor the worktree marker: both dropped, or
+        // neither was ever offered.
         let name_field_w = w - 2 - 1 - progress_len;
         if name_field_w >= 1 {
             let name_field = pad_or_truncate_right(name, name_field_w as usize);
@@ -209,31 +240,50 @@ fn active_style_row(
 }
 
 /// The archived-change grammar: `[marker][space][date field: 10][space]`
-/// then the active grammar's `[name field][space][badge][space][progress]`,
-/// with the date field ten spaces when `date` is `None`. Dropped whole, in
-/// order — the badge cell (and its separating space) first, then the
+/// then the active grammar's `[name field][space][badge][space][@][space]
+/// [progress]`, with the date field ten spaces when `date` is `None`.
+/// Dropped whole, in order — the worktree marker (and its separating space)
+/// first, then the badge cell (and its separating space), then the
 /// progress cell (and its separating space), then the date field (and its
 /// separating space), then degenerating to `active_style_row` with neither
-/// a badge nor a progress cell ever offered — exactly as `change-rows`'
-/// "Archived changes sit below a separator" requirement states.
+/// a badge, a worktree marker, nor a progress cell ever offered — exactly
+/// as `change-rows`' "Archived changes sit below their section header and
+/// carry their date" requirement states.
 ///
 /// Returns the row's text together with the badge's own column, on exactly
-/// [`active_style_row`]'s terms.
+/// [`active_style_row`]'s terms. The worktree marker's own column is never
+/// reported, on the same terms `active_style_row` does not report one
+/// either (design.md -> Decision 12).
 fn archived_row_text(
     marker: char,
     date: Option<&str>,
     name: &str,
     progress: &str,
     badge: Option<char>,
+    worktree: bool,
     width: u16,
 ) -> (String, Option<u16>) {
     let w = i64::from(width);
     let date_field = date.map_or_else(|| " ".repeat(10), str::to_string);
     let progress_len = columns(progress) as i64;
 
-    // Full form with the badge: marker + space + date(10) + space + name +
-    // space + badge + space + progress.
     if let Some(badge) = badge {
+        // Fullest: the badge and the worktree marker together. marker +
+        // space + date(10) + space + name + space + badge + space + @ +
+        // space + progress.
+        if worktree {
+            let name_field_w = w - 14 - 1 - 1 - 1 - 1 - progress_len;
+            if name_field_w >= 1 {
+                let name_field = pad_or_truncate_right(name, name_field_w as usize);
+                return (
+                    format!("{marker} {date_field} {name_field} {badge} @ {progress}"),
+                    Some(badge_column(13, name_field_w)),
+                );
+            }
+        }
+        // The badge alone: the worktree marker was either never offered or
+        // has just been dropped. marker + space + date(10) + space + name +
+        // space + badge + space + progress.
         let name_field_w = w - 14 - 1 - 1 - progress_len;
         if name_field_w >= 1 {
             let name_field = pad_or_truncate_right(name, name_field_w as usize);
@@ -242,10 +292,22 @@ fn archived_row_text(
                 Some(badge_column(13, name_field_w)),
             );
         }
+    } else if worktree {
+        // The worktree marker alone: no badge was ever offered. marker +
+        // space + date(10) + space + name + space + @ + space + progress.
+        let name_field_w = w - 14 - 1 - 1 - progress_len;
+        if name_field_w >= 1 {
+            let name_field = pad_or_truncate_right(name, name_field_w as usize);
+            return (
+                format!("{marker} {date_field} {name_field} @ {progress}"),
+                None,
+            );
+        }
     }
 
-    // Full form without the badge (dropped, or never offered): marker +
-    // space + date(10) + space + name + space + progress.
+    // Full form without the badge or the worktree marker (both dropped, or
+    // neither ever offered): marker + space + date(10) + space + name +
+    // space + progress.
     let name_field_full = w - 14 - progress_len;
     if name_field_full >= 1 {
         let name_field = pad_or_truncate_right(name, name_field_full as usize);
@@ -264,8 +326,8 @@ fn archived_row_text(
     }
 
     // Drop the date field too: degenerate to the active grammar, with
-    // neither a badge nor a progress cell ever offered.
-    active_style_row(marker, name, None, None, width)
+    // neither a badge, a worktree marker, nor a progress cell ever offered.
+    active_style_row(marker, name, None, None, false, width)
 }
 
 /// The badge's display column: the columns preceding the name field —
@@ -504,11 +566,15 @@ pub fn rows(dashboard: &Dashboard, width: u16) -> Vec<Row> {
                 let selected = selected_target == Some(Target::Change(index));
                 let marker = if selected { '>' } else { ' ' };
                 let status = attribution.badges.get(&change.name).copied();
+                let worktree =
+                    crate::worktrees::member_of(&dashboard.changes.worktrees, &change.dir)
+                        .is_some();
                 let (text, badge_x) = active_style_row(
                     marker,
                     &change.name,
                     Some(&progress_cell(&change.progress)),
                     status.map(badge_char),
+                    worktree,
                     width,
                 );
                 out.push(Row {
@@ -583,12 +649,16 @@ pub fn rows(dashboard: &Dashboard, width: u16) -> Vec<Row> {
                     crate::changes::Origin::Active => None,
                 };
                 let status = attribution.badges.get(&change.name).copied();
+                let worktree =
+                    crate::worktrees::member_of(&dashboard.changes.worktrees, &change.dir)
+                        .is_some();
                 let (text, badge_x) = archived_row_text(
                     marker,
                     date,
                     &change.name,
                     &progress_cell(&change.progress),
                     status.map(badge_char),
+                    worktree,
                     width,
                 );
                 out.push(Row {
@@ -3222,8 +3292,7 @@ mod tests {
     #[test]
     fn a_worktree_row_carries_its_marker_after_the_badge() {
         let mut add_token = fixture::active("add-token-refresh", 4, 9);
-        add_token.dir =
-            std::path::PathBuf::from("/w/feat/openspec/changes/add-token-refresh");
+        add_token.dir = std::path::PathBuf::from("/w/feat/openspec/changes/add-token-refresh");
         let d = dashboard_with_worktrees(
             vec![
                 add_token,
@@ -3237,8 +3306,11 @@ mod tests {
         );
 
         for (width, expected) in [
-            (38u16, "> add-token-refresh            @ [4/9]"),
-            (58, "> add-token-refresh                                @ [4/9]"),
+            (38, "> add-token-refresh            @ [4/9]"),
+            (
+                58,
+                "> add-token-refresh                                @ [4/9]",
+            ),
         ] {
             assert_eq!(rows(&d, width)[1].text, expected, "width {width}");
         }
@@ -3246,7 +3318,7 @@ mod tests {
         let mut with_agent = d.clone();
         with_agent.agents.agents = vec![agent_at("add-token-refresh", AgentStatus::Working)];
         for (width, expected, badge_x) in [
-            (38u16, "> add-token-refresh          w @ [4/9]", 29u16),
+            (38, "> add-token-refresh          w @ [4/9]", 29u16),
             (
                 58,
                 "> add-token-refresh                              w @ [4/9]",
@@ -3264,7 +3336,7 @@ mod tests {
         // Rows for changes under no worktree root are byte-identical to the
         // pre-existing "Active rows render at both mandated widths" scenario.
         let base = three_active();
-        for width in [38u16, 58] {
+        for width in [38, 58] {
             let these = rows(&d, width);
             let expected = rows(&base, width);
             assert_eq!(these[2].text, expected[2].text, "width {width}");
@@ -3299,6 +3371,13 @@ mod tests {
         for (width, expected) in cases {
             assert_eq!(rows(&d, width)[1].text, expected, "width {width}");
         }
+        // The contrasting controls at the two mandated interiors: both the badge
+        // and the marker survive at 38 and 58 columns.
+        for width in [38, 58] {
+            let text = &rows(&d, width)[1].text;
+            assert!(text.contains(" w @ "), "width {width}: {text:?}");
+            assert!(text.ends_with("[4/9]"), "width {width}: {text:?}");
+        }
     }
 
     /// `worktree-changes` :: "A pane inside a nested worktree marks none of its own
@@ -3311,8 +3390,7 @@ mod tests {
     fn a_pane_inside_a_nested_worktree_marks_none_of_its_own_rows() {
         let mk = |name: &str, completed: usize, total: usize| {
             let mut c = fixture::active(name, completed, total);
-            c.dir =
-                std::path::PathBuf::from(format!("/r/.worktrees/feat/openspec/changes/{name}"));
+            c.dir = std::path::PathBuf::from(format!("/r/.worktrees/feat/openspec/changes/{name}"));
             c
         };
         let d = dashboard_with_worktrees(
@@ -3328,7 +3406,7 @@ mod tests {
         );
 
         let base = three_active();
-        for width in [38u16, 58] {
+        for width in [38, 58] {
             assert_eq!(rows(&d, width), rows(&base, width), "width {width}");
             for row in rows(&d, width) {
                 assert!(
@@ -3342,7 +3420,7 @@ mod tests {
         let mut moved = d.clone();
         moved.changes.active[0].dir =
             std::path::PathBuf::from("/r/openspec/changes/add-token-refresh");
-        for width in [38u16, 58] {
+        for width in [38, 58] {
             let moved_rows = rows(&moved, width);
             assert!(
                 moved_rows[1].text.contains('@'),
@@ -3362,9 +3440,8 @@ mod tests {
     #[test]
     fn an_archived_change_in_a_worktree_carries_the_marker() {
         let mut add_auth = fixture::archived(Some("2026-08-14"), "add-auth", 7, 7);
-        add_auth.dir = std::path::PathBuf::from(
-            "/w/feat/openspec/changes/archive/2026-08-14-add-auth",
-        );
+        add_auth.dir =
+            std::path::PathBuf::from("/w/feat/openspec/changes/archive/2026-08-14-add-auth");
         let d = dashboard_with_worktrees(
             vec![fixture::active("fix-empty-basket", 7, 7)],
             vec![add_auth, fixture::archived(None, "legacy-cleanup", 3, 3)],
@@ -3374,8 +3451,11 @@ mod tests {
         );
 
         for (width, expected) in [
-            (38u16, "  2026-08-14 add-auth          @ [7/7]"),
-            (58, "  2026-08-14 add-auth                              @ [7/7]"),
+            (38, "  2026-08-14 add-auth          @ [7/7]"),
+            (
+                58,
+                "  2026-08-14 add-auth                              @ [7/7]",
+            ),
         ] {
             assert_eq!(rows(&d, width)[3].text, expected, "width {width}");
         }
@@ -3389,7 +3469,7 @@ mod tests {
             Vec::new(),
             1,
         );
-        for width in [38u16, 58] {
+        for width in [38, 58] {
             let d_rows = rows(&d, width);
             let base_rows = rows(&base, width);
             assert_eq!(d_rows[0].text, base_rows[0].text, "width {width}");
@@ -3400,7 +3480,7 @@ mod tests {
 
         let mut emptied = d.clone();
         emptied.changes = fixture::with_worktrees(emptied.changes, &[]);
-        for width in [38u16, 58] {
+        for width in [38, 58] {
             assert_eq!(
                 rows(&emptied, width)[3].text,
                 rows(&base, width)[3].text,
@@ -3417,9 +3497,8 @@ mod tests {
     #[test]
     fn an_unbadged_worktree_archived_row_drops_the_marker_before_the_progress_cell() {
         let mut add_auth = fixture::archived(Some("2026-08-14"), "add-auth", 7, 7);
-        add_auth.dir = std::path::PathBuf::from(
-            "/w/feat/openspec/changes/archive/2026-08-14-add-auth",
-        );
+        add_auth.dir =
+            std::path::PathBuf::from("/w/feat/openspec/changes/archive/2026-08-14-add-auth");
         let d = dashboard_with_worktrees(
             Vec::new(),
             vec![add_auth],
@@ -3442,6 +3521,14 @@ mod tests {
                 rows(&unbadged, width)[2].text,
                 "width {width}"
             );
+        }
+        // The contrasting controls at the two mandated interiors: the date, the
+        // marker, and the progress cell all survive.
+        for width in [38, 58] {
+            let text = &rows(&d, width)[2].text;
+            assert!(text.contains("2026-08-14"), "width {width}: {text:?}");
+            assert!(text.contains('@'), "width {width}: {text:?}");
+            assert!(text.ends_with("[7/7]"), "width {width}: {text:?}");
         }
     }
 }
