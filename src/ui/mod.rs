@@ -3568,7 +3568,11 @@ apply:
             let scratch = ScratchDir::new();
             let root = scratch.path();
             vendor_tdd_schema(root);
-            write_with_mode(&root.join("openspec/changes/x/proposal.md"), b"# x\n", 0o644);
+            write_with_mode(
+                &root.join("openspec/changes/x/proposal.md"),
+                b"# x\n",
+                0o644,
+            );
             write_with_mode(
                 &root.join("openspec/changes/x/tasks.md"),
                 b"- [ ] a\n- [ ] b\n- [ ] c\n",
@@ -3585,7 +3589,11 @@ apply:
             let scratch = ScratchDir::new();
             let root = scratch.path();
             vendor_tdd_schema(root);
-            write_with_mode(&root.join("openspec/changes/x/proposal.md"), b"# x\n", 0o644);
+            write_with_mode(
+                &root.join("openspec/changes/x/proposal.md"),
+                b"# x\n",
+                0o644,
+            );
             write_with_mode(
                 &root.join("openspec/changes/x/tasks.md"),
                 b"- [x] a\n- [x] b\n- [ ] c\n",

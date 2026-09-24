@@ -45,7 +45,7 @@ pub fn member_of<'a>(members: &'a [Worktree], dir: &Path) -> Option<&'a Worktree
 
 #[cfg(test)]
 mod tests {
-    use super::{member_of, Worktree};
+    use super::{Worktree, member_of};
     use std::path::PathBuf;
 
     fn worktree(root: &str, label: &str) -> Worktree {
