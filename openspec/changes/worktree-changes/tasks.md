@@ -155,7 +155,7 @@
 ## 8. The refresh worker overlays and re-checks
 <!-- kind: behavior -->
 
-- [ ] 8.1 RED: Write in `src/refresh.rs`'s tests, through `worker_for_test(repo, cli, git,
+- [x] 8.1 RED: Write in `src/refresh.rs`'s tests, through `worker_for_test(repo, cli, git,
       recheck)` with a 5 ms `recheck`: *A worktree copy reaches the merged result first and the
       file result after*; the six idle re-check scenarios; *No git binary*
       (`no_git_binary_leaves_the_set_unoverlaid`); *Not a git repository, a timeout, or no record
@@ -167,21 +167,21 @@
       (`a_prunable_record_and_an_unresolvable_path_record_no_problem`); *A member with no
       OpenSpec tree owns nothing*; *Only the four commands are run*; and the extended *No binary
       means no worker* (`file_mode_reads_no_worktree_family`).
-- [ ] 8.2 RED: Write the two real-`git` tests — *A full cycle over a real repository and worktree
+- [x] 8.2 RED: Write the two real-`git` tests — *A full cycle over a real repository and worktree
       leaves git's files untouched* and *A worktree that forked before the base moved on owns
       nothing it did not touch* — building the repository through
       `cli::git_cli_via(cli::GIT_PROGRAM)` with the settings design.md → Test Boundaries names.
-- [ ] 8.3 GREEN: Change `refresh::start` and `worker_for_test` to take the git handle; in
+- [x] 8.3 GREEN: Change `refresh::start` and `worker_for_test` to take the git handle; in
       `start_collaborators` build `cli::git_cli_via(git)` and pass it (`src/ui/mod.rs:244`); give
       each of the 6 existing `worker_for_test` callers a `GitCli` registration (`worktree list` →
       `NotStarted`), since `FakeCli` panics on an unregistered call; implement the cycle and the
       re-check per the `refresh-worker` delta and design.md → D6–D8, with `WORKTREE_RECHECK`
       declared above the single `thread::spawn`.
-- [ ] 8.4 CHECK: Re-inspect `ui::Startup`, `start_collaborators`, and `refresh::start` against
+- [x] 8.4 CHECK: Re-inspect `ui::Startup`, `start_collaborators`, and `refresh::start` against
       design.md → Contracts; no consumer outside the crate exists.
-- [ ] 8.5 REFACTOR: Share one "derive family and ownership" function between step 2 and the
+- [x] 8.5 REFACTOR: Share one "derive family and ownership" function between step 2 and the
       re-check, or record why none was needed.
-- [ ] 8.6 Run `cargo test --lib refresh::` (14 at HEAD, plus this group's) and `cargo test --lib
+- [x] 8.6 Run `cargo test --lib refresh::` (14 at HEAD, plus this group's) and `cargo test --lib
       ui::` — green; `make gates` for `NOBLOCK`, `NOSLEEP`, `LAUNCHSEAM`, and `WIRED`.
 
 ## 9. Acceptance Test — Outer Loop GREEN
