@@ -140,6 +140,13 @@ grep -qE '^pub fn npm_probe_hook\(' "$CLI" \
   || fail "positive control - $CLI defines no 'pub fn npm_probe_hook(' - degraded-states's wrapper around the real npm-prefix binding, named so ui/ can reach it without NOCLI-SHELL's CLI_RE firing"
 grep -qE '^pub const HERDR_PROGRAM' "$CLI" \
   || fail "positive control - $CLI defines no 'pub const HERDR_PROGRAM'"
+# worktree-changes: git_cli_via/GIT_PROGRAM's own positive controls, on HERDR_PROGRAM's exact
+# terms - a renamed binding fails HERE, in the defining file, rather than leaving leg 1 or
+# leg 7 below searching for a name nobody defines any more.
+grep -qE '^pub fn git_cli_via\(' "$CLI" \
+  || fail "positive control - $CLI defines no 'pub fn git_cli_via('"
+grep -qE '^pub const GIT_PROGRAM' "$CLI" \
+  || fail "positive control - $CLI defines no 'pub const GIT_PROGRAM'"
 grep -qE '^pub fn read\(' "$STATE" || fail "positive control - $STATE defines no 'pub fn read('"
 grep -qE '^pub fn start\(' "$LAUNCH" || fail "positive control - $LAUNCH defines no 'pub fn start('"
 # G5: anchored on the DEFINING file rather than left to leg 1 alone, so a rename fails HERE,
@@ -163,7 +170,7 @@ grep -qE '^    pub fn mouse_problem\(' "$TERMINAL" \
 # `terminal::install_panic_hook();` line in `run` left every gate and every test green.
 for n in run_wired start_collaborators 'watch::start' 'refresh::start' 'agents::start' \
          'resolve::openspec_bin' 'cli::worker_cli' agent_cli_via 'state::read' 'launch::start' \
-         'config::env_lookup(' npm_probe_hook install_panic_hook; do
+         'config::env_lookup(' npm_probe_hook install_panic_hook git_cli_via; do
   code "$MOD" | grep -q -- "$n" \
     || fail "leg 1: $MOD's production slice does not name $n - the name is gone; leg 1 sees names, not values, so a call whose result is dropped still passes here and is the acceptance test's job"
 done
@@ -264,5 +271,16 @@ h=$(find "$UIDIR" -name '*.rs' -print0 \
                  echo "reach cli::HERDR_PROGRAM instead - it is the one place the name lives" >&2
                  exit 1; }
 
+# Leg 7 — NEW in worktree-changes. `run` supplies `Startup::git` from `cli::GIT_PROGRAM`,
+# never a literal - on leg 5's own terms (state::state_dir(/state_dir: None), scoped to
+# `run`'s own body because GIT_PROGRAM, like STATE_DIR, is a fact `run` itself resolves;
+# `start_collaborators` only ever receives the already-resolved `git: &Path` (design.md ->
+# Decision 14) and never reads GIT_PROGRAM itself, so this leg does not scope to it.
+printf '%s\n' "$body" | grep -q 'GIT_PROGRAM' \
+  || fail "leg 7: 'pub fn run()' does not name GIT_PROGRAM - Startup.git would be a literal"
+if printf '%s\n' "$body" | grep -qF '"git"'; then
+  fail "leg 7: 'pub fn run()' hardcodes a \"git\" literal - Startup.git would not follow cli::GIT_PROGRAM"
+fi
+
 lines=$(printf '%s\n' "$body" | wc -l | tr -d ' ')
-echo "WIRED OK: thirteen names present in $MOD; run resolves state::state_dir; run threads the guard's mouse_problem( (leg 5c); run names startup_dir(; $MOD names config.agent_kind; 'pub fn run()' is $lines lines with no branch and no loop; no \"herdr\" and no \"claude\" literal under $UIDIR"
+echo "WIRED OK: fourteen names present in $MOD; run resolves state::state_dir; run threads the guard's mouse_problem( (leg 5c); run names startup_dir(; $MOD names config.agent_kind; run names GIT_PROGRAM with no \"git\" literal (leg 7); 'pub fn run()' is $lines lines with no branch and no loop; no \"herdr\" and no \"claude\" literal under $UIDIR"

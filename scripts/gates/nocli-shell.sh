@@ -3,7 +3,9 @@
 # changes-from-files, not on the CLI".
 # Carried forward from markdown-viewer with its executable logic BYTE-IDENTICAL; only
 # UI_MIN's invocation moves, 9 -> 10.
-CLI_RE='from_cli|OpenspecCli|HerdrCli|CliChanges|npm_prefix'
+# worktree-changes: GitCli joined the pattern alongside HerdrCli - the third CLI trait, the
+# same shell-shape rule.
+CLI_RE='from_cli|OpenspecCli|HerdrCli|CliChanges|npm_prefix|GitCli'
 UI_MIN="${UI_MIN:-12}"
 
 # Guard A — src/ui/ exists and holds Rust files. A count of zero would make the search

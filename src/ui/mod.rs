@@ -210,12 +210,12 @@ pub fn start_collaborators(
     state_dir: Option<&Path>,
     env: &dyn Fn(&str) -> Option<String>,
     npm_hook: &dyn Fn() -> Option<std::path::PathBuf>,
-    // `worktree-changes` group 0: unused until group 8 wires it into `refresh::start` (design.md
-    // -> Decision 14). Named, not `_git`, so its production use in group 8 is a one-line change
-    // rather than a rename.
+    // `worktree-changes` group 0/7: built into a git CLI handle below (`WIRED`'s leg 1 needs
+    // `git_cli_via` named here), but not yet passed anywhere — `refresh::start` does not take
+    // one until group 8 wires it in (design.md -> Decision 14).
     git: &Path,
 ) -> Collaborators {
-    let _ = git;
+    let _git_cli = crate::cli::git_cli_via(git);
     let mut problems = config.problems.clone();
 
     let resolution = crate::resolve::openspec_bin(config.openspec_bin.as_deref(), env, npm_hook);
@@ -476,10 +476,9 @@ pub fn run() -> Result<(), StartError> {
         env: &env,
         npm_hook: &crate::cli::npm_probe_hook,
         mouse_problem: guard.mouse_problem(),
-        // `worktree-changes` group 0: `cli::GIT_PROGRAM` does not exist until group 6/7, which
-        // is also when `wired.sh` starts rejecting a bare `"git"` literal here — see design.md
-        // -> Decision 14.
-        git: Path::new("git"),
+        // `worktree-changes` group 7: `WIRED`'s leg 7 now rejects a bare `"git"` literal here —
+        // see design.md -> Decision 14.
+        git: Path::new(crate::cli::GIT_PROGRAM),
     };
     let write = |text: &str| guard.write_clipboard(text).map_err(|e| e.to_string());
     run_wired(

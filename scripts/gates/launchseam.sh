@@ -19,6 +19,14 @@
 # it is still forbidden to name HerdrCli itself by NOCLI-SHELL, which sweeps all of src/ui/,
 # so the two checks compose without either one being weakened.
 #
+# PARAMETERISED in worktree-changes, on ENTRY's own terms (design.md -> Decision - "The git
+# handle is confined to three files"): HANDLE_RE defaults to today's Herdr pattern but a third
+# `gates:` line points it at the git names instead (GitCli|RealGitCli|git_cli_via), with LAUNCH
+# pointed at src/refresh.rs (the worker's own entry point, `pub fn start(`, which ENTRY's
+# default already matches) and ALLOWED narrowed to the three files the git handle reaches:
+# src/cli.rs, src/refresh.rs, and src/ui/mod.rs. This guards the git handle from the same leg
+# 3 that already guards the Herdr one, without a second script.
+#
 # Legs 1 and 2 read the PRODUCTION slice only, so a test that names Command::new to prove the
 # launcher does NOT reach for it is not itself a violation. That makes Guard D below
 # load-bearing rather than decorative: with two line-anchored #[cfg(test)] attributes the
@@ -107,12 +115,13 @@ r=$(prod "$LAUNCH" | grep -E 'ratatui|Frame|Rect|Buffer|Style' || true)
                  echo "Outcome is plain data - the view styles it, this module does not" >&2
                  exit 1; }
 
-# Leg 3 — the Herdr handle is reached only from the allowed files.
-HANDLE_RE='HerdrCli|RealHerdrCli|agent_cli_via'
+# Leg 3 — the Herdr handle (or, under the git invocation, the git handle) is reached only
+# from the allowed files.
+HANDLE_RE="${HANDLE_RE:-HerdrCli|RealHerdrCli|agent_cli_via}"
 # shellcheck disable=SC2086
 hits=$(find src tests -name '*.rs' $pruned -print0 \
        | xargs -0 -I{} grep -nE "$HANDLE_RE" {} /dev/null 2>&1 || true)
-[ -z "$hits" ] || { echo "LAUNCHSEAM FAIL (leg 3): the Herdr handle is reached outside:$ALLOWED" >&2
+[ -z "$hits" ] || { echo "LAUNCHSEAM FAIL (leg 3): the '$HANDLE_RE' handle is reached outside:$ALLOWED" >&2
                     echo "$hits" >&2; exit 1; }
 
 # Guard C — the exclusion is not vacuous in the other direction either: src/cli.rs must
@@ -131,4 +140,4 @@ grep -qF 'use std::process::{Command, Stdio};' src/cli.rs \
 echo 'use std::process::{Command, Stdio};' | grep -qE "$SPAWN_RE" \
   || fail "positive control - the widened pattern does not match src/cli.rs's own import line"
 
-echo "LAUNCHSEAM OK: $n files searched (>= $MIN); no spawn and no view type in $LAUNCH's production slice; Herdr handle only in:$ALLOWED"
+echo "LAUNCHSEAM OK: $n files searched (>= $MIN); no spawn and no view type in $LAUNCH's production slice; '$HANDLE_RE' handle only in:$ALLOWED"
