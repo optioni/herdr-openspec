@@ -251,6 +251,15 @@ pub trait HerdrCli: Send + Sync {
     fn run(&self, args: &[&str]) -> Result<String, CliError>;
 }
 
+/// The crate's trait for the `git` program. Same contract as [`OpenspecCli`] and
+/// [`HerdrCli`]; kept as a separate trait rather than a type parameter so a caller holding
+/// more than one is unambiguous about which program it is calling. See
+/// `openspec/changes/worktree-changes/design.md` -> Decision 14 and
+/// `specs/subprocess-seam/spec.md` -> "One binding names the real `git` program...".
+pub trait GitCli: Send + Sync {
+    fn run(&self, args: &[&str]) -> Result<String, CliError>;
+}
+
 /// The one real implementation of [`OpenspecCli`]. Constructed with the
 /// program path — the value `resolve::openspec_bin`'s result carries,
 /// never its canonicalized target, since that is the stable,
@@ -357,6 +366,32 @@ impl HerdrCli for RealHerdrCli {
     }
 }
 
+/// The one real implementation of [`GitCli`]. On exactly [`RealHerdrCli`]'s shape: no added
+/// argument, no working directory, and no environment overlay — every invocation names the
+/// directory it reads with git's own `-C <dir>` argument, which the caller supplies, so this
+/// seam decides nothing about where git runs.
+pub struct RealGitCli {
+    program: PathBuf,
+}
+
+impl RealGitCli {
+    pub fn new(program: impl Into<PathBuf>) -> Self {
+        Self {
+            program: program.into(),
+        }
+    }
+
+    pub fn program(&self) -> &Path {
+        &self.program
+    }
+}
+
+impl GitCli for RealGitCli {
+    fn run(&self, args: &[&str]) -> Result<String, CliError> {
+        run_and_map(&self.program, args, None, None, RUN_DEADLINE)
+    }
+}
+
 /// The pure decision behind the `npm prefix -g` probe: given the run's exit
 /// success and its stdout bytes, decide the prefix. Taking only these two
 /// parameters is the *structural* proof that stderr cannot influence the
@@ -428,6 +463,21 @@ pub fn agent_cli_via(program: &Path) -> std::sync::Arc<dyn HerdrCli> {
     std::sync::Arc::new(RealHerdrCli::new(program))
 }
 
+/// The bare program name `git`, resolved by the operating system through `PATH` — the one
+/// place that literal is written as a program name. This crate builds no resolution chain for
+/// `git`, on exactly [`HERDR_PROGRAM`]'s terms: failing to start it is a documented degraded
+/// state (`worktree-overlay` -> "Without git, or without a family, the pane is exactly what it
+/// was"), not a fault to work around.
+pub const GIT_PROGRAM: &str = "git";
+
+/// Construct the real `GitCli` over `program`, following [`agent_cli_via`]'s shape precisely:
+/// a parameterised spawner, so a scenario can drive a real spawn against a scratch `#!/bin/sh`
+/// program without touching `PATH`. `ui::run` is the one production caller that passes
+/// [`GIT_PROGRAM`]; every test passes a scratch path instead.
+pub fn git_cli_via(program: &Path) -> std::sync::Arc<dyn GitCli> {
+    std::sync::Arc::new(RealGitCli::new(program))
+}
+
 /// Turn a `resolve::BinResolution` into the real `OpenspecCli` the
 /// `live-refresh` worker should use — `None` when no usable binary was
 /// found, which is exactly `refresh::start`'s no-binary case: no thread, no
@@ -486,6 +536,7 @@ pub fn worker_cli_from_env(
 pub(crate) enum Program {
     Openspec,
     Herdr,
+    Git,
 }
 
 #[cfg(test)]
@@ -494,6 +545,7 @@ impl Program {
         match self {
             Program::Openspec => "openspec",
             Program::Herdr => "herdr",
+            Program::Git => "git",
         }
     }
 }
@@ -562,6 +614,11 @@ impl FakeCli {
         self.register(Program::Herdr, args, response);
     }
 
+    /// Register a response for `args` on the `GitCli` side.
+    pub(crate) fn register_git(&self, args: &[&str], response: Result<String, CliError>) {
+        self.register(Program::Git, args, response);
+    }
+
     /// The pairs recorded so far, in call order.
     pub(crate) fn calls(&self) -> Vec<(Program, Vec<String>)> {
         self.state
@@ -604,6 +661,13 @@ impl OpenspecCli for FakeCli {
 impl HerdrCli for FakeCli {
     fn run(&self, args: &[&str]) -> Result<String, CliError> {
         self.respond(Program::Herdr, args)
+    }
+}
+
+#[cfg(test)]
+impl GitCli for FakeCli {
+    fn run(&self, args: &[&str]) -> Result<String, CliError> {
+        self.respond(Program::Git, args)
     }
 }
 
