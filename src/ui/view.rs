@@ -3271,6 +3271,29 @@ mod tests {
         }
     }
 
+    /// `worktree-overlay` -> "Two worktrees touching one proposal (rendered)":
+    /// the conflict problem `changes::overlay` records leads the list exactly
+    /// as any other change-set problem does — this test only proves the
+    /// existing grammar renders the new wording, since `overlay` itself is
+    /// `changes.rs`'s concern.
+    #[test]
+    fn two_worktrees_touching_one_proposal_renders_a_leading_problem_row() {
+        let mut d = dashboard_with(vec![fixture::active("x", 3, 9)], Vec::new(), 0, Route::List);
+        d.changes = fixture::with_worktrees(d.changes, &[("/w/feat", "feat"), ("/w/fix", "fix")]);
+        d.changes.problems =
+            vec!["change x is modified in worktrees feat and fix; showing feat".to_string()];
+
+        for (width, height) in [(120, 20), (60, 20)] {
+            let buf = render_at(width, height, &d);
+            assert!(
+                interior_cols(&buf, 2)
+                    .starts_with("! change x is modified in worktrees feat and fix"),
+                "width {width}: {}",
+                interior_cols(&buf, 2)
+            );
+        }
+    }
+
     #[test]
     fn no_refresh_problem_draws_no_extra_row() {
         // `refresh.problems` is empty by construction — the closest a typed

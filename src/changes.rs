@@ -8270,4 +8270,435 @@ apply:
             }
         }
     }
+
+    // --- group 10: `overlay` and `from_files_owned` — the worktree family --
+
+    mod overlay {
+        use super::super::{OwnedChanges, from_files_owned, overlay};
+        use super::*;
+        use crate::worktrees::{Touched, Worktree};
+
+        fn touched(active: &[&str], archived: &[&str]) -> Touched {
+            Touched {
+                active: active.iter().map(|s| s.to_string()).collect(),
+                archived: archived.iter().map(|s| s.to_string()).collect(),
+            }
+        }
+
+        fn worktree(root: &std::path::Path, label: &str) -> Worktree {
+            Worktree {
+                root: root.to_path_buf(),
+                label: label.to_string(),
+            }
+        }
+
+        fn base_archive_dir_names(repo: &std::path::Path) -> Vec<String> {
+            archived_entries(repo, false)
+                .0
+                .into_iter()
+                .map(|entry| {
+                    entry
+                        .dir
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap()
+                        .to_string()
+                })
+                .collect()
+        }
+
+        /// worktree-overlay -> "A worktree's live progress replaces the
+        /// base's stale copy".
+        #[test]
+        fn a_worktrees_live_progress_replaces_the_bases_stale_copy() {
+            let base_scratch = ScratchDir::new();
+            let base_repo = canonical(base_scratch.path());
+            vendor_schema(&base_repo, "tdd", TDD_ARTIFACTS);
+            write_project_config(&base_repo, "tdd");
+            write(
+                &base_repo.join("openspec/changes/x/tasks.md"),
+                &"- [ ] a\n".repeat(12),
+            );
+            let base = from_files(&base_repo, ArchivedScope::Full);
+            assert_eq!(base.active[0].progress.completed, 0);
+
+            let member_scratch = ScratchDir::new();
+            let member_repo = canonical(member_scratch.path());
+            vendor_schema(&member_repo, "tdd", TDD_ARTIFACTS);
+            write_project_config(&member_repo, "tdd");
+            let mut tasks = "- [x] a\n".repeat(7);
+            tasks.push_str(&"- [ ] a\n".repeat(5));
+            write(&member_repo.join("openspec/changes/x/tasks.md"), &tasks);
+
+            let t = touched(&["x"], &[]);
+            let owned = from_files_owned(&member_repo, &t, ArchivedScope::Full);
+
+            let result = overlay(base, &[], &[(worktree(&member_repo, "feat"), t, owned)]);
+
+            assert_eq!(result.active.len(), 1);
+            assert_eq!(result.active[0].name, "x");
+            assert_eq!(result.active[0].progress.completed, 7);
+            assert_eq!(result.active[0].progress.total, 12);
+            assert!(result.active[0].dir.starts_with(&member_repo));
+            assert_set_invariants(&result);
+        }
+
+        /// worktree-overlay -> "A change created in a worktree is added".
+        #[test]
+        fn a_change_created_in_a_worktree_is_added() {
+            let base_scratch = ScratchDir::new();
+            let base_repo = canonical(base_scratch.path());
+            vendor_schema(&base_repo, "tdd", TDD_ARTIFACTS);
+            write_project_config(&base_repo, "tdd");
+            write(&base_repo.join("openspec/changes/a/tasks.md"), "- [ ] a\n");
+            write(&base_repo.join("openspec/changes/c/tasks.md"), "- [ ] a\n");
+            let base = from_files(&base_repo, ArchivedScope::Full);
+
+            let member_scratch = ScratchDir::new();
+            let member_repo = canonical(member_scratch.path());
+            vendor_schema(&member_repo, "tdd", TDD_ARTIFACTS);
+            write_project_config(&member_repo, "tdd");
+            write(
+                &member_repo.join("openspec/changes/b/tasks.md"),
+                "- [ ] a\n",
+            );
+
+            let t = touched(&["b"], &[]);
+            let owned = from_files_owned(&member_repo, &t, ArchivedScope::Full);
+            let result = overlay(base, &[], &[(worktree(&member_repo, "feat"), t, owned)]);
+
+            let names: Vec<&str> = result.active.iter().map(|c| c.name.as_str()).collect();
+            assert_eq!(names, vec!["a", "b", "c"]);
+            assert_set_invariants(&result);
+        }
+
+        /// worktree-overlay -> "A change archived in a worktree leaves the
+        /// active list and joins the archive", both `ArchivedScope`s over
+        /// the same inputs. The requirement's own illustration uses forty
+        /// pre-existing archived directories; this test uses two, since the
+        /// invariant under test — one new directory added, `y` sorted ahead
+        /// of an older one — does not depend on the count.
+        #[test]
+        fn a_change_archived_in_a_worktree_leaves_the_active_list_and_joins_the_archive() {
+            let base_scratch = ScratchDir::new();
+            let base_repo = canonical(base_scratch.path());
+            vendor_schema(&base_repo, "tdd", TDD_ARTIFACTS);
+            write_project_config(&base_repo, "tdd");
+            write(&base_repo.join("openspec/changes/y/tasks.md"), "- [ ] a\n");
+            for day in ["01", "02"] {
+                write(
+                    &base_repo
+                        .join(format!("openspec/changes/archive/2026-01-{day}-old"))
+                        .join("tasks.md"),
+                    "- [x] a\n",
+                );
+            }
+            let base_archive_dirs = base_archive_dir_names(&base_repo);
+            assert_eq!(base_archive_dirs.len(), 2);
+
+            let member_scratch = ScratchDir::new();
+            let member_repo = canonical(member_scratch.path());
+            vendor_schema(&member_repo, "tdd", TDD_ARTIFACTS);
+            write_project_config(&member_repo, "tdd");
+            write(
+                &member_repo.join("openspec/changes/archive/2026-09-24-y/tasks.md"),
+                "- [x] a\n- [x] b\n",
+            );
+
+            let t = touched(&["y"], &["2026-09-24-y"]);
+
+            let base_names = from_files(&base_repo, ArchivedScope::Names);
+            let owned_names = from_files_owned(&member_repo, &t, ArchivedScope::Names);
+            let names_result = overlay(
+                base_names,
+                &base_archive_dirs,
+                &[(worktree(&member_repo, "feat"), t.clone(), owned_names)],
+            );
+            assert!(names_result.active.iter().all(|c| c.name != "y"));
+            assert!(names_result.archived.is_empty());
+            assert_eq!(names_result.archived_total, 3);
+            assert_set_invariants(&names_result);
+
+            let base_full = from_files(&base_repo, ArchivedScope::Full);
+            let owned_full = from_files_owned(&member_repo, &t, ArchivedScope::Full);
+            let full_result = overlay(
+                base_full,
+                &base_archive_dirs,
+                &[(worktree(&member_repo, "feat"), t, owned_full)],
+            );
+            assert!(full_result.active.iter().all(|c| c.name != "y"));
+            assert_eq!(full_result.archived.len(), 3);
+            assert_eq!(full_result.archived[0].name, "y");
+            assert_eq!(
+                full_result.archived[0].origin,
+                Origin::Archived {
+                    date: Some("2026-09-24".to_string())
+                }
+            );
+            assert_eq!(full_result.archived_total, 3);
+            assert_set_invariants(&full_result);
+        }
+
+        /// worktree-overlay -> "A deletion without an archive keeps the
+        /// base's row".
+        #[test]
+        fn a_deletion_without_an_archive_keeps_the_bases_row() {
+            let base_scratch = ScratchDir::new();
+            let base_repo = canonical(base_scratch.path());
+            vendor_schema(&base_repo, "tdd", TDD_ARTIFACTS);
+            write_project_config(&base_repo, "tdd");
+            write(
+                &base_repo.join("openspec/changes/y/tasks.md"),
+                "- [ ] a\n- [ ] b\n",
+            );
+            let base = from_files(&base_repo, ArchivedScope::Full);
+            let base_y = base.active[0].clone();
+
+            let member_scratch = ScratchDir::new();
+            let member_repo = canonical(member_scratch.path());
+            vendor_schema(&member_repo, "tdd", TDD_ARTIFACTS);
+            write_project_config(&member_repo, "tdd");
+            // The member has neither an active `y` directory nor an
+            // archived one stripping to `y` — a bare deletion.
+
+            let t = touched(&["y"], &[]);
+            let owned = from_files_owned(&member_repo, &t, ArchivedScope::Full);
+            let result = overlay(base, &[], &[(worktree(&member_repo, "feat"), t, owned)]);
+
+            assert_eq!(result.active.len(), 1);
+            assert_eq!(result.active[0], base_y);
+            assert_set_invariants(&result);
+        }
+
+        /// worktree-overlay -> "An archive the base already holds is not
+        /// duplicated".
+        #[test]
+        fn an_archive_the_base_already_holds_is_not_duplicated() {
+            let base_scratch = ScratchDir::new();
+            let base_repo = canonical(base_scratch.path());
+            vendor_schema(&base_repo, "tdd", TDD_ARTIFACTS);
+            write_project_config(&base_repo, "tdd");
+            write(
+                &base_repo.join("openspec/changes/archive/2026-08-01-old/tasks.md"),
+                "- [x] a\n",
+            );
+            let base_archive_dirs = base_archive_dir_names(&base_repo);
+            let base = from_files(&base_repo, ArchivedScope::Full);
+            assert_eq!(base.archived_total, 1);
+
+            let member_scratch = ScratchDir::new();
+            let member_repo = canonical(member_scratch.path());
+            vendor_schema(&member_repo, "tdd", TDD_ARTIFACTS);
+            write_project_config(&member_repo, "tdd");
+            write(
+                &member_repo.join("openspec/changes/archive/2026-08-01-old/tasks.md"),
+                "- [x] a\n",
+            );
+
+            let t = touched(&[], &["2026-08-01-old"]);
+            let owned = from_files_owned(&member_repo, &t, ArchivedScope::Full);
+            let result = overlay(
+                base,
+                &base_archive_dirs,
+                &[(worktree(&member_repo, "feat"), t, owned)],
+            );
+
+            assert_eq!(result.archived_total, 1);
+            assert_eq!(result.archived.len(), 1);
+            assert_eq!(
+                result.archived[0].dir,
+                base_repo.join("openspec/changes/archive/2026-08-01-old")
+            );
+            assert_set_invariants(&result);
+        }
+
+        /// worktree-overlay -> "No member owns anything".
+        #[test]
+        fn no_member_owns_anything() {
+            let base_scratch = ScratchDir::new();
+            let base_repo = canonical(base_scratch.path());
+            vendor_schema(&base_repo, "tdd", TDD_ARTIFACTS);
+            write_project_config(&base_repo, "tdd");
+            write(&base_repo.join("openspec/changes/x/tasks.md"), "- [ ] a\n");
+            let base = from_files(&base_repo, ArchivedScope::Full);
+            let base_clone = base.clone();
+
+            let member_repo1 = std::path::PathBuf::from("/w/one");
+            let member_repo2 = std::path::PathBuf::from("/w/two");
+
+            let t1 = touched(&[], &[]);
+            let owned1 = OwnedChanges {
+                active: Vec::new(),
+                archived: Vec::new(),
+            };
+            let t2 = touched(&[], &[]);
+            let owned2 = OwnedChanges {
+                active: Vec::new(),
+                archived: Vec::new(),
+            };
+
+            let result = overlay(
+                base,
+                &[],
+                &[
+                    (worktree(&member_repo1, "feat"), t1, owned1),
+                    (worktree(&member_repo2, "fix"), t2, owned2),
+                ],
+            );
+
+            assert_eq!(result.active, base_clone.active);
+            assert_eq!(result.archived, base_clone.archived);
+            assert_eq!(result.problems, base_clone.problems);
+            assert_eq!(result.archived_total, base_clone.archived_total);
+            assert_eq!(result.worktrees.len(), 2);
+            assert_set_invariants(&result);
+        }
+
+        /// worktree-overlay -> "Two worktrees touching one proposal" (named
+        /// verbatim by tasks.md).
+        #[test]
+        fn two_owners_show_the_first_and_name_both() {
+            let base_scratch = ScratchDir::new();
+            let base_repo = canonical(base_scratch.path());
+            vendor_schema(&base_repo, "tdd", TDD_ARTIFACTS);
+            write_project_config(&base_repo, "tdd");
+            let base = from_files(&base_repo, ArchivedScope::Full);
+
+            let feat_scratch = ScratchDir::new();
+            let feat_repo = canonical(feat_scratch.path());
+            vendor_schema(&feat_repo, "tdd", TDD_ARTIFACTS);
+            write_project_config(&feat_repo, "tdd");
+            let mut feat_tasks = "- [x] a\n".repeat(3);
+            feat_tasks.push_str(&"- [ ] a\n".repeat(6));
+            write(&feat_repo.join("openspec/changes/x/tasks.md"), &feat_tasks);
+
+            let fix_scratch = ScratchDir::new();
+            let fix_repo = canonical(fix_scratch.path());
+            vendor_schema(&fix_repo, "tdd", TDD_ARTIFACTS);
+            write_project_config(&fix_repo, "tdd");
+            let mut fix_tasks = "- [x] a\n".repeat(5);
+            fix_tasks.push_str(&"- [ ] a\n".repeat(4));
+            write(&fix_repo.join("openspec/changes/x/tasks.md"), &fix_tasks);
+
+            let feat_touched = touched(&["x"], &[]);
+            let feat_owned = from_files_owned(&feat_repo, &feat_touched, ArchivedScope::Full);
+            let fix_touched = touched(&["x"], &[]);
+            let fix_owned = from_files_owned(&fix_repo, &fix_touched, ArchivedScope::Full);
+
+            let result = overlay(
+                base,
+                &[],
+                &[
+                    (worktree(&feat_repo, "feat"), feat_touched, feat_owned),
+                    (worktree(&fix_repo, "fix"), fix_touched, fix_owned),
+                ],
+            );
+
+            assert_eq!(result.active.len(), 1);
+            assert_eq!(result.active[0].progress.completed, 3);
+            assert_eq!(
+                result.problems,
+                vec!["change x is modified in worktrees feat and fix; showing feat".to_string()]
+            );
+            assert_set_invariants(&result);
+        }
+
+        /// worktree-overlay -> "The problem clears when the conflict does".
+        #[test]
+        fn the_problem_clears_when_the_conflict_does() {
+            let base_scratch = ScratchDir::new();
+            let base_repo = canonical(base_scratch.path());
+            vendor_schema(&base_repo, "tdd", TDD_ARTIFACTS);
+            write_project_config(&base_repo, "tdd");
+
+            let feat_scratch = ScratchDir::new();
+            let feat_repo = canonical(feat_scratch.path());
+            vendor_schema(&feat_repo, "tdd", TDD_ARTIFACTS);
+            write_project_config(&feat_repo, "tdd");
+            write(&feat_repo.join("openspec/changes/x/tasks.md"), "- [x] a\n");
+
+            let fix_scratch = ScratchDir::new();
+            let fix_repo = canonical(fix_scratch.path());
+            vendor_schema(&fix_repo, "tdd", TDD_ARTIFACTS);
+            write_project_config(&fix_repo, "tdd");
+            write(&fix_repo.join("openspec/changes/x/tasks.md"), "- [x] a\n");
+
+            let feat_touched = touched(&["x"], &[]);
+            let fix_touched = touched(&["x"], &[]);
+
+            let both = overlay(
+                from_files(&base_repo, ArchivedScope::Full),
+                &[],
+                &[
+                    (
+                        worktree(&feat_repo, "feat"),
+                        feat_touched.clone(),
+                        from_files_owned(&feat_repo, &feat_touched, ArchivedScope::Full),
+                    ),
+                    (
+                        worktree(&fix_repo, "fix"),
+                        fix_touched.clone(),
+                        from_files_owned(&fix_repo, &fix_touched, ArchivedScope::Full),
+                    ),
+                ],
+            );
+            assert!(both.problems.iter().any(|p| p.contains('x')));
+
+            let only_feat = overlay(
+                from_files(&base_repo, ArchivedScope::Full),
+                &[],
+                &[(
+                    worktree(&feat_repo, "feat"),
+                    feat_touched.clone(),
+                    from_files_owned(&feat_repo, &feat_touched, ArchivedScope::Full),
+                )],
+            );
+            assert!(!only_feat.problems.iter().any(|p| p.contains('x')));
+            assert_set_invariants(&only_feat);
+        }
+
+        /// `worktree-overlay`'s "holds" via the member's own enumeration:
+        /// `from_files_owned` opens no file beneath a change the member does
+        /// not own, on `a_collapsed_archive_opens_no_file_beneath_an_archived_change`'s
+        /// recorder terms.
+        #[test]
+        fn from_files_owned_opens_nothing_beneath_an_unowned_change() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            write_project_config(&repo, "tdd");
+            write(&repo.join("openspec/changes/x/tasks.md"), "- [x] a\n");
+            write(&repo.join("openspec/changes/z/tasks.md"), "- [ ] a\n");
+            let x_dir = repo.join("openspec/changes/x");
+            let z_dir = repo.join("openspec/changes/z");
+
+            let t = touched(&["x"], &[]);
+
+            let _ = crate::schema::take_recorded_reads();
+            let _ = crate::tasks::take_recorded_reads();
+            let owned = from_files_owned(&repo, &t, ArchivedScope::Full);
+
+            let schema_reads = crate::schema::take_recorded_reads();
+            let task_reads = crate::tasks::take_recorded_reads();
+
+            assert_eq!(
+                schema_reads
+                    .iter()
+                    .filter(|p| p.starts_with(&z_dir))
+                    .count(),
+                0,
+                "from_files_owned must open no .openspec.yaml beneath an unowned change"
+            );
+            assert_eq!(
+                task_reads.iter().filter(|p| p.starts_with(&z_dir)).count(),
+                0,
+                "from_files_owned must open no tasks.md beneath an unowned change"
+            );
+            // Positive control: the owned change's own tasks.md was read.
+            assert!(task_reads.iter().any(|p| p.starts_with(&x_dir)));
+
+            assert_eq!(owned.active.len(), 1);
+            assert_eq!(owned.active[0].name, "x");
+        }
+    }
 }
