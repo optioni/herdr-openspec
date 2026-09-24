@@ -7,8 +7,8 @@ pane's own repository root, and a linked worktree — Herdr places one at
 progress with no badge beside it, the footer's unattributed count omits the agent, and `g` has
 nothing to focus. The other half is launching: `a`, `c`, and `s` always split a pane at the
 pane's own root, so launching onto a row that shows a worktree's copy starts an agent in the
-wrong checkout, on the wrong branch. `SPEC.md` records the first half as row 30 of the
-degraded-states table, "a standing, accepted limitation".
+wrong checkout, on the wrong branch. `SPEC.md` records the first half in its degraded-states row "An agent works in a **linked
+worktree** of this repository", "a standing, accepted limitation".
 
 ## What Changes
 
@@ -22,8 +22,9 @@ degraded-states table, "a standing, accepted limitation".
   worktree's OpenSpec root instead of the pane's own. `launch::Request::Launch` gains the root it
   runs in, filled by the dashboard from the selected change's `dir`; `launch::decide` is unchanged.
 - `g` is unchanged: it focuses the pane of whichever agent the badge shows, wherever it runs.
-- `SPEC.md` row 30 changes from "invisible, not pending any future change" to "in scope whenever
-  the worktree is a member of the family", keeping its condition text.
+- That degraded-states row's description changes to "in scope whenever the worktree is a member of
+  the family", keeping its condition text, and the row "A live agent's `cwd` is absent, or
+  outside the resolved repository root" gains "…and every member of its worktree family".
 
 Not **BREAKING**: no manifest, config, or keybinding change. A pane whose repository has no
 worktree family behaves byte-identically.
@@ -53,16 +54,18 @@ None.
 - `agent-attribution`: the pure function's signature gains the worktree roots, and the
   repository-scope requirement admits an agent under any of them.
 - `agent-launch`: call 1's `--cwd` is the root of the checkout the selected change's copy lives
-  in, and a new requirement adds that root to `Request::Launch` and says who fills it.
+  in; the decision requirement's `Request` quote, rule 7, and one scenario literal gain the `root`
+  field `decide` always builds as `None`; and a new requirement says who fills it.
 
 ## Impact
 
 - `src/agents.rs` (`attribute`), `src/ui/app.rs` (`Dashboard::attribution`, the launch decision's
   `Go` branch), `src/launch.rs` (`Request::Launch`, `split_args`, the worker), `src/ui/driver.rs`
   (the `Request::Launch` patterns that name its fields).
-- `SPEC.md` (attribution scope paragraph, the linked-worktree paragraph, row 30's description,
+- `SPEC.md` (attribution scope paragraph, the linked-worktree paragraph, both worktree-related
+  degraded rows, the `agents::attribute` tested-modules bullet,
   the launch flow's `--cwd`), `AGENTS.md` (the attribution rule's "every tier is scoped to the
-  resolved repository"), and `tests/degraded-coverage.toml` (row 30's proof).
+  resolved repository"), and `tests/degraded-coverage.toml` (both rows' proof or `covers`).
 - No new module, dependency, thread, gate, or process spawn.
 - **Depends on `worktree-changes`**, which provides `ChangeSet::worktrees`; this change cannot be
   applied before it.

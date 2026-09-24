@@ -157,9 +157,12 @@ invent one.
 The worktree roots are `worktree-agents`' addition. A linked worktree of the repository —
 Herdr places one at `<repo-parent>/.worktrees/<repo>-<branch>`, outside the root — is the same
 repository's work, and `worktree-changes` already shows its changes on this pane's rows, so an
-agent working there belongs to this pane's scope. Only a worktree the family lists is admitted:
+agent working there belongs to this pane's scope. Only a root the family lists widens the scope:
 when no family was read (no `git`, file mode, a failed `worktree list`) `worktrees` is empty and a
-worktree-shaped `cwd` is out of scope exactly as before. Each root is a member's **OpenSpec
+worktree-shaped `cwd` is out of scope exactly as before. A directory **beneath** a listed root is
+in scope because it lies under that root — including, when the main checkout is a member, a
+worktree git no longer lists that sits inside it — exactly as any directory beneath the pane's
+own root already is. Each root is a member's **OpenSpec
 root**, on the same terms `root` is the directory holding `openspec/`, so a member whose OpenSpec
 root is a subdirectory of its checkout admits agents under that subdirectory only. An agent that is not in
 scope SHALL be neither badged nor counted: it contributes nothing to `badges` and nothing to
@@ -260,14 +263,16 @@ reaches `ChangeSet::worktrees` (`worktree-overlay`).
 #### Scenario: An agent in a member worktree is in scope and placed by the ordinary tiers
 
 - **WHEN** `attribute` is called with `repo` `Some("/r")`, `worktrees` `["/w/feat"]`,
-  `change_names` `["x"]`, a mapping `c-x -> x`, and three `Working` agents whose `cwd` values
-  are `/w/feat` (named `c-x`), `/w/feat/openspec/changes/x` (named `scratch`), and `/w/other`
-  (named `x`)
+  `change_names` `["x"]`, a mapping `c-x -> x`, and three agents: a `Working` agent at `cwd`
+  `/w/feat` named `c-x` in pane `w1:p1`, a `Working` agent at `/w/feat/openspec/changes/x` named
+  `scratch`, and a `Blocked` agent at `/w/feat-other` named `x` in pane `w1:p3`
 - **THEN** `badges` is exactly `{"x": Working}`, placed through the mapping tier by the first
-  agent, and `panes["x"]` is that agent's pane
+  agent, and `panes["x"]` is `w1:p1`
 - **AND** `unattributed` is exactly `1` — the second agent, in scope and placed by no tier
-- **AND** the third agent, whose name matches `x` byte for byte but whose `cwd` lies in no family
-  member, is neither badged nor counted
+- **AND** the third agent, whose name matches `x` byte for byte, is neither badged nor counted:
+  admitting it would turn the badge `Blocked` and the pane `w1:p3`, since `Blocked` outranks
+  `Working`, and `/w/feat-other` shares only a textual prefix with the member root, so the test is
+  component-wise
 
 #### Scenario: Without a family a worktree-shaped path stays out of scope
 
@@ -278,16 +283,28 @@ reaches `ChangeSet::worktrees` (`worktree-overlay`).
 
 #### Scenario: A member's OpenSpec root bounds its scope
 
-- **WHEN** `worktrees` is `["/w/feat/sub"]` and two agents sit at `/w/feat` and `/w/feat/sub/x`
-- **THEN** only the second is in scope: `unattributed` is `1`
+- **WHEN** `attribute` is called with `repo` `Some("/r")`, `worktrees` `["/w/feat/sub"]`,
+  `change_names` `["x"]`, an empty mapping, and two `Idle` agents named `x`, at `/w/feat/sub/x`
+  in pane `w1:p1` and at `/w/feat` in pane `w1:p2`
+- **THEN** `badges` is exactly `{"x": Idle}` with `panes["x"]` `w1:p1`, and `unattributed` is `0`
+- **AND** swapping which agent is at which path swaps nothing into scope: the agent at `/w/feat`
+  is out of scope, so with only that agent `badges` is empty and `unattributed` is `0`
 
 #### Scenario: The dashboard passes the family it holds
 
-- **WHEN** a `Dashboard` whose `changes.worktrees` holds `(/w/feat, "feat")` and whose active
-  change `x` lies under `/w/feat` is rendered at 120x20 and at 60x20 with one in-scope
-  `Working` agent at `cwd` `/w/feat` named `x`
-- **THEN** `x`'s row carries the `w` badge and the `@` marker, and the footer shows no
-  unattributed count
-- **AND** the same dashboard with `changes.worktrees` emptied renders no badge on `x`, so the
+- **WHEN** `ui::list::rows` is called at widths 38 and 58 for a `Dashboard` whose repository root
+  is `/r`, whose `changes.worktrees` holds `(/w/feat, "feat")`, whose one active change `x` has
+  `dir` `/w/feat/openspec/changes/x`, with `selected` 1, and which holds one `Working` agent at
+  `cwd` `/w/feat` named `x`
+- **THEN** `x`'s row carries the `w` badge followed by the `@` marker
+- **AND** the same dashboard with `changes.worktrees` emptied yields a row with no badge, so the
   badge came from the family and not from the fixture
+
+#### Scenario: The footer counts an unplaced agent in a member worktree
+
+- **WHEN** the same `Dashboard`, with its one agent renamed `scratch`, is rendered at 120x20 and
+  at 60x20
+- **THEN** the footer's last hint is `1 unattributed`
+- **AND** with `changes.worktrees` emptied the footer carries no unattributed count, so the count
+  follows the family
 
