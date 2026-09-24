@@ -95,12 +95,12 @@
 ## 4. Parsing git's answers
 <!-- kind: behavior -->
 
-- [ ] 4.1 RED: Write in `src/worktrees.rs`'s tests the six scenarios of the family requirement
+- [x] 4.1 RED: Write in `src/worktrees.rs`'s tests the six scenarios of the family requirement
       and the two pure `touched` scenarios.
-- [ ] 4.2 GREEN: Implement `parse_list`, `label`, `touched`, and the family selection — taking
+- [x] 4.2 GREEN: Implement `parse_list`, `label`, `touched`, and the family selection — taking
       the pane's canonical root and each record's canonical path or `None`, choosing the longest
       containing top level as the base — per design.md → D10/D15. No I/O, no CLI handle.
-- [ ] 4.3 Run `cargo test --lib worktrees::` — green, a non-zero count; no refactor needed.
+- [x] 4.3 Run `cargo test --lib worktrees::` — green, a non-zero count; no refactor needed.
 
 ## 5. The overlay
 <!-- kind: behavior -->
