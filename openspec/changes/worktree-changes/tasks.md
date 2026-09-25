@@ -272,14 +272,15 @@
 ## 13. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 13.1 CHECK: The tiers this change reaches are unit and view (`cargo test --lib`), the
+- [x] 13.1 CHECK: The tiers this change reaches are unit and view (`cargo test --lib`), the
       real-git unit tests, contract (`cargo test --test doc_contract`), gate controls
       (`cargo test --test gate_controls`), and coverage at both floors.
-- [ ] 13.2 VERIFY: `make lint` — 0 warnings.
-- [ ] 13.3 VERIFY: `make fmt-check` — clean.
-- [ ] 13.4 VERIFY: `make gates` — every gate OK.
-- [ ] 13.5 VERIFY: `make covers-check` — green.
-- [ ] 13.6 VERIFY: `make test` — green.
-- [ ] 13.7 VERIFY: `make coverage` — both floors met; add tests rather than lowering either.
-- [ ] 13.8 VERIFY: `openspec validate worktree-changes --strict` — valid.
-- [ ] 13.9 VERIFY: `make check` as the single gate; if it fails, name the failing sub-command.
+- [x] 13.2 VERIFY: `make lint` — 0 warnings.
+- [x] 13.3 VERIFY: `make fmt-check` — clean.
+- [x] 13.4 VERIFY: `make gates` — every gate OK.
+- [x] 13.5 VERIFY: `make covers-check` — green.
+- [x] 13.6 VERIFY: `make test` — green.
+- [x] 13.7 VERIFY: `make coverage` — both floors met; add tests rather than lowering either.
+- [x] 13.8 VERIFY: `openspec validate worktree-changes --strict` — valid.
+- [x] 13.9 VERIFY: `make check` as the single gate; if it fails, name the failing sub-command.
+      — Green at 3beb27a: every gate OK; coverage total 95.05% lines, production 96.24% ≥ 96%.
