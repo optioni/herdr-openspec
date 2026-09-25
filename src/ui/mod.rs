@@ -125,8 +125,8 @@ pub struct Startup<'a> {
     pub mouse_problem: Option<String>,
     /// `worktree-changes`' addition (design.md -> Decision 14): the `git` binary, injected on
     /// exactly `herdr`'s terms rather than made optional — an absent `git` is a degraded state
-    /// the worker absorbs, not a second way to say the same thing. Unused until group 8 wires
-    /// it into `refresh::start`.
+    /// the worker absorbs, not a second way to say the same thing. Reaches `refresh::start`
+    /// through `start_collaborators`, below.
     pub git: &'a Path,
 }
 
@@ -3339,9 +3339,11 @@ apply:
             /// have reported it. `run_wired_at` passes `None`, which is what
             /// every other test in this module drives.
             mouse_problem: Option<String>,
-            /// `worktree-changes`' addition, on `herdr`'s terms: the `git` binary, unused until
-            /// group 8. Every call site below passes a non-existent path, following `herdr`'s
-            /// own established convention for an unused collaborator.
+            /// `worktree-changes`' addition, on `herdr`'s terms: the `git` binary, wired into
+            /// `refresh::start` by `start_collaborators`. Every call site below passes a
+            /// non-existent path — none of these scenarios needs a real worktree family, so a
+            /// `git` that never resolves is the neutral choice, following `herdr`'s own
+            /// established convention for a collaborator this test group does not exercise.
             git: &'a Path,
         }
 
@@ -3583,7 +3585,7 @@ apply:
         /// A separate scratch tree standing in for a linked git worktree — nothing here is a
         /// real `git worktree`, since the scratch `git` program below answers every command
         /// itself — holding its own copy of change `x`, 2 of 3 tasks done: the member's copy
-        /// the future worktree overlay would show, ahead of the base repository's own 0 of 3.
+        /// the worktree overlay shows, ahead of the base repository's own 0 of 3.
         fn scratch_member_tree_with_x_in_progress() -> ScratchDir {
             let scratch = ScratchDir::new();
             let root = scratch.path();

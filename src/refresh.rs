@@ -1,8 +1,16 @@
 //! The worker thread: the only module in the crate spawning a thread. See
-//! `specs/refresh-worker/spec.md` and `openspec/changes/live-refresh/design.md`
-//! -> Boundaries. Reaches the `openspec` program only through
-//! `Arc<dyn crate::cli::OpenspecCli>` — it spawns no process, and
-//! `src/cli.rs` stays the crate's one spawn site.
+//! `specs/refresh-worker/spec.md`, `openspec/changes/live-refresh/design.md`
+//! -> Boundaries, and `openspec/changes/worktree-overlay/design.md`. Reaches
+//! the `openspec` program only through `Arc<dyn crate::cli::OpenspecCli>`,
+//! and — `worktree-overlay`'s addition — `git` only through
+//! `Arc<dyn crate::cli::GitCli>`, to derive the worktree family and each
+//! member's own `Touched` set (see [`derive_family`]); it spawns no process
+//! itself, and `src/cli.rs` stays the crate's one spawn site. Besides an
+//! ordinary refresh cycle, the worker also runs an idle re-check on its own
+//! timer while no request arrives (`WORKTREE_RECHECK`), re-deriving the
+//! worktree family and re-reading every owned change from its member's
+//! files so a change made directly inside a member — with no request ever
+//! reaching this pane — still reaches the screen.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
