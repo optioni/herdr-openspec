@@ -184,20 +184,35 @@ A change with **no** entry in `badges` SHALL carry no badge cell and no separati
 its row is byte-identical to the row the same dashboard produced before this change existed.
 An agentless pane therefore renders exactly as it did.
 
+**The worktree marker.** `worktree-changes` adds a second one-column cell. When
+`worktrees::member_of(&dashboard.changes.worktrees, &change.dir)` is `Some` — the change is a
+worktree member's copy, by the one derivation `worktree-overlay` defines — its row SHALL carry the marker `@` **after**
+the badge cell, or after the name field when the row carries no badge, separated from its
+neighbours by one space each, so the fullest active grammar is
+`[marker][space][name field][space][badge][space][@][space][progress]`. The marker sits after
+the badge rather than before it so that every column `BadgeCell` already reports — `name_field_width
++ 3` on an active row, `+ 14` on an archived one — is unchanged. `@` is one ASCII column,
+collision-free against `>`, `!`, `…`, `-`, `[`, and the five badge letters, and is drawn in the
+row's own style: it takes no palette role of its own. A change `member_of` answers `None` for
+SHALL carry no marker and no separating space, so its row is byte-identical to the row it produced
+before `worktree-changes`, and a pane with no worktree family renders exactly as it did.
+
 Cells SHALL be dropped **whole**, never cut short, in a fixed order as the width falls:
-first the badge cell and its separating space, when the name field would otherwise fall below
-one column; then the progress cell and its separating space, when the name field would
+first the worktree marker and its separating space, when the name field would otherwise fall
+below one column; then the badge cell and its separating space, when the name field would
+**still** fall below one column; then the progress cell and its separating space, when the name field would
 **still** fall below one column; then — on an archived row — the date field and its separating
 space, on the same condition; and only then does the row degenerate to
 `[marker][space][name field]`. Dropping the newest and narrowest cell first is what leaves
-every landed drop boundary where it was: once the badge is gone the row is
-character-for-character the row this grammar already specified, so the widths at which the
-progress cell and the date field drop are unchanged.
+every landed drop boundary where it was: once the marker is gone the row is
+character-for-character the badged row this grammar specified before `worktree-changes`, and once
+the badge is gone too it is the row this grammar already specified, so the widths at which the
+badge, the progress cell, and the date field drop are unchanged.
 
-A badge cell SHALL be drawn on a **change row only**. A `Problem`, `Section`, or `Message`
-row — including a launch problem, the `No changes yet`, `No active changes`,
-`No changes match`, and no-repository rows — carries no badge cell and no reserved column, at
-any width and whatever `badges` holds.
+A badge cell and a worktree marker SHALL be drawn on a **change row only**. A `Problem`,
+`Section`, or `Message` row — including a launch problem, the `No changes yet`,
+`No active changes`, `No changes match`, and no-repository rows — carries neither and reserves
+no column for either, at any width and whatever `badges` and `worktrees` hold.
 
 **Row numbering in this capability's scenarios** is the rendered **buffer** row, 0-based, so
 row 0 is the region's heading row, row 1 is its padding row, and row 2 is the interior's
@@ -336,6 +351,44 @@ now follows a cursor that can rest on a section header.
   `invalid_agent_name` — so such a change is badged only through the mapping tier, and doing
   so at 38 columns truncates the name two columns earlier, to
   `  a-very-long-change-name-tha… w [2/5]`
+
+#### Scenario: A worktree row carries its marker after the badge
+
+- **WHEN** the three-change dashboard of *Active rows render at both mandated widths*, at
+  `selected` 1, has `changes.worktrees` holding one entry whose root is `/w/feat`, and
+  `add-token-refresh`'s `dir` is `/w/feat/openspec/changes/add-token-refresh`, and is rendered at
+  120x20 and at 60x20, first with no agents and then with an in-scope `Working` agent named
+  `add-token-refresh`
+- **THEN** with no agents the 120-column buffer's row 3, columns 1 through 38, spells exactly
+  `> add-token-refresh            @ [4/9]` and the 60-column buffer's row 3, columns 1 through
+  58, spells exactly `> add-token-refresh                                @ [4/9]`
+- **AND** with the agent the same rows spell exactly `> add-token-refresh          w @ [4/9]`
+  and `> add-token-refresh                              w @ [4/9]`, and `BadgeCell::x` is
+  `name_field_width + 3` — 29 at 38 columns and 49 at 58 — so the badge is where
+  `BadgeCell` says it is
+- **AND** rows 4 and 5, whose changes lie under no worktree root, are byte-identical to that
+  scenario's, so only a worktree copy gains a cell
+
+#### Scenario: The worktree marker is dropped before the badge
+
+- **WHEN** `ui::list::rows` is called for a dashboard holding one active change named `alpha`
+  at 4 of 9 tasks, carrying a `Working` badge and lying under a worktree root, with `selected`
+  **1**, at widths 14, 13, 12, 11, and 10
+- **THEN** the change row is exactly `> a… w @ [4/9]` at 14 and `> … w @ [4/9]` at 13
+- **AND** at 12, 11, and 10 it is exactly `> a… w [4/9]`, `> … w [4/9]`, and `> a… [4/9]` —
+  character-for-character the rows *A field too narrow for both drops the progress cell whole*
+  specifies for the same change without a worktree, so dropping the marker first moves no
+  landed boundary
+
+#### Scenario: A pane inside a nested worktree marks none of its own rows
+
+- **WHEN** the three-change dashboard of *Active rows render at both mandated widths* has its
+  repository root at `/r/.worktrees/feat`, every change's `dir` under
+  `/r/.worktrees/feat/openspec/changes/`, and `changes.worktrees` holding `(/r, "main")`, and is
+  rendered at 120x20 and at 60x20
+- **THEN** no row carries `@`, and every row is byte-identical to that scenario's
+- **AND** changing `add-token-refresh`'s `dir` to `/r/openspec/changes/add-token-refresh` gives
+  that row alone the `@` marker
 
 #### Scenario: A field too narrow for both drops the progress cell whole
 
@@ -570,11 +623,12 @@ column and leaves the remainder blank. `ui::list::shorten_left_row`, the padded 
 third row uses, SHALL pad the result back to exactly `width` display columns — a third
 measuring site, named here because it is easy to miss beside its un-padded sibling.
 
-The cell-drop order is unchanged and is now evaluated in columns: the badge cell and its
-space go first, then the progress cell and its space, then an archived row's date field and
-its space, each when the name field would otherwise fall below **one column**. The progress
-cell (`[<completed>/<total>]` or `[-]`) and the badge (one ASCII column) are ASCII by
-construction and measure exactly their character counts; the date field is ten ASCII columns.
+The cell-drop order is evaluated in columns: the worktree marker and its space go first
+(`worktree-changes`), then the badge cell and its space, then the progress cell and its space,
+then an archived row's date field and its space, each when the name field would otherwise fall
+below **one column**. The progress cell (`[<completed>/<total>]` or `[-]`), the badge (one
+ASCII column), and the worktree marker (`@`, one ASCII column) are ASCII by construction and
+measure exactly their character counts; the date field is ten ASCII columns.
 Only the name field and the message rows can carry non-ASCII content, and only they can
 change width under this rule.
 
@@ -810,8 +864,8 @@ colour is added beside a style that carried none.
 
 An archived change's row SHALL carry, after the marker and its following space, a
 **ten-column date field** holding the `YYYY-MM-DD` string the archive directory name was
-prefixed with, then one space, then the name field, the badge cell, and the progress cell
-exactly as an active row has them. When the change's `Origin::Archived` carries `date: None`
+prefixed with, then one space, then the name field, the badge cell, the worktree marker, and the progress
+cell exactly as an active row has them. When the change's `Origin::Archived` carries `date: None`
 the ten columns SHALL be spaces, so an undated entry's name still begins in the same column
 as a dated one's.
 
@@ -820,8 +874,9 @@ archived while an agent that was working on it is still alive, and `agent-attrib
 its `badges` from both tiers of the change list.
 
 An archived row's fields SHALL be dropped **whole**, never cut short, in a fixed order as
-the width falls: first the badge cell and its following space, when the name field would
-otherwise fall below one column; then the progress cell and its following space, when the
+the width falls: first the worktree marker and its following space, when the name field would
+otherwise fall below one column; then the badge cell and its following space, when the name
+field would **still** fall below one column; then the progress cell and its following space, when the
 name field would **still** fall below one column; then the ten-column date field and its
 following space, on the same condition again; and only then does the row degenerate to the
 active grammar's `[marker][space][name field]`, with no progress cell ever offered. Below two columns
@@ -832,7 +887,10 @@ it is `> add-auth   `, the date dropped; at 3 it is `> …`; at 1 it is `>`; at 
 Every one of those rows SHALL be exactly its width in **display columns**, which for this
 all-ASCII worked example is the same row it has always been. The **badged** form of the
 same change needs two further columns: at width 22 the row is `> 2026-08-14 … b [7/7]`, and
-at width 21 and below the badge is gone and every row above is reproduced unchanged.
+at width 21 and below the badge is gone and every row above is reproduced unchanged. An
+**unbadged worktree** copy of it — archived in a worktree and not yet merged — needs the same
+two: at width 22 the row is `> 2026-08-14 … @ [7/7]`, and at 21 and below the marker is gone and
+every unbadged row above is reproduced unchanged.
 
 Every one of those rows is character-for-character the row the same change produced before
 `list-sections`: this requirement changes what sits **above** the archived rows, never the
@@ -962,6 +1020,19 @@ badged and is never a change.
 - **AND** the same dashboard with an accepted query of `zzz-no-match` shows neither header at
   either width, because both sections' counts are zero and the two `No changes match` message
   rows replace them
+
+#### Scenario: A change archived in a worktree carries the marker on its archived row
+
+- **WHEN** the dashboard of *The section header and archived rows render at both mandated
+  widths* — `fix-empty-basket` active, `add-auth` and `legacy-cleanup` archived, both sections
+  open, `selected` 1 — has `add-auth`'s `dir` at
+  `/w/feat/openspec/changes/archive/2026-08-14-add-auth` and `changes.worktrees` holding one
+  entry rooted at `/w/feat`, and is rendered at 120x20 and at 60x20
+- **THEN** `add-auth`'s row, columns 1 through 38 of the 120-column buffer, spells exactly
+  `  2026-08-14 add-auth          @ [7/7]`, and columns 1 through 58 of the 60-column buffer
+  spell exactly `  2026-08-14 add-auth                              @ [7/7]`
+- **AND** every other row is byte-identical to that scenario's, and the same dashboard with
+  `worktrees` emptied renders `add-auth`'s row byte-identical to it too
 
 ### Requirement: The row a point lands on is the row drawn there
 

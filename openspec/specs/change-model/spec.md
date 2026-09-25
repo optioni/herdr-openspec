@@ -267,8 +267,9 @@ one module.
 ### Requirement: Archived changes are file-sourced only, and the two lists stay separate
 
 `ChangeSet` SHALL hold `active` and `archived` as two separate vectors, a repository-level
-`problems` list, and an `archived_total: usize` — the number of archived changes the archive
-directory holds — rather than one vector discriminated by `origin`.
+`problems` list, an `archived_total: usize` — the number of archived changes the archive
+directory holds — and a `worktrees: Vec<worktrees::Worktree>` — the worktree family members
+the set was overlaid against — rather than one vector discriminated by `origin`.
 
 The separation is a contract, not a convenience. `openspec list --json` lists active changes
 only, and the OpenSpec CLI offers no way to address a change under `archive/` at all — an
@@ -284,9 +285,11 @@ suppresses the other.
 `archived_total` is `list-sections`' addition and exists because `archived` is no longer
 always populated: `change-enumeration` resolves the archived tier only when the archived
 section is shown, and a collapsed section's header still has to say how many changes are
-behind it. It SHALL be the count the archive **enumeration** produced, before any change was
-built, so it is the same number under either scope. Two invariants therefore hold on every
-`ChangeSet` either producer returns, and a **new** `#[cfg(test)]` function
+behind it. On a set `changes::from_files` returns it SHALL be the count the archive
+**enumeration** produced, before any change was built, so it is the same number under either
+scope; on a set `changes::overlay` returns it additionally counts the archived directories
+worktree members added, per `worktree-overlay`, under either scope alike. Two invariants
+therefore hold on every `ChangeSet` either producer or the overlay returns, and a **new** `#[cfg(test)]` function
 `conformance::assert_set_invariants(set: &ChangeSet)` SHALL check both: `archived.len()` is
 either `0` or exactly `archived_total`, and `archived_total` is never less than
 `archived.len()`.
@@ -301,8 +304,21 @@ sixth `ChangeSet` field is a compile error there too. `changes::merge` SHALL car
 through untouched, on exactly the terms `archived` itself passes through, and
 `changes::empty_set()` SHALL set it to `0`.
 
-`archived_total` is **not** a field of `Change` and does not weaken the seven-field rule
-above: it is a property of the set, like `problems`, and `ChangeSet` derives no `Default`
+`worktrees` is `worktree-changes`' addition. Each entry is one member's OpenSpec root and its
+label, in the order `git worktree list` gave them, and the pane's own root is never among
+them; `worktree-overlay` owns how the list is derived. It SHALL be empty on every set
+`changes::from_files` returns, on `changes::empty_set()`, and whenever no family was read —
+no `git`, no repository, file mode — and `changes::merge` SHALL carry the file result's
+`worktrees` through untouched, on exactly `archived_total`'s terms. It is how a view learns that
+a change came from a worktree: `worktrees::member_of(&set.worktrees, &change.dir)`, the one
+derivation `worktree-overlay` defines, matching `dir` against each member's
+`<root>/openspec/changes`. That is **derived**, never stored on `Change` — the "no producer discriminant"
+rule above holds, because a `dir` is a location, not a statement of which producer built the
+value. `conformance::assert_set_invariants` SHALL bind `worktrees` in its exhaustive
+destructure and assert a third invariant: no two entries share a root.
+
+`archived_total` and `worktrees` are **not** fields of `Change` and do not weaken the seven-field rule
+above: each is a property of the set, like `problems`, and `ChangeSet` derives no `Default`
 either, so adding it is a compile error at every construction site rather than a silent `0`
 at one of them.
 
@@ -340,6 +356,16 @@ at one of them.
   rather than a comment
 - **AND** `assert_invariants` still takes a `&Change` and every landed call site compiles
   unchanged, so mechanism 2's `E0027` guard is intact
+
+#### Scenario: The worktree family travels with the set and nowhere else
+
+- **WHEN** a scratch repository is enumerated by `changes::from_files`, merged with a
+  `CliChanges` by `changes::merge`, and `changes::empty_set()` is called
+- **THEN** all three sets carry an empty `worktrees`
+- **AND** a set whose `worktrees` holds `(/w/feat, "feat")` passed through `changes::merge`
+  keeps exactly that list, so the merge never drops the family
+- **AND** `assert_set_invariants` rejects a hand-built set whose `worktrees` lists `/w/feat`
+  twice, and accepts the same set with one entry
 
 ### Requirement: Producing changes never fails and never panics
 

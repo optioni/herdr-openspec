@@ -192,7 +192,8 @@ pub enum RefreshResult {
 }
 ```
 
-Neither the trait nor `RefreshResult` SHALL name `CliChanges`, `OpenspecCli`, or `from_cli`,
+Neither the trait nor `RefreshResult` SHALL name `CliChanges`, `OpenspecCli`, `GitCli`, or
+`from_cli`,
 so `src/ui/driver.rs` can hold a `&mut dyn Refresher` while the landed `NOCLI-SHELL` check —
 which forbids every file under `src/ui/` from naming any of those — stays green unweakened.
 That check is what proves, structurally, that the CLI is off the render path.
@@ -232,13 +233,18 @@ the pane looks like now, and a stale one would resolve an archive the reader has
 or leave folded an archive they have since opened.
 
 A cycle SHALL be considered answered when its **`Merged`** result arrives, since the worker
-answers each request twice, and also when a `Stopped` is latched.
+answers each request twice, and also when a `Stopped` is latched. An **unsolicited** `Files`
+result — `worktree-overlay`'s idle re-check, sent while no request is outstanding — SHALL be
+returned by `take_result` like any other and SHALL leave the outstanding state untouched, which
+is why the re-check answers with `Files` and never with `Merged`.
 
 `refresh::none()` SHALL return the inert implementation: `request` records nothing and does
 nothing, `take_result` is always `None`. `refresh::start(repo: Option<&Path>, cli:
-Option<Arc<dyn OpenspecCli>>) -> Box<dyn Refresher>` SHALL return the
-inert implementation when either argument is `None`, so a machine with no `openspec` binary
-installed at all runs the landed file-only dashboard with no worker and no thread. The inert
+Option<Arc<dyn OpenspecCli>>, git: Arc<dyn GitCli>) -> Box<dyn Refresher>` SHALL return the
+inert implementation when either `repo` or `cli` is `None`, so a machine with no `openspec` binary
+installed at all runs the landed file-only dashboard with no worker and no thread. `git` never
+decides whether a worker starts: it is not an `Option`, because an absent `git` is a degraded
+state the worker absorbs (`worktree-overlay`), not a reason to run without one. The inert
 implementation SHALL never report `Stopped`: it has no worker to lose.
 
 #### Scenario: The inert refresher answers nothing and starts no thread
@@ -252,11 +258,13 @@ implementation SHALL never report `Stopped`: it has no worker to lose.
 
 #### Scenario: No binary means no worker
 
-- **WHEN** `refresh::start` is called with `cli: None`, and again with `repo: None`
+- **WHEN** `refresh::start` is called with `cli: None`, and again with `repo: None`, each time
+  with a recording fake `GitCli`
 - **THEN** both return the inert implementation, observationally identical to
   `refresh::none()`
 - **AND** the dashboard's behaviour is exactly the landed file-only behaviour: it paints, it
   filters, it scrolls, and nothing ever corrects it
+- **AND** the fake `GitCli` records no call, so file mode never reads the worktree family
 
 #### Scenario: A dead refresh worker is reported once and then stops being reported
 
@@ -297,15 +305,25 @@ implementation SHALL never report `Stopped`: it has no worker to lose.
 
 The real `Refresher` SHALL own a worker thread and two `std::sync::mpsc` channels — requests
 out, results in — and SHALL call the `openspec` binary only through the `OpenspecCli` trait,
-which is `Send + Sync` for exactly this reason. It SHALL NOT spawn a process: `src/cli.rs`
+which is `Send + Sync` for exactly this reason, and `git` only through the `GitCli` trait. It SHALL NOT spawn a process: `src/cli.rs`
 remains the crate's only spawn site, checked tree-wide by `NOSPAWN-GREP`.
 
 For each request the worker SHALL, in this order:
 
-1. run `changes::from_files(repo, request.archived)` and send `RefreshResult::Files(files)`;
-2. run `changes::from_cli_cached(cli, repo, &request.selection, &mut cache)` against a `CliCache` it
-   owns for its whole lifetime, and send
-   `RefreshResult::Merged(changes::merge(files, cli_changes))`.
+1. run `changes::from_files(repo, request.archived)`, overlay it with the **remembered** worktree family
+   and ownership — whatever the previous cycle or idle re-check last derived — reading each
+   member's owned changes afresh from its files, and send `RefreshResult::Files(overlaid)`; on the worker's first cycle there is
+   no previous family, and the file result is sent un-overlaid;
+2. derive the family and every member's ownership afresh through `GitCli`, per
+   `worktree-overlay`; run `changes::from_cli_cached(cli, repo, &request.selection, &mut cache)`
+   against a `CliCache` it owns for its whole lifetime; and send
+   `RefreshResult::Merged(changes::overlay(changes::merge(files, cli_changes), …))`, where
+   `files` is step 1's **un-overlaid** set, so the CLI is layered over the pane's own changes
+   only and a worktree copy is never corrected by it.
+
+The worker SHALL remember step 2's un-overlaid merged set, the request's `ArchivedScope`, the
+base archive's directory names step 1's enumeration read, the family and ownership it derived,
+and the set it sent, for `worktree-overlay`'s idle re-check and for the next cycle's step 1.
 
 Sending the file result **before** the CLI call is what makes the dual-source model
 mechanical rather than described: the cheap, always-available answer is on the channel within
@@ -336,11 +354,13 @@ and `Box<dyn Refresher>` deliberately exposes only the non-blocking `take_result
 
 ```rust
 #[cfg(test)]
-pub(crate) fn worker_for_test(repo, cli)
+pub(crate) fn worker_for_test(repo, cli, git, recheck: Duration)
     -> (Box<dyn Refresher>, Receiver<RefreshResult>, Receiver<()>);
 ```
 
-Its **second** element is the worker's result `Receiver`, handed to the test instead of being
+`recheck` is the idle re-check interval `worktree-overlay` names; production passes
+`refresh::WORKTREE_RECHECK` and a test passes a few milliseconds, so no scenario waits two
+seconds. Its **second** element is the worker's result `Receiver`, handed to the test instead of being
 stored on the `Refresher`, so a test can `recv_timeout` on it; the returned `Refresher`'s
 `take_result` therefore always yields `None` and no test in this requirement calls it. Its
 **third** element receives from a channel whose `Sender` the worker thread owns and drops only
@@ -348,7 +368,7 @@ when its body returns. Dropping the returned `Refresher` drops the request `Send
 which is what makes the disconnection observable on the third element.
 
 `worker_for_test` SHALL be declared **after** `start` — below the file's single
-`thread::spawn` and above `mod tests` — because `READONLY-UI` and `NOBLOCK` build a file's
+`thread::spawn`, inside `mod tests`, which is where it lives — because `READONLY-UI` and `NOBLOCK` build a file's
 production slice by discarding everything from its **first** line-anchored `#[cfg(test)]` to
 EOF. A `#[cfg(test)]` item placed above `start` would hide the worker's whole body from both
 sweeps: measured, a `std::fs::write` in the worker's start path is then reported **green** by
@@ -396,6 +416,20 @@ naming `thread::spawn`, and no file under `src/ui/` SHALL name `thread::spawn`, 
 - **AND** the ordering claim is sound without a race: the merged result is sent **after** the
   file result on the same channel, so receiving the merged one is proof the file one was
   already sent, and neither assertion is made after a fixed sleep
+
+#### Scenario: A worktree copy reaches the merged result first and the file result after
+
+- **WHEN** a real `Refresher` is constructed through `refresh::worker_for_test` over a
+  `ScratchDir` base whose `alpha` counts 0 of 9, a fake `GitCli` reporting one member whose
+  `status` names `openspec/changes/alpha/tasks.md` and whose own `alpha` counts 5 of 9, and a fake
+  `OpenspecCli` reporting `alpha` at 0 of 9, and is given two requests, the second after the
+  first cycle's `Merged` is received
+- **THEN** the first cycle's `Files` shows `alpha` at 0 of 9 with an empty `worktrees`, and its
+  `Merged` shows `alpha` at 5 of 9 with the member listed
+- **AND** the second cycle's `Files` already shows `alpha` at 5 of 9, so after the first cycle the
+  fast answer never regresses a worktree row to the base's copy
+- **AND** the fake `OpenspecCli` was asked about the base only: no recorded call names the
+  member's directory
 
 #### Scenario: A CLI that fails still produces the file result
 
@@ -642,3 +676,90 @@ naming the command and its exit code. Carrying the child's stderr on that row is
 - **AND** the file-sourced change set is still what the pane renders, so a 127 degrades the
   pane to file mode rather than emptying it
 - **AND** no panic, no error screen, and no `LoopError` results
+
+### Requirement: While idle, the worker re-checks the worktree family on its own cadence
+
+The worker SHALL wait for its next request with `recv_timeout(recheck)` rather than `recv`,
+where production's `recheck` is `refresh::WORKTREE_RECHECK`, a named `Duration` of two seconds
+declared beside the module's other items and never written as a bare literal at the call site.
+When the wait times out and at least one cycle has completed, the worker SHALL re-derive the
+family and every member's ownership through `GitCli`, re-read every owned change from its
+member's files, overlay the result onto the **remembered** un-overlaid merged set under the
+remembered `ArchivedScope` and the remembered base archive directory names, and — only when
+that set differs from the set it last sent — send it as `RefreshResult::Files`. An unchanged
+overlay SHALL send nothing, so an idle pane beside an idle worktree receives no result and
+adopts nothing. Whether or not it sends, a re-check SHALL **replace** the remembered family and
+ownership with what it derived, and a sent set SHALL replace the remembered last-sent set, so the
+next request's fast answer overlays with what the pane last saw and a row the re-check brought in
+never drops out of it.
+
+The re-check SHALL NOT run the `openspec` CLI and SHALL NOT re-read the base's own changes: the
+base is watched, and its changes arrive through the ordinary request path. It exists because
+nothing watches a member — a worktree lives outside `openspec/`, often outside the repository
+root, and may be created after the pane opened — and a watch over every member would move the
+watcher's roots at run time from a thread the render loop owns. Polling from the worker keeps
+every clock and every wait off the render path, on `agents`' own model, and costs one
+`git worktree list` per interval when no member exists.
+
+When the worker's request channel disconnects during the wait it SHALL return, and when its
+result channel is disconnected at a send it SHALL return, exactly as between requests. A re-check
+SHALL NOT run before the first cycle has completed, because until then there is no base to
+overlay onto.
+
+#### Scenario: A worktree created after the last cycle appears without a request
+
+- **WHEN** a worker constructed through `worker_for_test` with a 5 ms `recheck` has answered one
+  request over a base with no members, and its fake `GitCli` is then switched to report a new
+  member owning an untracked change `beta`
+- **THEN** `results_rx.recv_timeout(Duration::from_secs(10))` yields an unsolicited
+  `RefreshResult::Files` holding `beta` and listing the member, with no further `request` made
+- **AND** the fake `OpenspecCli` recorded no call after the first cycle's
+- **AND** the base's own `alpha`, which its files count at 4 of 9 and the CLI corrected to 7 of 9
+  in the first cycle, is still at 7 of 9 in that unsolicited result, so the re-check overlaid the
+  remembered merged base rather than re-reading the base's files
+
+#### Scenario: An unchanged overlay sends nothing
+
+- **WHEN** a worker whose family holds two members that both own active `x` — so the overlaid set
+  carries `x` from the first and a conflict problem — has answered one request, and its fake
+  `GitCli` keeps answering identically for twenty re-check intervals
+- **THEN** the result channel holds nothing beyond that cycle's `Files` and `Merged`, and a
+  `recv_timeout` of twenty intervals returns `Err(RecvTimeoutError::Timeout)`
+- **AND** the fake `GitCli` recorded at least **two** further `worktree list` calls — the worker
+  is sequential, so the second proves the first re-check reached its comparison — and no
+  unsolicited result was sent, so the comparison is against the remembered base and not against
+  an accumulating set
+
+#### Scenario: A ticked task inside a worktree reaches the pane
+
+- **WHEN** after the first cycle a scratch member's owned `tasks.md` is replaced — written to a
+  sibling file and renamed over it, so no read sees it half-written — changing it from 5 of 9 to
+  6 of 9, with the fake `GitCli`'s answers unchanged
+- **THEN** within a 10 s `recv_timeout` deadline an unsolicited `Files` result shows that change at
+  6 of 9, and its `dir` is the member's
+
+#### Scenario: No re-check before the first cycle
+
+- **WHEN** a worker is constructed with a 5 ms `recheck` and given no request
+- **THEN** `results_rx.recv_timeout(Duration::from_millis(50))` returns
+  `Err(RecvTimeoutError::Timeout)` and its fake `GitCli` has recorded no call
+
+#### Scenario: A re-check's discovery survives the next request's fast answer
+
+- **WHEN** a worker has sent the unsolicited `Files` of *A worktree created after the last cycle
+  appears without a request*, holding `beta`, and a request then arrives
+- **THEN** that request's `Files` result already holds `beta`, and so does its `Merged`
+
+#### Scenario: A worker that has cycled still returns when its refresher is dropped
+
+- **WHEN** a worker constructed through `worker_for_test` with a 5 ms `recheck` has answered one
+  request, and its `Refresher` is then dropped
+- **THEN** its exit channel reports `Err(RecvTimeoutError::Disconnected)` within 10 s, so a
+  disconnect during the timed wait ends the worker rather than being read as a timeout
+
+#### Scenario: The render path gains no clock and no wait
+
+- **WHEN** `NOBLOCK` and `NOSLEEP` run over the tree after this change
+- **THEN** both pass unweakened: `recv_timeout` sits below `src/refresh.rs`'s single
+  `thread::spawn`, in the worker body those gates already leave free to block, and no file under
+  `src/ui/` names it
