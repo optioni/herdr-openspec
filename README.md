@@ -98,8 +98,9 @@ itself as being in file mode.
 ## Development
 
 Requires Rust — `Cargo.toml`'s `rust-version = "1.88"` is the supported floor
-— and `python3`, which the hygiene-gate tier's own scripts and the coverage
-gate's production-floor script invoke, plus two one-time components:
+— `python3`, which the hygiene-gate tier's own scripts and the coverage
+gate's production-floor script invoke, and `git`, for `make check`'s own test
+suite (`worktree-overlay`'s scratch repositories), plus two one-time components:
 
 ```sh
 rustup component add clippy
