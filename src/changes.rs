@@ -2022,6 +2022,21 @@ pub fn from_files_owned(
     touched: &crate::worktrees::Touched,
     scope: ArchivedScope,
 ) -> OwnedChanges {
+    // A member that touched nothing on either side cannot own anything below —
+    // every active and archived filter tests against `touched`'s two sets, so
+    // proceeding would only read the project config and enumerate both
+    // directories to filter everything back out. `worktree-overlay`'s idle
+    // re-check calls this for every member on every tick, so this early return
+    // is what keeps an untouched member's cost at zero rather than "one
+    // directory listing per unchanged member, forever" (Change Review
+    // follow-up, `worktree-changes` task 11.2 item 3).
+    if touched.active.is_empty() && touched.archived.is_empty() {
+        return OwnedChanges {
+            active: Vec::new(),
+            archived: Vec::new(),
+        };
+    }
+
     let project_config_path = root.join("openspec").join("config.yaml");
     let project_config_text = crate::schema::read_file(&project_config_path);
     let mut schema_cache: std::collections::HashMap<String, CachedSchemaLoad> =
