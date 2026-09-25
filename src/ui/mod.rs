@@ -3520,21 +3520,21 @@ apply:
 
         /// `degraded-coverage`'s two CLI-cycle failure fixtures: a scratch `openspec`
         /// program that either reports a repository root disagreeing with `root`, or exits
-        /// non-zero — both after logging its own argv, on `openspec_script`'s terms.
+        /// non-zero. Unlike `openspec_script`, it logs its argv as its **last** act before
+        /// exiting, not its first: the caller's predicate is "the log has a line", and a
+        /// line written before the output let that predicate, and `UntilReady`'s settle
+        /// window, run out while the child was still running — so `q` could beat the
+        /// worker's answer, and on a loaded CI runner it did.
         fn openspec_script_failing(dir: &Path, log: &Path, kind: &str) -> PathBuf {
+            let log_argv = format!("printf '%s\\n' \"$*\" >> \"{}\"\n", log.display());
             let body = match kind {
-                "wrong_root" => "printf '%s' '{\"changes\":[],\"root\":{\"path\":\"/definitely/elsewhere\",\"source\":\"nearest\"}}'\n".to_string(),
-                "nonzero" => "exit 1\n".to_string(),
+                "wrong_root" => format!(
+                    "printf '%s' '{{\"changes\":[],\"root\":{{\"path\":\"/definitely/elsewhere\",\"source\":\"nearest\"}}}}'\n{log_argv}"
+                ),
+                "nonzero" => format!("{log_argv}exit 1\n"),
                 other => unreachable!("unexpected kind {other}"),
             };
-            write_script(
-                dir,
-                "openspec",
-                &format!(
-                    "printf '%s\\n' \"$*\" >> \"{log}\"\n{body}",
-                    log = log.display(),
-                ),
-            )
+            write_script(dir, "openspec", &body)
         }
 
         /// The number of lines a scratch program's log currently holds — `0`
