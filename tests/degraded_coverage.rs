@@ -1059,16 +1059,16 @@ fn a_struct_field_only_covers_range_is_rejected() {
 /// a string literal desyncs a counter for the remainder of the file and its failure mode is
 /// **vacuous acceptance**: fields stop being recognised and the very range this rule exists to
 /// reject passes again. `src/ui/mod.rs` holds `{` inside string literals well before line
-/// 2672 (`r#"{"workspace_id":"w8",…}"#` at 698, 737 and 764), and 2672-2674 is `struct
+/// 2686 (`r#"{"workspace_id":"w8",…}"#` at 712, 751 and 778), and 2686-2688 is `struct
 /// Recorder`'s two field declarations.
 #[test]
 fn field_recognition_does_not_desync_on_a_brace_in_a_string_literal() {
-    let (condition, err) = covers_error(("src/ui/mod.rs", 2672, 2674));
+    let (condition, err) = covers_error(("src/ui/mod.rs", 2686, 2688));
     assert!(
         err.contains(&condition),
         "the failure must name the row's condition: {err:?}"
     );
-    assert!(err.contains("src/ui/mod.rs:2672-2674"), "{err:?}");
+    assert!(err.contains("src/ui/mod.rs:2686-2688"), "{err:?}");
     assert!(err.contains("holds no statement"), "{err:?}");
 
     // The same property asserted directly on the classifier, where the desync can be planted
@@ -1188,9 +1188,9 @@ fn dropping_covers_ranges_fails_the_range_floor() {
 #[test]
 fn each_declaration_branch_has_a_range_only_it_rejects() {
     // `is_attribute`: two attribute lines and nothing else.
-    let (condition, err) = covers_error(("src/changes.rs", 1981, 1982));
+    let (condition, err) = covers_error(("src/changes.rs", 2345, 2346));
     assert!(err.contains(&condition), "{err:?}");
-    assert!(err.contains("src/changes.rs:1981-1982"), "{err:?}");
+    assert!(err.contains("src/changes.rs:2345-2346"), "{err:?}");
     assert!(err.contains("holds no statement"), "{err:?}");
 
     // `is_lone_delimiter`: three closing braces and nothing else.

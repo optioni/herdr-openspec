@@ -9,7 +9,7 @@ tier = "view"
 proof = ["no_repository_names_the_directory_searched"]
 verdict = "confirmed"
 why = "the list region renders the empty state naming the directory searched, via render_at"
-covers = ["src/ui/list.rs:348-368", "src/ui/list.rs:380-381"]
+covers = ["src/ui/list.rs:410-430", "src/ui/list.rs:442-443"]
 
 [[row]]
 condition = "`openspec` binary not found"
@@ -17,7 +17,7 @@ tier = "view"
 proof = ["the_badge_is_right_aligned_and_dropped_whole"]
 verdict = "implemented"
 why = "the list region's heading renders a dim, yellow file mode badge right-aligned against its own last column, dropped whole below its budget, driven through render_at at both widths and at the drop rule's own boundary"
-covers = ["src/ui/view.rs:596-598", "src/ui/view.rs:609-616"]
+covers = ["src/ui/view.rs:621-623", "src/ui/view.rs:634-641"]
 
 [[row]]
 condition = "Schema unknown to the CLI"
@@ -25,7 +25,7 @@ tier = "unit"
 proof = ["a_cli_rejected_schema_names_its_reason_per_change"]
 verdict = "unproven"
 why = "a real FakeCli-driven from_cli merge falls back per change and content_lines renders the reason"
-covers = ["src/changes.rs:1430-1474"]
+covers = ["src/changes.rs:1497-1541"]
 
 [[row]]
 condition = "Schema not vendored (no `openspec/schemas/<name>/schema.yaml` locally)"
@@ -33,7 +33,7 @@ tier = "unit"
 proof = ["an_unusable_schema_renders_no_artifacts"]
 verdict = "unproven"
 why = "a real not-vendored schema, read through changes::from_files, empties tab_bar"
-covers = ["src/changes.rs:993-995"]
+covers = ["src/changes.rs:1060-1062"]
 
 [[row]]
 condition = "Schema unreadable or invalid (I/O error, or bytes that are not a usable schema)"
@@ -41,7 +41,7 @@ tier = "unit"
 proof = ["an_unusable_schema_renders_no_artifacts"]
 verdict = "unproven"
 why = "a real unparseable schema.yaml, read through changes::from_files, empties tab_bar"
-covers = ["src/changes.rs:996-1001"]
+covers = ["src/changes.rs:1063-1068"]
 
 [[row]]
 condition = "Schema loads with no tasks artifact (`apply.tracks` matches nothing and no artifact has id `tasks`, or `apply.tracks` is present but wrong-typed even when an artifact has id `tasks`)"
@@ -49,7 +49,7 @@ tier = "unit"
 proof = ["no_tasks_artifact_renders_every_tab_as_markdown"]
 verdict = "unproven"
 why = "every tab dispatches to markdown, never the checklist grammar, and progress falls back to tasks.md"
-covers = ["src/changes.rs:808-810"]
+covers = ["src/changes.rs:859-861"]
 
 [[row]]
 condition = "No active changes"
@@ -57,7 +57,7 @@ tier = "view"
 proof = ["a_repository_with_no_changes_says_so"]
 verdict = "confirmed"
 why = "the list region's empty state, rendered through render_at"
-covers = ["src/ui/list.rs:525-535", "src/ui/list.rs:536-542"]
+covers = ["src/ui/list.rs:591-601", "src/ui/list.rs:602-608"]
 
 [[row]]
 condition = "A `/` filter matches no change"
@@ -65,7 +65,7 @@ tier = "view"
 proof = ["a_query_matching_nothing_names_itself"]
 verdict = "confirmed"
 why = "the filter's no-match rows, rendered through render_at"
-covers = ["src/ui/list.rs:544-555"]
+covers = ["src/ui/list.rs:610-621"]
 
 [[row]]
 condition = "Artifact file missing"
@@ -73,7 +73,7 @@ tier = "view"
 proof = ["a_missing_artifact_still_shows_its_tab_and_reads_no_content_yet"]
 verdict = "confirmed"
 why = "the detail region's No content yet state, rendered through render_at"
-covers = ["src/ui/detail.rs:847-849"]
+covers = ["src/ui/detail.rs:921-923"]
 
 [[row]]
 condition = "An artifact file exists and cannot be read (permission error, I/O error)"
@@ -81,7 +81,7 @@ tier = "view"
 proof = ["a_read_failure_is_named_above_the_content_at_both_widths"]
 verdict = "confirmed"
 why = "the detail region's leading problem line, rendered through render_at"
-covers = ["src/ui/app.rs:2305-2309", "src/ui/detail.rs:673-673"]
+covers = ["src/ui/app.rs:2305-2309", "src/ui/detail.rs:747-747"]
 
 [[row]]
 condition = "No change is selected (an empty visible list, or a `/` filter matching none)"
@@ -89,7 +89,7 @@ tier = "view"
 proof = ["an_empty_visible_list_leaves_the_whole_detail_interior_blank"]
 verdict = "confirmed"
 why = "the whole detail interior stays blank, rendered through render_at"
-covers = ["src/ui/view.rs:128-130"]
+covers = ["src/ui/view.rs:129-131"]
 
 [[row]]
 condition = "Markdown source holds a construct the parser does not model (a footnote), on a tab **other** than the tracked-tasks one"
@@ -113,7 +113,7 @@ tier = "view"
 proof = ["missing_tasks_artifact_no_content_yet"]
 verdict = "confirmed"
 why = "the header's counted pair beside the tab's own No content yet, rendered through render_at"
-covers = ["src/ui/detail.rs:847-849", "src/ui/detail.rs:64-70"]
+covers = ["src/ui/detail.rs:921-923", "src/ui/detail.rs:82-87"]
 
 [[row]]
 condition = "`openspec/changes/` or its `archive/` exists and cannot be read"
@@ -121,7 +121,7 @@ tier = "view"
 proof = ["repository_problems_are_named_above_the_rows"]
 verdict = "confirmed"
 why = "the list's leading problem row naming the unreadable directory, rendered through render_at"
-covers = ["src/ui/list.rs:432-439"]
+covers = ["src/ui/list.rs:494-501"]
 
 [[row]]
 condition = "An artifact's `generates` pattern falls outside the file path's supported glob subset"
@@ -129,7 +129,7 @@ tier = "unit"
 proof = ["an_unsupported_glob_names_its_reason_and_spares_the_others"]
 verdict = "unproven"
 why = "a real unsupported glob, read through changes::from_files, empties one artifact and names why"
-covers = ["src/changes.rs:748-751"]
+covers = ["src/changes.rs:799-802"]
 
 [[row]]
 condition = "A `generates` glob crosses a symlinked directory whose target resolves inside the change directory"
@@ -137,7 +137,7 @@ tier = "unit"
 proof = ["a_non_looping_directory_symlink_resolving_inside_the_change_is_skipped_too"]
 verdict = "confirmed"
 why = "a real non-looping symlink whose target canonicalizes inside the change directory, read through resolve_artifact, is not descended into and the file behind it is absent from the artifact's paths - this proves the plugin's own skip, not that the CLI actually follows such a link (that claim rests on the 1.12.0 measurement cited in the row itself and in design.md, not on a test that spawns the real CLI)"
-covers = ["src/changes.rs:693-694", "src/changes.rs:697-697", "src/changes.rs:703-705"]
+covers = ["src/changes.rs:744-745", "src/changes.rs:748-748", "src/changes.rs:754-756"]
 
 [[row]]
 condition = "A tasks file exists but cannot be read (a directory where a file was expected, a permission error, an I/O error, or invalid UTF-8)"
@@ -153,7 +153,7 @@ tier = "view"
 proof = ["an_unreachable_socket_renders_the_agentless_pane"]
 verdict = "spec-corrected"
 why = "the pane renders identically whether AgentSnapshot::problem is Some or None, via render_at — because ui::list only draws that reason when the snapshot is also `stalled`, which the fixture never sets"
-covers = ["src/ui/list.rs:456-458"]
+covers = ["src/ui/list.rs:518-520"]
 
 [[row]]
 condition = "A launch's `pane split` call fails"
@@ -273,7 +273,7 @@ tier = "outer"
 proof = ["a_failed_cli_cycle_keeps_the_file_numbers"]
 verdict = "unproven"
 why = "a real run_wired run against a scratch openspec reporting a disagreeing root keeps the file-sourced numbers"
-covers = ["src/changes.rs:1643-1660"]
+covers = ["src/changes.rs:1710-1727"]
 
 [[row]]
 condition = "An `openspec` command exits non-zero"
@@ -281,7 +281,7 @@ tier = "unit"
 proof = ["a_failed_cli_cycle_keeps_the_file_numbers", "an_exec_failure_of_the_openspec_shim_reports_its_own_stderr", "a_shim_whose_interpreter_is_unreachable_exits_127_and_renders_a_problem_row"]
 verdict = "confirmed"
 why = "three proofs for the row's two halves, plus the S10 shim shape folded in rather than given a third row of its own: a_failed_cli_cycle_keeps_the_file_numbers (outer) runs a real run_wired cycle against a scratch openspec exiting non-zero and shows the file-sourced numbers survive; an_exec_failure_of_the_openspec_shim_reports_its_own_stderr (unit) feeds cli_error_problem the measured Failed{code:127} shape and shows the stderr line is carried; a_shim_whose_interpreter_is_unreachable_exits_127_and_renders_a_problem_row (unit, real worker thread) drives the same worker::worker_for_test seam group 9 already exercises with a Failed{code:127} openspec answer, and shows the file-sourced set survives with the problem recorded — group 9 deliberately folded the shim's unreachable-interpreter case into this existing row rather than adding a third, since a 127 exit is a 127 exit regardless of why the child never execed. The outer proof is the strongest of the three, since it exercises the real cycle rather than calling cli_error_problem or the worker directly. tier is \"unit\" because tests/degraded_coverage.rs applies its view/outer rendering check per proof entry, and neither unit proof's own body renders anything through a TestBackend"
-covers = ["src/changes.rs:1621-1628", "src/changes.rs:1396-1411"]
+covers = ["src/changes.rs:1688-1695", "src/changes.rs:1463-1478"]
 
 [[row]]
 condition = "A `herdr agent list` call exits non-zero, or the program cannot be started at all"
@@ -336,7 +336,7 @@ tier = "outer"
 proof = ["a_failed_cli_cycle_keeps_the_file_numbers"]
 verdict = "unproven"
 why = "a real run_wired run keeps the file-sourced result after a later failing CLI cycle"
-covers = ["src/changes.rs:1623-1628", "src/changes.rs:1830-1830"]
+covers = ["src/changes.rs:1690-1695", "src/changes.rs:1900-1900"]
 
 [[row]]
 condition = "A touched path is classified to the wrong change, or conservatively to every change"
@@ -400,7 +400,7 @@ tier = "unit"
 proof = ["prefers_the_workspace_cwd_and_falls_back_when_there_is_none", "a_herdr_context_with_no_workspace_cwd_is_the_fallback_case_not_a_failure"]
 verdict = "confirmed"
 why = "startup_dir's own unit tests drive both arms of the fallback decision directly"
-covers = ["src/ui/mod.rs:417-422"]
+covers = ["src/ui/mod.rs:428-433"]
 
 [[row]]
 condition = "The terminal refuses mouse capture (`enable_mouse` fails)"
@@ -408,7 +408,7 @@ tier = "outer"
 proof = ["a_refused_capture_is_named_last", "a_successful_capture_adds_no_row"]
 verdict = "confirmed"
 why = "mouse-input: run_wired is driven with Startup::mouse_problem set and with it None; the first proves the reason lands as refresh.startup's LAST entry, below the binary probe's own, and renders as a `!`-marked row above the change rows while the loop runs normally; the second proves a successful capture adds no entry and leaves the frame unchanged"
-covers = ["src/ui/mod.rs:341-343", "src/ui/terminal.rs:83-83", "src/ui/terminal.rs:91-93"]
+covers = ["src/ui/mod.rs:352-354", "src/ui/terminal.rs:83-83", "src/ui/terminal.rs:91-93"]
 
 [[row]]
 condition = "The clipboard write fails locally (`TerminalOps::write_clipboard` returns an error)"
@@ -424,7 +424,7 @@ tier = "unit"
 proof = ["a_change_archived_mid_cycle_appears_in_both_lists_for_one_cycle"]
 verdict = "confirmed"
 why = "changes::merge's own unit proof: two merges, the second with an empty CLI list, showing add-auth appears in both active and archived for one cycle and then self-corrects rather than sticking (design.md -> Decision D6)"
-covers = ["src/changes.rs:1902-1918", "src/changes.rs:1834-1835", "src/changes.rs:1842-1847"]
+covers = ["src/changes.rs:1991-2007", "src/changes.rs:1904-1905", "src/changes.rs:1912-1918"]
 
 # --- agent-client-choice ----------------------------------------------------
 
