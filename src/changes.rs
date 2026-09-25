@@ -958,6 +958,27 @@ pub(crate) struct ArchivedEntry {
     pub(crate) dir: PathBuf,
 }
 
+/// The archived ordering both [`archived_entries`] and [`archived_change_order`]
+/// apply: newest date first, same-date ties broken by name descending, then every
+/// undated entry ordered among itself by name descending, undated always sorting
+/// after dated. Shared so the two call sites — one over freshly enumerated
+/// [`ArchivedEntry`] values, one over already-built [`Change`]s in [`overlay`] — can
+/// never silently drift onto two different rules for the same fact (Change Review
+/// follow-up, `worktree-changes` task 11.2 item 4).
+fn archived_order(
+    date_a: &Option<String>,
+    name_a: &str,
+    date_b: &Option<String>,
+    name_b: &str,
+) -> std::cmp::Ordering {
+    match (date_a, date_b) {
+        (Some(da), Some(db)) => db.cmp(da).then_with(|| name_b.cmp(name_a)),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => name_b.cmp(name_a),
+    }
+}
+
 /// Archived entries directly under `<repo>/openspec/changes/archive/`,
 /// excluding dot-prefixed names (unlike the active listing — the two are
 /// deliberately opposite, see `change-enumeration`'s spec), ordered dated
@@ -1011,12 +1032,7 @@ pub(crate) fn archived_entries(
         })
         .collect();
 
-    entries.sort_by(|a, b| match (&a.date, &b.date) {
-        (Some(date_a), Some(date_b)) => date_b.cmp(date_a).then_with(|| b.name.cmp(&a.name)),
-        (Some(_), None) => std::cmp::Ordering::Less,
-        (None, Some(_)) => std::cmp::Ordering::Greater,
-        (None, None) => b.name.cmp(&a.name),
-    });
+    entries.sort_by(|a, b| archived_order(&a.date, &a.name, &b.date, &b.name));
 
     (entries, problems)
 }
@@ -2110,23 +2126,18 @@ fn join_labels(labels: &[&str]) -> String {
     }
 }
 
-/// The same ordering [`archived_entries`] gives its [`ArchivedEntry`]
-/// values, restated over already-built [`Change`]s so [`overlay`] can merge
-/// a member's newly built archived changes into the base's own list rather
-/// than only ever appending. Panics if given a `Change` whose `origin` is
-/// not `Archived` — `overlay` never calls it with anything else.
+/// [`archived_order`] applied over already-built [`Change`]s rather than
+/// [`ArchivedEntry`] values, so [`overlay`] can merge a member's newly built
+/// archived changes into the base's own list rather than only ever
+/// appending. Panics if given a `Change` whose `origin` is not `Archived` —
+/// `overlay` never calls it with anything else.
 fn archived_change_order(a: &Change, b: &Change) -> std::cmp::Ordering {
     let (Origin::Archived { date: date_a }, Origin::Archived { date: date_b }) =
         (&a.origin, &b.origin)
     else {
         unreachable!("overlay's archived tier holds only Archived changes")
     };
-    match (date_a, date_b) {
-        (Some(da), Some(db)) => db.cmp(da).then_with(|| b.name.cmp(&a.name)),
-        (Some(_), None) => std::cmp::Ordering::Less,
-        (None, Some(_)) => std::cmp::Ordering::Greater,
-        (None, None) => b.name.cmp(&a.name),
-    }
+    archived_order(date_a, &a.name, date_b, &b.name)
 }
 
 /// Layer each worktree member's owned changes over the base's own set:
