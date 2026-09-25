@@ -210,12 +210,25 @@
 ## 11. Change Review
 <!-- kind: operational -->
 
-- [ ] 11.1 CHECK: Dispatch the `outside-in-tdd-reviewer` subagent — not a fork of this session —
+- [x] 11.1 CHECK: Dispatch the `outside-in-tdd-reviewer` subagent — not a fork of this session —
       against `proposal.md`, every delta spec, `design.md`, `tasks.md`, `planning-review.md`, and
       the diff.
-- [ ] 11.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a one-line
+- [x] 11.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a one-line
       reason, note each SUGGESTION, and re-run the affected tests.
-- [ ] 11.3 VERIFY: Confirm no blocking or unowned finding remains.
+- [x] 11.3 VERIFY: Confirm no blocking or unowned finding remains.
+
+      Outcome (Change Review, 2026-09-25): 2 CRITICAL fixed in 0e652a8 — the
+      `wired-git-cli-via-dropped` and `launchseam-git-confinement` controls group 8 broke
+      (`gate_controls` now 6/6, `env_overrides` splits on shell words). WARNING, one
+      base-selection rule: fixed in 2743872..a055b32 (`family_with_tops` returns
+      `Option<Family>`, `None` with no base, per worktree-overlay). WARNING, doc drift group 12
+      did not list: added to 12.2. SUGGESTIONS fixed: paired members/touched (a4c3fd6), no
+      enumeration for an untouched member (50aad8b..5f6a027), one archived comparator (2b3b21f),
+      one full-form width (f63f1fd), one base archive enumeration (94d42d5), merge's empty
+      family (283e034), stale comments (7681b64). SUGGESTIONS accepted: `pub` on the new
+      `changes`/`worktrees` items, consistent with `from_files`/`merge`; `assert_no_git_env_leak`
+      reads `std::env::var_os` directly (a test-only read); dropped per-member read problems and
+      stale worktree artifact text, both recorded as limitations in 12.2.
 
 ## 12. Documentation
 <!-- kind: operational -->
@@ -231,7 +244,13 @@
       view's drop order (the marker first); Detail view's "the gauge is **first** in the header's
       drop-whole order" (the branch cell now is); the Unit-tested modules `cli` bullet (`GitCli`);
       the linked-worktree paragraph after attribution tier 3 and the description column of its
-      degraded row (the change half is shown; the agent half waits on `worktree-agents`).
+      degraded row (the change half is shown; the agent half waits on `worktree-agents`); the
+      module map's `worktrees` row and the Unit-tested modules `worktrees::` bullet (now
+      `parse_list`, `label`, `family_with_tops`, `Touched`/`touched` besides `member_of`); and,
+      beside the linked-worktree paragraph, two accepted limitations the Change Review named:
+      a member whose `openspec/changes/` cannot be read contributes nothing and names no problem
+      (its base row is kept), and a member edit that changes no `Change` field re-adopts nothing,
+      so that row's artifact tab can show stale text until the next adopt.
 - [ ] 12.3 CHANGE: Add to `SPEC.md`'s degraded-states table six rows — *`git` absent, or the
       repository is not a git repository*, *A worktree's git query fails*, *A worktree's directory
       is gone*, *Two worktrees modify one change*, *`git` too old for `worktree list -z`*, and
