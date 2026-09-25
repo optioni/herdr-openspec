@@ -483,3 +483,53 @@ proof = ["file_mode_refuses_the_three_launch_keys_and_names_the_missing_binary",
 verdict = "confirmed"
 why = "`launch::decide` with `file_mode` true refuses all three launch intents with a reason naming the absent binary, whether or not anything is selected, while the `file_mode` false control returns `Go` - so the refusal is caused by the flag alone; `Focus` is exempt; the list test proves the row at 38 and 58 columns; and the wiring test proves it end to end in the shipped composition root against a reachable socket, with the footer carrying `g focus` and not `a/c/s launch`"
 covers = ["src/launch.rs:136-142"]
+
+# --- worktree-changes --------------------------------------------------------
+
+[[row]]
+condition = "`git` absent, or the repository is not a git repository"
+tier = "unit"
+proof = ["no_git_binary_leaves_the_set_unoverlaid"]
+verdict = "confirmed"
+why = "a real worker_for_test cycle with GitCli::run failing NotStarted on `worktree list` merges to an empty worktree family and no problem naming git, driven end to end through the worker thread against a FakeCli"
+covers = ["src/refresh.rs:337-337"]
+
+[[row]]
+condition = "A worktree's git query fails"
+tier = "unit"
+proof = ["a_failing_member_contributes_nothing_and_is_named"]
+verdict = "confirmed"
+why = "a real worker_for_test cycle over three members where one's merge-base call fails shows that member contributing no rows, one other member's change still overlaid, and one problem naming the failing member's own top level and merge-base"
+covers = ["src/refresh.rs:434-436"]
+
+[[row]]
+condition = "A worktree's directory is gone"
+tier = "unit"
+proof = ["a_prunable_record_and_an_unresolvable_path_record_no_problem"]
+verdict = "confirmed"
+why = "a real worker_for_test cycle over a live member, a record git itself marked prunable, and a record whose path does not canonicalize shows only the live member as a worktree, with no problem for either of the other two"
+covers = ["src/worktrees.rs:224-228"]
+
+[[row]]
+condition = "Two worktrees modify one change"
+tier = "unit"
+proof = ["two_owners_show_the_first_and_name_both"]
+verdict = "confirmed"
+why = "changes::overlay's own unit proof: two members both touching change x, the first member's progress wins the merged row and one problem names the change and both worktrees, showing the first"
+covers = ["src/changes.rs:2222-2229"]
+
+[[row]]
+condition = "`git` too old for `worktree list -z`"
+tier = "unit"
+proof = ["a_git_too_old_for_the_listing_is_named_once"]
+verdict = "confirmed"
+why = "a real worker_for_test cycle with `git worktree list --porcelain -z` failing exit 129 shows an empty worktree family and exactly one problem naming worktree list and that worktree changes are not shown"
+covers = ["src/refresh.rs:330-333"]
+
+[[row]]
+condition = "Worktree changes in file mode"
+tier = "unit"
+proof = ["file_mode_reads_no_worktree_family"]
+verdict = "confirmed"
+why = "refresh::start with no cli or no repo returns the inert Refresher before a worker thread ever exists, proved by repeated requests against both cases returning no result and recording no GitCli call at all"
+covers = ["src/refresh.rs:212-214"]
