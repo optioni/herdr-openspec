@@ -14,7 +14,7 @@
 //! stdout ([`Record`], [`parse_list`], [`label`]), the family-selection rule
 //! choosing a base and its members ([`family`]), and classifying which
 //! change directories a member touched ([`Touched`], [`touched`]). All of it
-//! stays pure: [`family`] takes already-canonicalized paths rather than
+//! stays pure: [`family`] takes canonical paths its caller already resolved rather than
 //! calling into the filesystem itself (design.md -> D15) — the refresh
 //! worker is where canonicalization and the `git` calls themselves happen.
 //! See `specs/worktree-overlay/spec.md`.
@@ -50,7 +50,7 @@ pub fn member_of<'a>(members: &'a [Worktree], dir: &Path) -> Option<&'a Worktree
 }
 
 /// One record from `git worktree list --porcelain -z`'s stdout: the raw
-/// (not yet canonicalized) top-level path it names, its `HEAD` and
+/// (not yet made canonical) top-level path it names, its `HEAD` and
 /// `branch` fields when present, and its state flags. A record with no
 /// `worktree` field is never represented here — [`parse_list`] skips it
 /// entirely, so `path` is always present on anything this module hands
@@ -151,7 +151,7 @@ pub fn label(record: &Record) -> String {
 
 /// Selects the worktree family for the pane's own canonical root, given the
 /// parsed records and their canonical top levels in the same order (`None`
-/// where the worker could not canonicalize a record's path). Per design.md
+/// where the worker could not resolve a record's canonical path). Per design.md
 /// -> D10, the **base** is the record whose canonical top level is the
 /// **longest** one that is equal to, or an ancestor of, `pane_root`; the
 /// pane's root relative to that top level is the OpenSpec prefix, empty
@@ -163,7 +163,7 @@ pub fn label(record: &Record) -> String {
 /// [`member_of`]'s expectation that `root` already points at the directory
 /// whose `openspec/changes` subdirectory holds the member's changes.
 ///
-/// Pure per design.md -> D15: `canonical` is supplied already-canonicalized
+/// Pure per design.md -> D15: `canonical` arrives already resolved
 /// by the caller (the refresh worker), and this function never touches the
 /// filesystem.
 pub fn family(
