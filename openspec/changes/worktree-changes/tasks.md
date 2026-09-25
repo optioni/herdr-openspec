@@ -196,15 +196,15 @@
 ## 10. The seventeenth doc-contract claim
 <!-- kind: operational -->
 
-- [ ] 10.1 CHECK: `grep -n 'CLAIM_COUNT: usize' tests/doc_contract.rs` → `5000: … = 16` at HEAD,
+- [x] 10.1 CHECK: `grep -n 'CLAIM_COUNT: usize' tests/doc_contract.rs` → `5000: … = 16` at HEAD,
       and no claim reads `src/worktrees.rs`, so a `use std::fs;` or `root.canonicalize()` in its
       production slice passes `cargo test --test doc_contract` today.
-- [ ] 10.2 CHANGE: In one commit, add the claim with the needle set the `doc-conformance` delta
+- [x] 10.2 CHANGE: In one commit, add the claim with the needle set the `doc-conformance` delta
       enumerates and its in-file negative controls over string literals, and move all four count
       sites: `CLAIM_COUNT` to 17; `CLAIM_COUNT_WORDS` to an 8-entry array ending
       `("seventeen", 17)`; `AGENTS.md`'s "sixteen further claims" and its list; the `SPEC.md` →
       Doc-conformance checks bullet above the trailing meta-statement.
-- [ ] 10.3 VERIFY: `cargo test --test doc_contract` — green, the new negative controls among the
+- [x] 10.3 VERIFY: `cargo test --test doc_contract` — green, the new negative controls among the
       executed tests.
 
 ## 11. Change Review
