@@ -233,12 +233,12 @@
 ## 12. Documentation
 <!-- kind: operational -->
 
-- [ ] 12.1 CHECK: `make covers-check` is green at the start of this group, and
+- [x] 12.1 CHECK: `make covers-check` is green at the start of this group, and
       `grep -n 'Two traits carry\|badge cell first\|is \*\*first\*\* in the header\|answers it twice\|cli::OpenspecCli' SPEC.md`
       (5 lines at HEAD: `:36, :345, :532, :566, :1220`) and
       `grep -n "that side's pure\|it is first in the header's" AGENTS.md` (2 lines: `:101, :403`)
       find the stale sites named below.
-- [ ] 12.2 CHANGE: Rewrite in `SPEC.md` (audience: anyone implementing against the contract), in
+- [x] 12.2 CHANGE: Rewrite in `SPEC.md` (audience: anyone implementing against the contract), in
       place: Architecture's "Two traits carry the two programs" and its code block; the module
       map's `cli` and `refresh` rows; § Refresh's "answers it twice" (the idle re-check); List
       view's drop order (the marker first); Detail view's "the gauge is **first** in the header's
@@ -251,7 +251,7 @@
       a member whose `openspec/changes/` cannot be read contributes nothing and names no problem
       (its base row is kept), and a member edit that changes no `Change` field re-adopts nothing,
       so that row's artifact tab can show stale text until the next adopt.
-- [ ] 12.3 CHANGE: Add to `SPEC.md`'s degraded-states table six rows — *`git` absent, or the
+- [x] 12.3 CHANGE: Add to `SPEC.md`'s degraded-states table six rows — *`git` absent, or the
       repository is not a git repository*, *A worktree's git query fails*, *A worktree's directory
       is gone*, *Two worktrees modify one change*, *`git` too old for `worktree list -z`*, and
       *Worktree changes in file mode* — and the matching `tests/degraded-coverage.toml` rows,
@@ -260,14 +260,14 @@
       `a_prunable_record_and_an_unresolvable_path_record_no_problem`,
       `two_owners_show_the_first_and_name_both`, `a_git_too_old_for_the_listing_is_named_once`,
       and `file_mode_reads_no_worktree_family`, with `covers` measured now.
-- [ ] 12.4 CHANGE: Rewrite in `AGENTS.md` (audience: every agent session), in place: "Current repo
+- [x] 12.4 CHANGE: Rewrite in `AGENTS.md` (audience: every agent session), in place: "Current repo
       state" gains `worktree-changes` and one sentence on the overlay, and its gauge-first
       sentence names the branch cell; the pure-classifiers sentence names `src/worktrees.rs` and
       claim seventeen; the subprocess rule says three traits and names the git handle's three
       files; Environment names `git` (measured on 2.48.1). Net addition under ten lines.
-- [ ] 12.5 CHANGE: Rewrite in `README.md` → Development: name `git` beside `python3` as a
+- [x] 12.5 CHANGE: Rewrite in `README.md` → Development: name `git` beside `python3` as a
       `make check` prerequisite (audience: a contributor running the gates).
-- [ ] 12.6 VERIFY: `make covers-check` and `cargo test --test doc_contract` — green.
+- [x] 12.6 VERIFY: `make covers-check` and `cargo test --test doc_contract` — green.
 
 ## 13. Lint & Verify
 <!-- kind: operational -->
