@@ -4373,6 +4373,23 @@ apply:
         );
         assert_set_invariants(&from_files_set);
 
+        // Change Review follow-up (`worktree-changes` task 11.2 item 7): the
+        // change-model scenario this test proves says "all three sets" —
+        // `from_files`, `empty_set`, and `merge` — carry no worktree family on
+        // their own; the merge leg was untested until now.
+        let merged_from_files = merge(
+            from_files_set,
+            CliChanges {
+                active: Vec::new(),
+                problems: Vec::new(),
+            },
+        );
+        assert!(
+            merged_from_files.worktrees.is_empty(),
+            "merging a from_files result with no family must still carry none"
+        );
+        assert_set_invariants(&merged_from_files);
+
         let empty = empty_set();
         assert!(
             empty.worktrees.is_empty(),
