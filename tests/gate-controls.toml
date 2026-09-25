@@ -399,13 +399,13 @@ why = "worktree-changes: naming GitCli under src/ui/ must fail the shell-shape c
 [[control]]
 id = "launchseam-git-confinement"
 script = "launchseam.sh"
-env = "HANDLE_RE=GitCli|RealGitCli|git_cli_via"
+env = "LAUNCH=src/refresh.rs HANDLE_RE='GitCli|RealGitCli|git_cli_via' ALLOWED='src/cli.rs src/refresh.rs src/ui/mod.rs'"
 plant_file = "src/ui/list.rs"
 plant_find = "//! The row grammar: every function here is a pure total transformation,"
 plant_replace = '''//! The row grammar: every function here is a pure total transformation,
 // git_cli_via mentioned here'''
 expect = "LAUNCHSEAM FAIL (leg 3)"
-why = "worktree-changes: HANDLE_RE is now an environment parameter, and the git-specific value (GitCli|RealGitCli|git_cli_via) must catch the git handle named outside the allowed files on exactly the terms the default Herdr pattern already does - LAUNCH and ALLOWED are left at their defaults here because env_overrides splits this field on whitespace and cannot carry the real recipe's space-separated ALLOWED list (src/cli.rs src/refresh.rs src/ui/mod.rs); src/ui/list.rs is outside every ALLOWED set this gate has ever used, so the plant fails leg 3 regardless"
+why = "worktree-changes: HANDLE_RE is now an environment parameter; with the recipe's own git invocation (LAUNCH=src/refresh.rs, the git names, ALLOWED narrowed to src/cli.rs src/refresh.rs src/ui/mod.rs) a git handle named anywhere else - here src/ui/list.rs - must fail leg 3 exactly as the default Herdr pattern does"
 
 [[control]]
 id = "wired-git-literal"
@@ -420,8 +420,8 @@ why = "worktree-changes: leg 7 - `run` must supply Startup.git from cli::GIT_PRO
 id = "wired-git-cli-via-dropped"
 script = "wired.sh"
 plant_file = "src/ui/mod.rs"
-plant_find = "let _git_cli = crate::cli::git_cli_via(git);"
-plant_replace = "let _git_cli = git;"
+plant_find = "let git_cli = crate::cli::git_cli_via(git);"
+plant_replace = "let git_cli = git;"
 expect = "WIRED FAIL"
 why = "worktree-changes: leg 1 now names git_cli_via beside agent_cli_via; start_collaborators that stops building the git handle through the seam must fail"
 

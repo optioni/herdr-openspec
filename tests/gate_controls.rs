@@ -196,7 +196,8 @@ fn gate_scripts() -> Vec<String> {
 fn env_overrides(raw: &str) -> (Vec<(String, String)>, Vec<String>) {
     let mut sets = Vec::new();
     let mut unsets = Vec::new();
-    let tokens: Vec<&str> = raw.split_whitespace().collect();
+    let owned = shell_words(raw);
+    let tokens: Vec<&str> = owned.iter().map(String::as_str).collect();
     let mut i = 0;
     while i < tokens.len() {
         let token = tokens[i];
@@ -212,12 +213,45 @@ fn env_overrides(raw: &str) -> (Vec<(String, String)>, Vec<String>) {
             continue;
         }
         if let Some((key, value)) = token.split_once('=') {
-            let cleaned = value.trim_matches('\'').trim_matches('"');
-            sets.push((key.to_string(), cleaned.to_string()));
+            sets.push((key.to_string(), value.to_string()));
         }
         i += 1;
     }
     (sets, unsets)
+}
+
+/// Splits `raw` on whitespace the way the `gates:` recipe's shell would, except inside a
+/// single- or double-quoted span, and drops the quotes — so a recipe prefix such as
+/// `ALLOWED='src/cli.rs src/refresh.rs'` reaches the gate as one space-separated value.
+fn shell_words(raw: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut in_word = false;
+    let mut quote: Option<char> = None;
+    for c in raw.chars() {
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some(_) => current.push(c),
+            None if c == '\'' || c == '"' => {
+                quote = Some(c);
+                in_word = true;
+            }
+            None if c.is_whitespace() => {
+                if in_word {
+                    words.push(std::mem::take(&mut current));
+                    in_word = false;
+                }
+            }
+            None => {
+                current.push(c);
+                in_word = true;
+            }
+        }
+    }
+    if in_word {
+        words.push(current);
+    }
+    words
 }
 
 /// Copies every file under the repository root into `dest`, excluding `.git` and `target` —
@@ -814,4 +848,25 @@ fn leg_one_cannot_see_the_defect_leg_five_c_catches() {
     let real_body = run_body(&production(&real));
     assert!(real_body.contains("mouse_problem("));
     assert!(!real_body.contains("mouse_problem: None"));
+}
+
+/// A recipe prefix whose value is quoted and holds spaces — the git `LAUNCHSEAM` invocation's
+/// `ALLOWED` — reaches the gate as one value, quotes dropped, beside the `env -u` form.
+#[test]
+fn env_overrides_keep_a_quoted_value_whole() {
+    let (sets, unsets) = env_overrides(
+        "env -u GRAPH_WRITE LAUNCH=src/refresh.rs ALLOWED='src/cli.rs src/refresh.rs' TYPES=\"A B\"",
+    );
+    assert_eq!(
+        sets,
+        vec![
+            ("LAUNCH".to_string(), "src/refresh.rs".to_string()),
+            (
+                "ALLOWED".to_string(),
+                "src/cli.rs src/refresh.rs".to_string()
+            ),
+            ("TYPES".to_string(), "A B".to_string()),
+        ]
+    );
+    assert_eq!(unsets, vec!["GRAPH_WRITE".to_string()]);
 }
