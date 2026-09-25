@@ -187,10 +187,11 @@
 ## 9. Acceptance Test — Outer Loop GREEN
 <!-- kind: behavior -->
 
-- [ ] 9.1 VERIFY: `cargo test --lib run_wired_shows_a_worktree_copy_with_its_marker` — 1
+- [x] 9.1 VERIFY: `cargo test --lib run_wired_shows_a_worktree_copy_with_its_marker` — 1
       executed, passing.
-- [ ] 9.2 REFACTOR: Fold the scratch-`git` builder into the existing scratch-program helpers if
-      they duplicate, or record that none was needed.
+- [x] 9.2 REFACTOR: Fold the scratch-`git` builder into the existing scratch-program helpers if
+      they duplicate, or record that none was needed. — None needed: `git_script` already
+      builds through the shared `write_script` helper.
 
 ## 10. The seventeenth doc-contract claim
 <!-- kind: operational -->
