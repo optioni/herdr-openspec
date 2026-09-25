@@ -149,66 +149,70 @@ pub fn label(record: &Record) -> String {
     }
 }
 
+/// [`family_with_tops`]'s own selection: the winning record's index into the
+/// caller's own `records`/`canonical` slices (the base), the OpenSpec prefix
+/// every member shares — the pane's own root relative to the base's
+/// canonical top level, empty when the two are equal — and, paired with
+/// each [`Worktree`], the member's own canonical top level: the path
+/// *before* the prefix was joined onto it to make [`Worktree::root`].
+///
+/// The refresh worker needs the top level, not the OpenSpec root, for `-C`:
+/// git's `merge-base`/`diff-tree`/`status` are run against a member's
+/// checkout, and `diff-tree`/`status` report paths relative to that
+/// checkout's own top, never relative to `-C`'s directory — so a pathspec
+/// and a `touched` prefix must be the OpenSpec prefix joined to
+/// `openspec/changes`, not `openspec/changes` alone, or every path a
+/// nonempty prefix produces silently fails to match. See
+/// specs/worktree-overlay/spec.md -> "A member owns exactly the changes it
+/// touched since it forked from the base".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Family {
+    pub base: usize,
+    pub prefix: PathBuf,
+    pub members: Vec<(PathBuf, Worktree)>,
+}
+
 /// Selects the worktree family for the pane's own canonical root, given the
 /// parsed records and their canonical top levels in the same order (`None`
-/// where the worker could not resolve a record's canonical path). Per design.md
-/// -> D10, the **base** is the record whose canonical top level is the
-/// **longest** one that is equal to, or an ancestor of, `pane_root`; the
-/// pane's root relative to that top level is the OpenSpec prefix, empty
-/// when the two are equal. Every other record joins the family as a member
-/// unless it is `bare`, carries `prunable`, or has no canonical path —
-/// each skipped without any problem being recorded, since this module has
-/// no such concept. A member's [`Worktree::root`] (its OpenSpec root) is
-/// its own canonical top level joined to the OpenSpec prefix, matching
-/// [`member_of`]'s expectation that `root` already points at the directory
-/// whose `openspec/changes` subdirectory holds the member's changes.
+/// where the worker could not resolve a record's canonical path). Per
+/// design.md -> D10, the **base** is the record whose canonical top level is
+/// the **longest** one that is equal to, or an ancestor of, `pane_root` —
+/// `None` when no record contains `pane_root` at all, per
+/// `specs/worktree-overlay/spec.md` -> "A listing with no record containing
+/// the root yields no family": that sentence used to hold only because
+/// `refresh::derive_family` short-circuited on its own duplicate of this
+/// rule before ever handing the family to a member loop; this function now
+/// answers the same question directly, and `derive_family` reads its
+/// `base` field instead of re-deriving it. Every other record joins the
+/// family as a member unless it is `bare`, carries `prunable`, or has no
+/// canonical path — each skipped without any problem being recorded, since
+/// this module has no such concept. A member's [`Worktree::root`] (its
+/// OpenSpec root) is its own canonical top level joined to the OpenSpec
+/// prefix, matching [`member_of`]'s expectation that `root` already points
+/// at the directory whose `openspec/changes` subdirectory holds the
+/// member's changes.
 ///
 /// Pure per design.md -> D15: `canonical` arrives already resolved
 /// by the caller (the refresh worker), and this function never touches the
 /// filesystem.
-pub fn family(
-    records: &[Record],
-    canonical: &[Option<PathBuf>],
-    pane_root: &Path,
-) -> Vec<Worktree> {
-    family_with_tops(records, canonical, pane_root)
-        .1
-        .into_iter()
-        .map(|(_, worktree)| worktree)
-        .collect()
-}
-
-/// [`family`]'s own selection, additionally handing back the OpenSpec prefix
-/// (returned once, since every member shares the one prefix the base's own record
-/// determines) and, paired with each [`Worktree`], the member's own canonical top
-/// level — the path *before* the prefix was joined onto it to make `Worktree::root`.
-/// `family` is a thin wrapper over this that keeps its existing signature and drops
-/// both, so the two can never disagree about which records are members.
-///
-/// The refresh worker needs the top level, not the OpenSpec root, for `-C`: git's
-/// `merge-base`/`diff-tree`/`status` are run against a member's checkout, and
-/// `diff-tree`/`status` report paths relative to that checkout's own top, never
-/// relative to `-C`'s directory — so a pathspec and a `touched` prefix must be the
-/// OpenSpec prefix joined to `openspec/changes`, not `openspec/changes` alone, or
-/// every path a nonempty prefix produces silently fails to match. See
-/// specs/worktree-overlay/spec.md -> "A member owns exactly the changes it touched
-/// since it forked from the base".
 pub fn family_with_tops(
     records: &[Record],
     canonical: &[Option<PathBuf>],
     pane_root: &Path,
-) -> (PathBuf, Vec<(PathBuf, Worktree)>) {
-    let base_index = canonical
+) -> Option<Family> {
+    let base = canonical
         .iter()
         .enumerate()
         .filter_map(|(index, top_level)| top_level.as_ref().map(|path| (index, path)))
         .filter(|(_, top_level)| pane_root.starts_with(top_level.as_path()))
         .max_by_key(|(_, top_level)| top_level.as_os_str().len())
-        .map(|(index, _)| index);
+        .map(|(index, _)| index)?;
 
-    let prefix = base_index
-        .and_then(|index| canonical[index].as_ref())
-        .and_then(|base_root| pane_root.strip_prefix(base_root).ok())
+    // `base` came from a `filter_map` over `Some` canonical paths above, so
+    // `canonical[base]` is always `Some` here.
+    let base_top = canonical[base].as_ref()?;
+    let prefix = pane_root
+        .strip_prefix(base_top)
         .map(Path::to_path_buf)
         .unwrap_or_default();
 
@@ -216,7 +220,7 @@ pub fn family_with_tops(
         .iter()
         .zip(canonical.iter())
         .enumerate()
-        .filter(|(index, _)| Some(*index) != base_index)
+        .filter(|(index, _)| *index != base)
         .filter_map(|(_, (record, top_level))| {
             if record.bare || record.prunable {
                 return None;
@@ -237,7 +241,11 @@ pub fn family_with_tops(
         })
         .collect();
 
-    (prefix, members)
+    Some(Family {
+        base,
+        prefix,
+        members,
+    })
 }
 
 /// Which change directories a member touched since it forked from the base:
@@ -292,13 +300,28 @@ mod tests {
     use super::{
         Record, Touched, Worktree, family_with_tops, label, member_of, parse_list, touched,
     };
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     fn worktree(root: &str, label: &str) -> Worktree {
         Worktree {
             root: PathBuf::from(root),
             label: label.to_string(),
         }
+    }
+
+    /// The old `family`'s own scenario shape, restated over
+    /// [`family_with_tops`] now that `family` itself has no production
+    /// caller and is gone: the member `Worktree`s alone, dropping the base
+    /// index, the prefix, and each member's own top level, or an empty
+    /// vector when there is no base at all.
+    fn family_members(
+        records: &[Record],
+        canonical: &[Option<PathBuf>],
+        pane_root: &Path,
+    ) -> Vec<Worktree> {
+        family_with_tops(records, canonical, pane_root)
+            .map(|family| family.members.into_iter().map(|(_, w)| w).collect())
+            .unwrap_or_default()
     }
 
     /// worktree-overlay, "A member's change is found and the pane's own is
@@ -412,7 +435,7 @@ worktree /w/gone\0HEAD dddd\0detached\0prunable gitdir file points to non-existe
             .iter()
             .map(|record| Some(PathBuf::from(&record.path)))
             .collect();
-        let members = family(&records, &canonical, &PathBuf::from("/r"));
+        let members = family_members(&records, &canonical, &PathBuf::from("/r"));
 
         assert_eq!(
             members,
@@ -464,7 +487,7 @@ worktree /w/gone\0HEAD dddd\0detached\0prunable gitdir file points to non-existe
         ];
         let canonical = vec![Some(PathBuf::from("/r")), Some(PathBuf::from("/w/feat"))];
 
-        let members = family(&records, &canonical, &PathBuf::from("/r/sub"));
+        let members = family_members(&records, &canonical, &PathBuf::from("/r/sub"));
 
         assert_eq!(members, vec![worktree("/w/feat/sub", "feat")]);
     }
@@ -497,7 +520,7 @@ worktree /w/gone\0HEAD dddd\0detached\0prunable gitdir file points to non-existe
         ];
         let canonical = vec![Some(PathBuf::from("/r")), Some(PathBuf::from("/w/feat"))];
 
-        let members = family(&records, &canonical, &PathBuf::from("/w/feat"));
+        let members = family_members(&records, &canonical, &PathBuf::from("/w/feat"));
 
         assert_eq!(members, vec![worktree("/r", "main")]);
     }
@@ -537,7 +560,7 @@ worktree /w/gone\0HEAD dddd\0detached\0prunable gitdir file points to non-existe
             Some(PathBuf::from("/r/.worktrees/feat")),
         ];
 
-        let members = family(&records, &canonical, &PathBuf::from("/r/.worktrees/feat"));
+        let members = family_members(&records, &canonical, &PathBuf::from("/r/.worktrees/feat"));
 
         assert_eq!(members, vec![worktree("/r", "main")]);
     }
@@ -548,7 +571,11 @@ worktree /w/gone\0HEAD dddd\0detached\0prunable gitdir file points to non-existe
     /// detached record and one on `branch refs/remotes/origin/x` become
     /// members labelled with the first seven characters of `HEAD` and the
     /// full ref respectively — `label` only strips a leading
-    /// `refs/heads/` prefix.
+    /// `refs/heads/` prefix. A fifth, real base record (`/base`) is included
+    /// and the pane root moved under it — `no_base_yields_no_family` above
+    /// already pins the true no-base case, so this scenario's own pane root
+    /// no longer needs to sit outside every record just to stay a "which
+    /// records are skipped as members" test.
     #[test]
     fn bare_unresolvable_and_oddly_named_records() {
         let records = vec![
@@ -588,19 +615,32 @@ worktree /w/gone\0HEAD dddd\0detached\0prunable gitdir file points to non-existe
                 locked: false,
                 prunable: false,
             },
+            Record {
+                path: "/base".to_string(),
+                head: Some("eeee".to_string()),
+                branch: Some("refs/heads/main".to_string()),
+                detached: false,
+                bare: false,
+                locked: false,
+                prunable: false,
+            },
         ];
         let canonical = vec![
             Some(PathBuf::from("/bare")),
             None,
             Some(PathBuf::from("/det")),
             Some(PathBuf::from("/remote")),
+            Some(PathBuf::from("/base")),
         ];
 
-        // No record here is an ancestor of this pane root, so none is
-        // selected as the base — the point of this scenario is which
-        // records are skipped as members, not base selection.
-        let members = family(&records, &canonical, &PathBuf::from("/nowhere"));
+        // `/base` (index 4) is the only record ancestor of (here, equal to)
+        // the pane root, so it is the base; the point of this scenario
+        // stays which of the *other* records are skipped as members.
+        let family = family_with_tops(&records, &canonical, &PathBuf::from("/base"))
+            .expect("a real base record is present");
+        assert_eq!(family.base, 4);
 
+        let members: Vec<Worktree> = family.members.into_iter().map(|(_, w)| w).collect();
         assert_eq!(
             members,
             vec![

@@ -287,23 +287,6 @@ fn git_call(git: &dyn GitCli, dir: &Path, rest: &[&str]) -> Result<String, CliEr
     git.run(&args)
 }
 
-/// The index of the record whose canonical top level is the longest one that is equal
-/// to, or an ancestor of, `pane_root` — `worktrees::family`'s own base-selection rule,
-/// duplicated here because that pure module does not hand back which record it chose
-/// as the base, and this is the one extra fact the worker needs from it: the base's own
-/// `HEAD`, which every member's `merge-base` is compared against. `None` when no record
-/// contains `pane_root` at all — an ordinary repository without git, or a listing that
-/// never named it.
-fn base_record_index(canonical: &[Option<PathBuf>], pane_root: &Path) -> Option<usize> {
-    canonical
-        .iter()
-        .enumerate()
-        .filter_map(|(index, top)| top.as_ref().map(|path| (index, path)))
-        .filter(|(_, top)| pane_root.starts_with(top.as_path()))
-        .max_by_key(|(_, top)| top.as_os_str().len())
-        .map(|(index, _)| index)
-}
-
 /// The one problem shape for a member whose `merge-base` (other than the
 /// unrelated-history exit), `diff-tree`, or `status` call failed: names the member's
 /// top level and the failing command's reason.
@@ -352,11 +335,14 @@ fn derive_family(repo: &Path, git: &dyn GitCli) -> FamilyDerivation {
         .map(|record| std::fs::canonicalize(&record.path).ok())
         .collect();
 
-    let Some(base_index) = base_record_index(&canonical, repo) else {
-        // No record contains the pane's own root at all.
+    // `family_with_tops` is `None` exactly when no record contains the pane's own
+    // root at all — `worktrees::Family`'s own base-selection rule, which now hands
+    // back which record it chose as the base, so this worker no longer duplicates
+    // that selection just to read the base's own `HEAD`.
+    let Some(family) = crate::worktrees::family_with_tops(&records, &canonical, repo) else {
         return FamilyDerivation::default();
     };
-    let Some(base_head) = records[base_index].head.clone() else {
+    let Some(base_head) = records[family.base].head.clone() else {
         return FamilyDerivation::default();
     };
 
@@ -364,14 +350,13 @@ fn derive_family(repo: &Path, git: &dyn GitCli) -> FamilyDerivation {
     // `worktree-overlay`'s "A member owns exactly the changes it touched since it
     // forked from the base". Every member shares one prefix — the base's own record
     // determines it — so it is computed once, not per member.
-    let (prefix, members_with_tops) =
-        crate::worktrees::family_with_tops(&records, &canonical, repo);
-    let changes = if prefix.as_os_str().is_empty() {
+    let changes = if family.prefix.as_os_str().is_empty() {
         "openspec/changes".to_string()
     } else {
-        format!("{}/openspec/changes", prefix.to_string_lossy())
+        format!("{}/openspec/changes", family.prefix.to_string_lossy())
     };
-    let members: Vec<crate::worktrees::Worktree> = members_with_tops
+    let members: Vec<crate::worktrees::Worktree> = family
+        .members
         .iter()
         .map(|(_, worktree)| worktree.clone())
         .collect();
@@ -382,7 +367,7 @@ fn derive_family(repo: &Path, git: &dyn GitCli) -> FamilyDerivation {
     // OpenSpec root — because `-C` must point at the checkout `diff-tree`/`status`
     // report paths relative to; `<changes>` above is the pathspec that recovers the
     // OpenSpec prefix those reported paths carry.
-    for (top, _) in &members_with_tops {
+    for (top, _) in &family.members {
         match git_call(git, top, &["merge-base", "HEAD", &base_head]) {
             Ok(out) => {
                 let merge_base = out.trim();
