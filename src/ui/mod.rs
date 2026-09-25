@@ -3601,34 +3601,37 @@ apply:
             scratch
         }
 
-        /// A scratch `#!/bin/sh` `git` program: appends its arguments to `log`, one line per
-        /// invocation, then answers whichever of the four commands `worktree-overlay` will
-        /// eventually drive — `worktree list --porcelain -z`, `merge-base`, `diff-tree`, and
-        /// `status` — plausibly enough that a later group can drive against it directly, even
-        /// though nothing in the crate parses this output yet (design.md -> Test Boundaries).
-        /// `member` is the scratch member tree's own root, named in the `worktree list`
-        /// listing this prints.
-        fn git_script(dir: &Path, log: &Path, member: &Path) -> PathBuf {
+        /// A scratch `#!/bin/sh` `git` program answering the four `worktree-overlay` commands
+        /// on the argv the refresh worker actually sends: it drops the common
+        /// `--no-optional-locks -c core.fsmonitor=false -C <dir>` prefix, appends the remaining
+        /// arguments to `log` (one line per invocation, so each line starts with its
+        /// subcommand), and answers NUL-separated as `-z` asks. `worktree list` names the base
+        /// repository `root` and the member tree `member`, both at `HEAD aaaa`; the member
+        /// reports `openspec/changes/x/tasks.md` touched through both `diff-tree` and `status`.
+        fn git_script(dir: &Path, log: &Path, root: &Path, member: &Path) -> PathBuf {
             write_script(
                 dir,
                 "git",
                 &format!(
-                    "printf '%s\\n' \"$*\" >> \"{log}\"\n\
+                    "if [ \"$1\" = --no-optional-locks ]; then shift 5; fi\n\
+                     printf '%s\\n' \"$*\" >> \"{log}\"\n\
                      case \"$1\" in\n\
                      worktree)\n\
-                     printf 'worktree {member}\\nHEAD abc123def456\\nbranch refs/heads/x\\n\\n'\n\
+                     printf 'worktree {root}\\000HEAD aaaa\\000branch refs/heads/main\\000\\000'\n\
+                     printf 'worktree {member}\\000HEAD bbbb\\000branch refs/heads/x\\000\\000'\n\
                      ;;\n\
                      merge-base)\n\
-                     printf 'abc123def456\\n'\n\
+                     printf 'aaaa\\n'\n\
                      ;;\n\
                      diff-tree)\n\
-                     printf 'openspec/changes/x/tasks.md\\n'\n\
+                     printf 'openspec/changes/x/tasks.md\\000'\n\
                      ;;\n\
                      status)\n\
-                     printf ' M openspec/changes/x/tasks.md\\n'\n\
+                     printf ' M openspec/changes/x/tasks.md\\000'\n\
                      ;;\n\
                      esac\n",
                     log = log.display(),
+                    root = root.display(),
                     member = member.display(),
                 ),
             )
@@ -3640,14 +3643,11 @@ apply:
         /// scratch base repository, a scratch member tree, a scratch `git` answering the four
         /// `worktree-overlay` commands, and the existing scratch `openspec`/`herdr` programs.
         ///
-        /// RED by construction: `Startup::git` is plumbed through this group but nothing reads
-        /// it yet (`worktree-overlay` lands in a later group), so the scratch `git` program is
-        /// never invoked at all — the `UntilReady` predicate below, "the git log records a
-        /// `status` call", can never go true, and `run_wired` returns once `UntilReady`'s own
-        /// 30s deadline presses `q` regardless. The row this test looks for can therefore never
-        /// appear either, which is the right reason for this test to fail — see `live-refresh`'s
-        /// own history, design.md -> Test Strategy: a `run` that never calls the collaborator it
-        /// was handed passes every unit test and fails only here.
+        /// The `UntilReady` predicate, "the git log records a `status` call", goes true only
+        /// once `run` has handed `Startup::git` to the refresh worker and the worker has walked
+        /// the member through `merge-base` and `diff-tree` to `status` — see `live-refresh`'s own
+        /// history, design.md -> Test Strategy: a `run` that never calls the collaborator it was
+        /// handed passes every unit test and fails only here.
         #[test]
         fn run_wired_shows_a_worktree_copy_with_its_marker() {
             let scratch = scratch_repo_with_x_untouched();
@@ -3657,7 +3657,7 @@ apply:
 
             let git_log = root.join("git.log");
             let openspec_log = root.join("openspec.log");
-            let git = git_script(root, &git_log, &member_root);
+            let git = git_script(root, &git_log, root, &member_root);
             let openspec = openspec_script(root, &openspec_log, root);
             let herdr = root.join("does-not-exist-herdr");
 
@@ -3700,13 +3700,18 @@ apply:
 
             let git_calls = std::fs::read_to_string(&git_log).unwrap_or_default();
             assert!(
-                !git_calls.lines().any(|line| line.starts_with("status")),
-                "RED evidence: nothing wires `Startup::git` into a collaborator yet, so the \
-                 scratch git program must never be called: {git_calls:?}"
+                git_calls.lines().any(|line| line.starts_with("status")),
+                "`run` must hand `Startup::git` to the refresh worker, which queries the \
+                 member's status: {git_calls:?}"
             );
 
             assert!(
-                rows.iter().any(|row| row.trim_end().ends_with(" @ [2/3]")),
+                rows.iter().any(|row| {
+                    // The wide layout draws the detail region beside the list; the list
+                    // interior is everything before the divider.
+                    let list = row.split('│').next().unwrap_or_default();
+                    list.trim_end().ends_with(" @ [2/3]")
+                }),
                 "a frame's list interior must hold a row ending ' @ [2/3]' for the worktree \
                  copy of change x: {rows:?}"
             );
