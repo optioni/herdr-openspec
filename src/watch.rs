@@ -222,7 +222,7 @@ impl FsEvents for RealFsEvents {
         let mut paths = Vec::new();
         loop {
             match self.rx.try_recv() {
-                Ok(Ok(event)) => paths.extend(event.paths),
+                Ok(Ok(event)) => paths.extend(touched_paths(event)),
                 // A per-event error from notify's own backend (for
                 // example, a dropped-event overflow) is not this pane's
                 // failure to watch — it is skipped rather than surfaced,
@@ -339,9 +339,69 @@ pub fn soonest(a: Option<Duration>, b: Option<Duration>) -> Option<Duration> {
     }
 }
 
+/// The paths a `notify` event reports as touched: none for a read. `notify`'s inotify
+/// backend subscribes to `OPEN` and `CLOSE_NOWRITE` as well as to writes, so on Linux
+/// every read under `openspec/` — the worker's own `from_files` walk, the artifact read,
+/// the `openspec` CLI it spawns — arrives here as an `EventKind::Access`. Counting those
+/// as touches made each refresh cycle request the next, forever. A write that finished
+/// (`Close(Write)`) is still a touch; FSEvents reports no access events at all, which is
+/// why the loop never showed on macOS.
+pub fn touched_paths(event: notify::Event) -> Vec<PathBuf> {
+    use notify::event::{AccessKind, AccessMode};
+    match event.kind {
+        notify::EventKind::Access(AccessKind::Close(AccessMode::Write)) => event.paths,
+        notify::EventKind::Access(_) => Vec::new(),
+        _ => event.paths,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod touched_paths {
+        use std::path::PathBuf;
+
+        use notify::event::{AccessKind, AccessMode, CreateKind, DataChange, ModifyKind};
+        use notify::{Event, EventKind};
+
+        fn event(kind: EventKind) -> Event {
+            Event::new(kind).add_path(PathBuf::from("/repo/openspec/changes/a/tasks.md"))
+        }
+
+        #[test]
+        fn a_read_touches_nothing() {
+            for kind in [
+                AccessKind::Open(AccessMode::Read),
+                AccessKind::Close(AccessMode::Read),
+                AccessKind::Read,
+                AccessKind::Any,
+            ] {
+                assert!(
+                    super::super::touched_paths(event(EventKind::Access(kind))).is_empty(),
+                    "{kind:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn a_write_create_remove_or_unknown_kind_touches_its_paths() {
+            for kind in [
+                EventKind::Access(AccessKind::Close(AccessMode::Write)),
+                EventKind::Modify(ModifyKind::Data(DataChange::Any)),
+                EventKind::Create(CreateKind::File),
+                EventKind::Remove(notify::event::RemoveKind::Any),
+                EventKind::Any,
+                EventKind::Other,
+            ] {
+                assert_eq!(
+                    super::super::touched_paths(event(kind)),
+                    vec![PathBuf::from("/repo/openspec/changes/a/tasks.md")],
+                    "{kind:?}"
+                );
+            }
+        }
+    }
 
     fn set(names: &[&str]) -> std::collections::BTreeSet<String> {
         names.iter().map(|s| s.to_string()).collect()

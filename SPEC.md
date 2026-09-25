@@ -332,7 +332,10 @@ working directory, alongside a one-entry `PATH` overlay prepending the resolved
 binary's own parent directory (`seam-resilience` → Decisions 2 and 8) — opened
 once at startup and held for the pane's lifetime; `watch::start` itself takes
 the already-joined path as a plain argument and stays ignorant of the
-repository's own layout. Every
+repository's own layout. A read is not a touch: `watch::touched_paths` drops
+`notify`'s access events, which its inotify backend reports for every open on
+Linux, and keeps only a finished write (`Close(Write)`) — counted as touches, the
+pane's own reads requested a fresh refresh after every cycle, forever. Every
 touched path it reports is folded into a **debounce**: a pure
 state machine (`watch::Debounce`) that takes `now` as a parameter rather than reading
 the clock itself, so its window-boundary behaviour is asserted directly
