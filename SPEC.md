@@ -33,22 +33,32 @@ implementation time, not from memory.
 Two boundaries define the design. Everything interesting lives between them.
 
 **The subprocess seam.** `cli` is the only module in this crate permitted to
-spawn a process. Two traits carry the two programs it wraps directly:
+spawn a process. Three traits carry the three programs it wraps directly:
 
 ```rust
 pub trait OpenspecCli: Send + Sync { fn run(&self, args: &[&str]) -> Result<String, CliError>; }
 pub trait HerdrCli:    Send + Sync { fn run(&self, args: &[&str]) -> Result<String, CliError>; }
+pub trait GitCli:      Send + Sync { fn run(&self, args: &[&str]) -> Result<String, CliError>; }
 ```
 
-Both require `Send + Sync`: `live-refresh` runs CLI calls on a worker thread and
-`agent-polling` polls on another, so a trait that could not cross a thread boundary
-would have to be redesigned by the first change that used one. Each has exactly one
-real implementation that spawns a process and returns stdout, and a fake used by
-tests. No parsing, merging, or decision-making happens inside either. A third spawn
+All three require `Send + Sync`: `live-refresh` runs CLI and `git` calls on a worker
+thread and `agent-polling` polls on another, so a trait that could not cross a thread
+boundary would have to be redesigned by the first change that used one. Each has
+exactly one real implementation that spawns a process and returns stdout, and a fake
+used by tests. No parsing, merging, or decision-making happens inside any of them.
+`RealGitCli` decides nothing about where `git` runs, unlike the other two: every
+invocation names its own directory with git's own `-C <dir>` argument, supplied by
+the caller, rather than a constructor-injected working directory. `git_cli_via`
+constructs it, `GIT_PROGRAM` is the one place the literal `"git"` is written as a
+program name, and the `dyn GitCli` handle it returns is confined to exactly three
+files — `src/cli.rs`, `src/refresh.rs` (the worktree family derivation), and
+`src/ui/mod.rs`, the composition root — checked by `LAUNCHSEAM`'s third recipe line,
+pointed at the git names on the same `ENTRY`/`ALLOWED` terms that already guard
+`HerdrCli`'s own handle. A fourth spawn
 lives behind the same seam: the one-shot `npm prefix -g` probe that
-`resolve::openspec_bin`'s fourth step needs. It is neither `openspec` nor `herdr`, so
-it is not one of the two traits above — but it is still a process spawn, and `cli` is
-still where it lives. `resolve` itself never spawns it: the probe arrives as an
+`resolve::openspec_bin`'s fourth step needs. It is none of `openspec`, `herdr`, or
+`git`, so it is not one of the three traits above — but it is still a process spawn,
+and `cli` is still where it lives. `resolve` itself never spawns it: the probe arrives as an
 injected `&dyn Fn() -> Option<PathBuf>`, the same shape by which `resolve` and
 `config` take the process environment as a lookup closure, so `resolve` stays pure and
 the seam still exists before anything crosses it. This is what makes the coverage
@@ -94,11 +104,11 @@ binding, not its only one — `NOBLOCK` leg 2 covers it identically.
 | `agents` | Poll `herdr agent list`, parse its envelope into agent values, and attribute live Herdr agents to changes |
 | `launch` | Split a pane, resolve the agent kind once per session, start an agent, send the CLI-driven prompt |
 | `watch` | The recursive `notify` watch, the debounce, and classifying a touched path to a per-change `Selection` |
-| `worktrees` | The worktree family value type and the one derivation of which member a change's directory belongs to |
-| `refresh` | The worker thread and the non-blocking `Refresher` seam it answers through |
+| `worktrees` | The worktree family value type; the one derivation of which member a change's directory belongs to; parsing `git worktree list --porcelain -z`'s own stdout and labelling a member; choosing a family's base and members; and classifying which change directories a member touched |
+| `refresh` | The worker thread, the non-blocking `Refresher` seam it answers through, and the worktree family derivation (four `git` commands, an idle re-check) it overlays onto the `ChangeSet` |
 | `open` | The `open` and `open-tab` subcommands that open or focus the dashboard pane through `herdr plugin pane`; the crate's third `HerdrCli` consumer |
 | `ui` | Views (the change-row grammar, the detail region's header/tab-bar/content grammar, markdown rendering, `ui::tasks`' checklist-and-progress-bar grammar for the tracked-tasks tab, and `ui::help`'s help band — its row grammar and, in `ui::help::INVENTORY`, the crate's one list of what every key and gesture does, which `?` renders and `tests/doc_contract.rs` binds back to the driver), the semantic-role colour palette (`ui::palette`, the one table from a role to a `Style` and the crate's only `ratatui::style::Color` — see Colour and style), layout, the dashboard's own state (selection, the `/` filter, the detail region's section list — one section per resolved file and, inside a spec-shaped or tracked task file, one per heading, a tracked task file's document title excepted, each carrying a `depth` — and its fold set, the detail cursor, the width of the content area last drawn — the one piece of geometry the dashboard stores, and only so a keypress taken between frames can resolve against what the last frame did, never as a source of what is drawn — the selected artifact tab, the live tier's refresh flag and standing problems, the help overlay's own layer state — open or not, and its scroll — and the injected artifact-read binding), key handling, terminal lifecycle, and the event loop |
-| `cli` | The two subprocess traits and their real implementations |
+| `cli` | The three subprocess traits and their real implementations |
 
 ## Data layer
 
@@ -353,6 +363,19 @@ thread the same way, answering an `AgentSnapshot` request instead of a
 `Selection` one — `src/refresh.rs` and `src/agents.rs` are the crate's only
 two threads, not the one.
 
+Both answers are overlaid with the worktree family besides: `git worktree list
+--porcelain -z` once, then `merge-base`, `diff-tree`, and `status` per member — four
+commands total, `worktree-overlay`'s own count — each run at that member's own top
+level with `<prefix>/openspec/changes` pathspecs, so every member's own copy of the
+changes it touched is layered onto the `ChangeSet` the file walk or the CLI merge
+already produced. The file-sourced answer overlays the family already remembered
+from the last full derivation, so it stays sub-millisecond; the merged answer re-runs
+`git` afresh every cycle, alongside the CLI call. With no request arriving at all, the
+worker also re-derives the same family on its own timer, `WORKTREE_RECHECK` (two
+seconds), so a change made directly inside a member still reaches the screen with no
+request ever sent, and answers again only when the re-derived, re-overlaid set
+differs from what it last sent.
+
 Pressing `r` sets the same one-shot request the pane issues automatically at
 startup — `Selection::All`, so the CLI corrects every change's numbers once,
 whether or not anything was ever touched. The event loop's own wait shortens to
@@ -530,11 +553,14 @@ that is the accepted trade-off of naming the reason at all, against a one-column
 that would have named nothing.
 
 A cell too narrow for the interior is dropped **whole**, never cut short, in
-a fixed order: the badge cell first (reclaiming its separating space too),
-then the progress cell (reclaiming its separating space too), then an
-archived row's date field (reclaiming its separating space), and then the
-row degenerates to the marker-plus-name grammar an active row always has. A
-name too long for its field is truncated with a trailing `…`.
+a fixed order: `worktree-changes`' own `@` cell first — present only on a change
+whose directory is owned by a linked worktree, placed beside the progress cell
+and carrying no palette role of its own — then the badge cell (reclaiming its
+separating space too), then the progress cell (reclaiming its separating
+space too), then an archived row's date field (reclaiming its separating
+space), and then the row degenerates to the marker-plus-name grammar an
+active row always has. A name too long for its field is truncated with a
+trailing `…`.
 
 **The footer's last hint is `<n> unattributed`**, `agent-attribution`'s other
 addition: present only when at least one in-scope agent could not be placed
@@ -564,12 +590,15 @@ The gauge is a bare `█`/`░` run of a fixed **12 columns** — `ui::tasks::ga
 the same run the tracked-tasks tab's own bar draws, so the header and that
 tab can never disagree about how full a change is — and it is drawn on
 **every** artifact tab, because the row is built from the selected change and
-never from the selected tab. It is **first** in the header's drop-whole order,
-ahead of the schema and progress cells, so every width band below the full
-form is byte-identical to the grammar that preceded it and this addition is
-not observable below 26 columns. Its twelve columns never grow: every column
-a wider frame brings goes to the name field. A change whose `total` is zero
-draws no gauge and reserves no space for one.
+never from the selected tab. It is second in the header's drop-whole order, ahead of
+the schema and progress cells but behind `worktree-changes`' own **branch cell** —
+`@` followed by the owning worktree's branch, cut to 16 columns, inserted between the
+name field and the schema on a change whose directory a linked worktree owns, and
+dropped whole, ahead of the gauge, whenever the header cannot also draw its own full
+form — so every width band below the full form is byte-identical to the grammar that
+preceded both additions and neither is observable below 26 columns. The gauge's
+twelve columns never grow: every column a wider frame brings goes to the name field.
+A change whose `total` is zero draws no gauge and reserves no space for one.
 
 The tab bar addresses artifacts by **position**, never by id, in the
 schema's declared order: `1`–`9` select the first nine positions directly, but
@@ -920,11 +949,25 @@ other, and the design refuses to guess beyond them:
 3. **Everything else.** An in-scope agent no tier could place is *not* attributed to any
    row. It is reported as a count in the footer — never guessed at, never assigned.
 
-Linked worktrees are a known limitation: Herdr places one at
+Linked worktrees are a known limitation, and only half of it is fixed. `worktree-overlay`
+now reads `git worktree list` itself and shows each member's own changes overlaid onto
+this one, so the **change** half of a linked worktree is visible in the list and detail
+regions. The **agent** half is not: Herdr places a linked worktree at
 `<repo-parent>/.worktrees/<repo>-<branch>`, **outside** the repository root, so an agent
-working in a worktree of this repository fails the containment test in tier 1 above and is
-invisible to the pane. Recorded here rather than fixed, pending a change that reads
-`herdr worktree list` deliberately.
+working in one still fails the containment test in tier 1 above and is invisible to the
+pane. Recorded here rather than fixed, pending `worktree-agents`, a change that reads the
+same family this module already derives to place such an agent.
+
+Two further limitations were accepted rather than fixed, both from the Change Review of
+`worktree-changes`. A member whose `openspec/changes/` cannot be read (a permission
+error, or the directory missing entirely) contributes nothing to the overlay and names no
+problem of its own — its row simply stays whatever the base already showed — because the
+family derivation discards that per-member read failure rather than surfacing it as one
+more `!`-marked row competing with the base's own problems. And a member edit that
+changes no field of the owning `Change` (its progress, schema, or artifact list) leaves
+the overlay unchanged, so nothing re-adopts and the detail region's per-tab content cache
+is not invalidated — a row's artifact tab can go on showing stale text, read before the
+edit, until some later change to the `Change` itself triggers the next adopt.
 
 ### Launch flow
 
@@ -1167,7 +1210,7 @@ Every condition renders usable content rather than an error screen:
 | `config.toml` malformed, unreadable, or a key of the wrong type | The affected key falls back to its documented default while every other key that parsed correctly is still honoured; `Config::problems` names each fallback |
 | `agent-names.toml` unusable (malformed, unreadable, or an entry Herdr would reject) | Empty or partial mapping; attribution falls back to the name-equality tier. The read itself is non-destructive — nothing on disk is touched by reading it — but the next successful recording rewrites the file from the entries the read recovered alone, so an entry the parse could not recover does not survive that later write |
 | A live agent's `cwd` is absent, or outside the resolved repository root | Neither badged nor counted, at any tier — `herdr agent list` is session-global, so an agent this pane cannot place in its own repository must not badge or count toward it |
-| An agent works in a **linked worktree** of this repository | Herdr places a linked worktree at `<repo-parent>/.worktrees/<repo>-<branch>`, outside the repository root, so the agent fails the containment test above and is invisible to the pane — a standing, accepted limitation, not a silent mis-count and not pending any future change |
+| An agent works in a **linked worktree** of this repository | The change half is shown: `worktree-overlay` reads `git worktree list` itself and overlays that worktree's own changes onto the list and detail regions. The agent half is not — Herdr places a linked worktree at `<repo-parent>/.worktrees/<repo>-<branch>`, outside the repository root, so the agent fails the containment test above and is invisible to the pane, a standing, accepted limitation pending `worktree-agents` |
 | A configured `openspec_bin` that does not name a usable binary | Falls through to the remaining probe steps rather than winning or ending the chain; the fallback is named in `BinResolution::problems` rather than being silent |
 | A schema declares the same artifact id at two positions | The CLI rejects such a schema outright (`Duplicate artifact ID`), so a change using it is permanently file-mode — this crate's own parser accepts the duplicate, as `schema-artifacts` requires, so the plugin's "usable" is strictly wider than the CLI's |
 | `openspec list --json` reports a repository root other than the one this plugin resolved | The whole CLI result is discarded, not merged: `ui::start_collaborators` gives the `openspec` child the same resolved repository root as its own working directory (`seam-resilience` → Decision 2), so the CLI's own upward walk from that directory ordinarily agrees with what the plugin already resolved — a disagreement here is no longer an accepted consequence of a `current_dir`-less seam, but a signal that something else is wrong (a configured `openspec_bin` answering for a different tree, among other causes), and the guard stays in place as a safety net rather than being removed |
@@ -1196,6 +1239,12 @@ Every condition renders usable content rather than an error screen:
 | No installed integration leaves the settings panel's `agent_kind` row uneditable | `Enter` begins no edit and nothing is written; the source row names `config.toml` as the way to set it instead, at both mandated widths, and the panel stays open — `Back` still closes it. Not a contradiction of "never fail closed": a shortlist-only picker has nothing to offer, and a stated reason is the honest degrade a silently inert key would not be (`settings-window`) |
 | The settings panel's commit to `settings.toml` fails (the state directory cannot be created, or the write itself errors) | `record_kind` returns `Err` rather than panicking, and leaves no partial or temporary file behind. The panel records exactly one problem naming the path and the operating system's own reason; the committed value still updates in memory and still reaches `Launcher::set_kind`, so the choice holds for the rest of the session even though it could not be persisted for the next one (`settings-window`) |
 | `a`, `c`, or `s` pressed in file mode | Refused with a reason naming the absent `openspec` binary, before any Herdr call: the prompt would have to name an absolute path the pane does not have, and the launched agent's own shell will not resolve `openspec` either. The footer drops the `a/c/s launch` hint in file mode and the header already badges `file mode`, so the refusal confirms a context already on screen. `g` is unaffected — it focuses an agent that is already running and needs no binary |
+| `git` absent, or the repository is not a git repository | The pane is exactly what it was before `worktree-overlay`: no worktree family, no `@` marker, no branch cell, and no problem naming `git` — an absent worktree family degrades exactly as an absent `openspec` binary does, silently, because most repositories are not worktree checkouts and a row for the common case would be noise |
+| A worktree's git query fails | That member contributes nothing — no rows, no overlaid changes — while every other member still overlays normally; one `!`-marked problem row names the member's own top level and the failing command (`merge-base`, `diff-tree`, or `status`) and its reason |
+| A worktree's directory is gone | A `prunable` record (git already knows the checkout is gone) and a record whose path does not resolve to a real directory are both skipped before any query is attempted, exactly like a `bare` one — silently, with no problem recorded, since a `git worktree prune` away from correcting itself is not this pane's fault to report |
+| Two worktrees modify one change | The family's first member, in `git worktree list`'s own order, wins the row; one problem names the change and both worktrees — `change <name> is modified in worktrees <first> and <second>; showing <first>` — and the CLI tier, indifferent to worktrees entirely, is unaffected either way. The problem clears on its own once only one member still touches the change |
+| `git` too old for `worktree list -z` | `git worktree list --porcelain -z` exits 129 on a `git` that predates `-z`; the worktree family is empty, as if none existed, and one problem names the failing command and says worktree changes are not shown — distinct from `git` being entirely absent, which names nothing, because here `git` answered and the reason is known |
+| Worktree changes in file mode | File mode already means no `openspec` binary and no CLI-merged tier; the worktree family is not read either — `GitCli` is never called, on the same "no binary, no worker" terms that already keep the CLI unread — so a worktree family is invisible in file mode exactly as every other CLI-tier correction is |
 
 ### No terminal is not a degraded state
 
@@ -1218,11 +1267,11 @@ Each is a pure transformation, tested without a TUI. `cli` is the one exception:
 is tested against scratch `#!/bin/sh` programs rather than the real `openspec`,
 `herdr`, or `npm`, because performing a spawn is the one thing it exists to do.
 
-- `cli::OpenspecCli`, `cli::HerdrCli`, and the `npm prefix -g` probe — the traits'
-  contract (stdout returned verbatim, stderr excluded, a non-zero exit or an
-  absent program becomes an error rather than a panic) and the probe's
+- `cli::OpenspecCli`, `cli::HerdrCli`, `cli::GitCli`, and the `npm prefix -g` probe —
+  the traits' contract (stdout returned verbatim, stderr excluded, a non-zero exit or
+  an absent program becomes an error rather than a panic) and the probe's
   trim/decode rules, proved against scratch `#!/bin/sh` programs built under
-  `std::env::temp_dir()` so the suite passes with `openspec`, `herdr`, and `npm`
+  `std::env::temp_dir()` so the suite passes with `openspec`, `herdr`, `git`, and `npm`
   all unresolvable
 - `changes::from_files` and `changes::from_cli` — both produce the same `Change`
   type, from fixture trees and fixture JSON respectively
@@ -1268,12 +1317,19 @@ is tested against scratch `#!/bin/sh` programs rather than the real `openspec`,
   instant, never the real clock; `watch::start` and `RealFsEvents` are the
   one filesystem edge, tested against a real `ScratchDir` and against a path
   that does not exist
-- `worktrees::member_of` — the worktree family's own value type and the one
-  function that decides which member a change's directory belongs to,
-  matching against `<root>/openspec/changes` rather than `<root>` alone so a
-  member whose root is an ancestor of the pane's own root does not falsely
-  claim the pane's own rows. Pure over `&[Worktree]` and `&Path` with no
-  filesystem edge at all
+- `worktrees::member_of`, `worktrees::parse_list`, `worktrees::label`,
+  `worktrees::family_with_tops`, and `worktrees::touched` — the worktree family's own
+  value type and the one function that decides which member a change's directory
+  belongs to, matching against `<root>/openspec/changes` rather than `<root>` alone so
+  a member whose root is an ancestor of the pane's own root does not falsely claim the
+  pane's own rows; parsing `git worktree list --porcelain -z`'s own stdout into
+  records and a record's own label (its branch with `refs/heads/` stripped, or the
+  first seven characters of a detached `HEAD`); selecting a family's base — the
+  record whose canonical top level is the longest ancestor of the pane's own root —
+  and its members, each paired with its own canonical top level rather than its
+  OpenSpec root, since that is what a member's `-C` argument needs; and classifying
+  which change directories a `diff-tree`/`status` path touched. Pure over `&[Worktree]`,
+  `&Path`, and `&str` with no filesystem edge at all
 - `refresh::start`, `refresh::none`, and the worker body — one of the
   crate's **three** worker threads, tested through a `#[cfg(test)]` constructor
   (`worker_for_test`) that hands the test the worker's own result and exit
