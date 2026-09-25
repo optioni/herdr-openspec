@@ -12,7 +12,7 @@
 //! derivation `worktree-overlay` names as the crate's only membership test
 //! ([`member_of`]), parsing of `git worktree list --porcelain -z`'s own
 //! stdout ([`Record`], [`parse_list`], [`label`]), the family-selection rule
-//! choosing a base and its members ([`family`]), and classifying which
+//! choosing a base and its members ([`family_with_tops`]), and classifying which
 //! change directories a member touched ([`Touched`], [`touched`]). All of it
 //! stays pure: [`family`] takes canonical paths its caller already resolved rather than
 //! calling into the filesystem itself (design.md -> D15) — the refresh
@@ -289,7 +289,9 @@ fn classify(path: &str, prefix: &str, result: &mut Touched) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Record, Touched, Worktree, family, label, member_of, parse_list, touched};
+    use super::{
+        Record, Touched, Worktree, family_with_tops, label, member_of, parse_list, touched,
+    };
     use std::path::PathBuf;
 
     fn worktree(root: &str, label: &str) -> Worktree {
@@ -360,6 +362,33 @@ mod tests {
             &PathBuf::from("/r/.worktrees/b/openspec/changes/y"),
         );
         assert_eq!(found.map(|w| w.label.as_str()), Some("b"));
+    }
+
+    /// Change Review follow-up (`worktree-changes` task 11.2, item 1):
+    /// `specs/worktree-overlay/spec.md` says "A listing with no record
+    /// containing the root SHALL yield empty `worktrees`" — with no record
+    /// an ancestor of (or equal to) `pane_root`, `family_with_tops` must
+    /// return `None` rather than treating every resolvable, non-bare record
+    /// as a member. Before this fix the pure rule disagreed with the spec;
+    /// only `refresh::derive_family`'s own duplicated early return made the
+    /// spec's promise hold in practice.
+    #[test]
+    fn no_base_yields_no_family() {
+        let records = vec![Record {
+            path: "/w/feat".to_string(),
+            head: Some("bbbb".to_string()),
+            branch: Some("refs/heads/feat".to_string()),
+            detached: false,
+            bare: false,
+            locked: false,
+            prunable: false,
+        }];
+        let canonical = vec![Some(PathBuf::from("/w/feat"))];
+
+        assert_eq!(
+            family_with_tops(&records, &canonical, &PathBuf::from("/nowhere")),
+            None
+        );
     }
 
     /// worktree-overlay, "A porcelain listing with a main checkout, a
