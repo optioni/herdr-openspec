@@ -8964,5 +8964,55 @@ apply:
             assert_eq!(owned.active.len(), 1);
             assert_eq!(owned.active[0].name, "x");
         }
+
+        /// Change Review follow-up (`worktree-changes` task 11.2 item 3): a member
+        /// whose `Touched` set is empty on both sides cannot own anything
+        /// `from_files_owned` would find — every active and archived filter tests
+        /// against those two sets — so it must return early rather than reading the
+        /// project config and enumerating the active and archive directories only
+        /// to filter everything out. This matters for `worktree-overlay`'s 2s idle
+        /// re-check, which calls this for every member on every tick regardless of
+        /// whether anything changed. Proved on
+        /// `from_files_owned_opens_nothing_beneath_an_unowned_change`'s own recorder
+        /// terms: with a real active change and a real archived one present, an
+        /// empty `Touched` still leaves both recorders empty — which also proves
+        /// the project config itself, read unconditionally as this function's very
+        /// first step, was never reached.
+        #[test]
+        fn an_empty_touched_set_enumerates_nothing() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            write_project_config(&repo, "tdd");
+            write(&repo.join("openspec/changes/x/tasks.md"), "- [ ] a\n");
+            write(
+                &repo.join("openspec/changes/archive/2026-01-01-old/tasks.md"),
+                "- [x] a\n",
+            );
+
+            let t = touched(&[], &[]);
+
+            let _ = crate::schema::take_recorded_reads();
+            let _ = crate::tasks::take_recorded_reads();
+            let owned = from_files_owned(&repo, &t, ArchivedScope::Full);
+
+            assert_eq!(
+                crate::schema::take_recorded_reads(),
+                Vec::<PathBuf>::new(),
+                "an empty Touched set must never read the project config"
+            );
+            assert_eq!(
+                crate::tasks::take_recorded_reads(),
+                Vec::<PathBuf>::new(),
+                "an empty Touched set must never read a tasks.md"
+            );
+            assert_eq!(
+                owned,
+                OwnedChanges {
+                    active: Vec::new(),
+                    archived: Vec::new(),
+                }
+            );
+        }
     }
 }
