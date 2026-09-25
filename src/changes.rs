@@ -1946,10 +1946,27 @@ pub fn empty_set() -> ChangeSet {
 /// one call. See `openspec/changes/changes-from-files/design.md` for the
 /// full contract.
 pub fn from_files(repo: &std::path::Path, archived: ArchivedScope) -> ChangeSet {
+    let (active_names, archived_list, problems) = list_changes(repo);
+    from_files_with_listing(repo, archived, active_names, archived_list, problems)
+}
+
+/// [`from_files`]'s own body, taking [`list_changes`]'s result rather than calling it —
+/// the sibling `refresh::worker_body` reaches for so it can derive the base's own
+/// archive directory names from the same enumeration it hands here, instead of a
+/// second `archived_entries` call of its own (Change Review follow-up,
+/// `worktree-changes` task 11.2 item 6). `from_files` is a thin wrapper over this that
+/// keeps its existing signature; the two can never disagree about what a listing
+/// builds because `from_files` calls nothing else.
+pub(crate) fn from_files_with_listing(
+    repo: &std::path::Path,
+    archived: ArchivedScope,
+    active_names: Vec<String>,
+    archived_list: Vec<ArchivedEntry>,
+    problems: Vec<String>,
+) -> ChangeSet {
     let project_config_path = repo.join("openspec").join("config.yaml");
     let project_config_text = crate::schema::read_file(&project_config_path);
 
-    let (active_names, archived_list, problems) = list_changes(repo);
     let archived_total = archived_list.len();
 
     let mut schema_cache: std::collections::HashMap<String, CachedSchemaLoad> =

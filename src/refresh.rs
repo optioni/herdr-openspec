@@ -433,24 +433,6 @@ fn derive_family(repo: &Path, git: &dyn GitCli) -> FamilyDerivation {
     FamilyDerivation { members, problems }
 }
 
-/// The base's own archive directory names, read the same way `changes::from_files`'s
-/// own enumeration does — `worktree-overlay`'s "the base archive directory names step
-/// 1's enumeration read" — so `overlay` never re-adds a directory the base already
-/// holds.
-fn base_archive_dir_names(repo: &Path) -> Vec<String> {
-    crate::changes::archived_entries(repo, false)
-        .0
-        .into_iter()
-        .filter_map(|entry| {
-            entry
-                .dir
-                .file_name()
-                .and_then(|name| name.to_str())
-                .map(str::to_string)
-        })
-        .collect()
-}
-
 /// Everything the worker remembers between cycles: for `worktree-overlay`'s idle
 /// re-check, which has no request of its own, and for the next cycle's fast,
 /// file-sourced answer, which overlays with whatever family the previous cycle or
@@ -536,8 +518,29 @@ fn worker_body(
         // Step 1: the fast, file-sourced answer, overlaid with whatever family the
         // previous cycle or an idle re-check last derived; on the worker's first
         // cycle there is no previous family, and the file result is sent un-overlaid.
-        let files = crate::changes::from_files(&repo, request.archived);
-        let base_archive_dirs = base_archive_dir_names(&repo);
+        // `list_changes` is called once here — `changes::from_files_with_listing` is
+        // its own `from_files`'s body, taking that one enumeration rather than
+        // re-deriving it — and `base_archive_dirs` is read off the very same
+        // `archived_list` rather than a second `archived_entries` call of its own
+        // (Change Review follow-up, `worktree-changes` task 11.2 item 6).
+        let (active_names, archived_list, list_problems) = crate::changes::list_changes(&repo);
+        let base_archive_dirs: Vec<String> = archived_list
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .dir
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .map(str::to_string)
+            })
+            .collect();
+        let files = crate::changes::from_files_with_listing(
+            &repo,
+            request.archived,
+            active_names,
+            archived_list,
+            list_problems,
+        );
         let files_overlaid = match &remembered {
             Some(rem) => {
                 let mut overlaid = crate::changes::overlay_family(
