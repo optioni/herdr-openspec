@@ -310,27 +310,26 @@ triangle — a `herdr-plugin.toml`, `README.md`, or binary-name edit that drifts
 against another fails it, deliberately asserting nothing about `target/release/`, which
 `make check` never builds), `tests/degraded_coverage.rs` (`SPEC.md`'s degraded-states
 table bound to a named, passing proving test per row), and `tests/doc_contract.rs`
-(sixteen further claims — the module map, the tested-modules list, the worker-thread
+(seventeen further claims — the module map, the tested-modules list, the worker-thread
 count, the MSRV, the gate-path programs, the manifest transcription, the injected
-OpenSpec context, the documented mouse bindings (`SPEC.md` → Keys' mouse table
-bound **row by row** by *executing* `mouse_action` at every cell of the swept
-frames, never by parsing its source: each row names the `Zone` variants it covers
-and its outcome's payload constructor, a row covering no observed behaviour fails
-as vacuous and a behaviour no row covers fails as undocumented — so editing that
-table alone is not safe, and `mouse-text-selection`'s four false statements would
-not survive it twice), the documented key bindings
-(`SPEC.md` → Keys and `README.md` → Keys against `ui::help::INVENTORY`), the
-confined terminal-seam
-names, `src/specs.rs`'s production slice carrying no I/O or schema name,
-`src/settings.rs`'s production slice carrying no I/O, clock, or `ratatui` name, the
-OSC 52 introducer confined to `src/ui/terminal.rs`, and the documented
-drag-to-select bypass naming what `notes/measurements.md` actually measured — each
-bound to the repository file that determines it; see `SPEC.md`
-→ § Testing and quality gates → Doc-conformance checks). The rule all three share: **a
-documented claim with a computable second site is bound to that site inside `cargo
-test`, not left to a human re-reading it.** Durable because a future change adding a
-module, a worker thread, or a gate program will otherwise not know why its `make check`
-went red — the failure names both sides of the disagreement.
+OpenSpec context, the documented mouse bindings (`SPEC.md` → Keys' mouse table bound
+**row by row** by *executing* `mouse_action` at every cell of the swept frames, never by
+parsing its source: each row names the `Zone` variants it covers and its outcome's
+payload constructor, a row covering no observed behaviour fails as vacuous and a
+behaviour no row covers fails as undocumented — so editing that table alone is not safe,
+and `mouse-text-selection`'s four false statements would not survive it twice), the
+documented key bindings (`SPEC.md` → Keys and `README.md` → Keys against
+`ui::help::INVENTORY`), the confined terminal-seam names, `src/specs.rs`'s production
+slice carrying no I/O or schema name, `src/settings.rs`'s production slice carrying no
+I/O, clock, or `ratatui` name, `src/worktrees.rs`'s production slice carrying no I/O,
+clock, `ratatui`, or CLI-handle name, the OSC 52 introducer confined to
+`src/ui/terminal.rs`, and the documented drag-to-select bypass naming what
+`notes/measurements.md` actually measured — each bound to the repository file that
+determines it; see `SPEC.md` → § Testing and quality gates → Doc-conformance checks).
+The rule all three share: **a documented claim with a computable second site is bound to
+that site inside `cargo test`, not left to a human re-reading it.** Durable because a
+future change adding a module, a worker thread, or a gate program will otherwise not
+know why its `make check` went red — the failure names both sides of the disagreement.
 
 `make gates` is not two scripts — it is every hygiene gate this project has ever argued
 for, extracted into its own repository file under `scripts/gates/` and composed into the

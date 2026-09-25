@@ -4987,6 +4987,177 @@ fn the_production_slice_of_src_settings_rs_carries_no_io_clock_or_view_name() {
 }
 
 // ---------------------------------------------------------------------------
+// `worktree-changes` :: "`src/worktrees.rs`' freedom from I/O is the seventeenth claim" —
+// the **seventeenth** `tests/doc_contract.rs` claim, on exactly `src/specs.rs`'s,
+// `src/integration.rs`'s, and `src/settings.rs`'s terms: design.md -> Boundaries puts
+// `src/worktrees.rs` outside `src/ui/`, where **no** `scripts/gates/` script sweeps it at
+// all. The CLI-handle needles are this claim's own addition, on `src/integration.rs`'s
+// model: the module parses the stdout of `git` commands the refresh worker runs, and a
+// handle reaching it would move a blocking call into code the design keeps pure.
+// Canonicalizing a worktree path is a filesystem call and stays in the worker, which
+// passes the canonical paths in.
+//
+// `CLAIM_COUNT` below moves to 17 together with its three sibling sites
+// (`CLAIM_COUNT_WORDS`, `AGENTS.md`'s "further claims" marker, and `SPEC.md`'s
+// "### Doc-conformance checks" bullet list) in the same commit as this claim's own
+// test — `worktree-changes`'s task 10.2 — so `cargo test --test doc_contract` is never
+// red in between. This claim's own test passes on its own regardless of that count.
+// ---------------------------------------------------------------------------
+
+/// The names forbidden anywhere in `src/worktrees.rs`'s production slice: the eleventh
+/// claim's filesystem, process, environment, network, and standard-I/O names; the path
+/// methods that reach the filesystem without naming `std::fs`; the two clock APIs this
+/// crate's render path is forbidden from naming; every `ratatui` type this pure classifier
+/// must not reach for; and the CLI handles a blocking call would otherwise reach through.
+const WORKTREES_RS_FORBIDDEN_NEEDLES: [&str; 21] = [
+    "std::fs",
+    "std::io",
+    "std::env",
+    "std::process",
+    "std::net",
+    "File::",
+    "read_to_string",
+    "Command",
+    "canonicalize",
+    ".exists(",
+    ".is_dir(",
+    "metadata(",
+    "read_dir",
+    "Instant",
+    "SystemTime",
+    "ratatui",
+    // Built with `concat!` rather than spelled contiguously: `AGENTSEAM` and
+    // `LAUNCHSEAM` sweep `tests/` too, for the Herdr and the Git CLI handles
+    // respectively, and a literal spelling here would trip them for a string that
+    // names no real handle — this file's own source must not carry the substring.
+    concat!("Git", "Cli"),
+    "OpenspecCli",
+    concat!("Herdr", "Cli"),
+    concat!("git_cli", "_via"),
+    "crate::cli",
+];
+
+/// Whether `src`'s production slice names any of [`WORKTREES_RS_FORBIDDEN_NEEDLES`]. `Err`
+/// names the first needle found and its 1-based line number. The slice is asserted
+/// non-empty before it is searched, so the check cannot pass vacuously against a file it
+/// failed to read or cut at the wrong place.
+fn worktrees_rs_production_slice_is_io_free(src: &str) -> Result<(), String> {
+    let prod = production_slice(src);
+    if prod.is_empty() {
+        return Err(
+            "src/worktrees.rs's production slice is empty — cut at the wrong place, or \
+             the file itself has none"
+                .to_string(),
+        );
+    }
+    for (idx, line) in prod.lines().enumerate() {
+        for needle in WORKTREES_RS_FORBIDDEN_NEEDLES {
+            if line.contains(needle) {
+                return Err(format!(
+                    "src/worktrees.rs's production slice names {needle:?} at line {}: {line}",
+                    idx + 1
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn worktrees_rs_production_slice_check_passes_on_a_clean_slice() {
+    let src = "//! docs
+pub fn a() -> u8 { 1 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+}
+";
+    worktrees_rs_production_slice_is_io_free(src).expect("no needle above the cut");
+}
+
+#[test]
+fn worktrees_rs_production_slice_check_fails_naming_needle_and_line() {
+    let src = "pub fn a() {}
+use std::fs;
+
+#[cfg(test)]
+mod tests {}
+";
+    let err =
+        worktrees_rs_production_slice_is_io_free(src).expect_err("std::fs above the cut fails");
+    assert!(err.contains("std::fs"), "{err}");
+    assert!(err.contains("line 2"), "{err}");
+
+    // The path-method needle is this claim's own addition: the spelling that names no
+    // `std::fs` and would otherwise slip past the eleventh claim's I/O set.
+    let src = "fn a(p: &std::path::Path) { let _ = p.canonicalize(); }
+
+#[cfg(test)]
+mod tests {}
+";
+    let err = worktrees_rs_production_slice_is_io_free(src)
+        .expect_err("a canonicalize() above the cut fails");
+    assert!(err.contains("canonicalize"), "{err}");
+
+    // The clock needle, carried from `src/settings.rs`'s claim.
+    let src = "fn a() { let _ = std::time::Instant::now(); }
+
+#[cfg(test)]
+mod tests {}
+";
+    let err = worktrees_rs_production_slice_is_io_free(src)
+        .expect_err("an Instant::now() above the cut fails");
+    assert!(err.contains("Instant"), "{err}");
+
+    // The CLI-handle needle is this claim's own further addition beyond
+    // `src/integration.rs`'s set: a handle reaching this module would move a blocking
+    // call into code the design keeps pure. Assembled at runtime, for the same reason
+    // the needle list above builds it with `concat!` rather than spelling it out.
+    let git_handle = concat!("Git", "Cli");
+    let src = format!("use crate::cli::{git_handle};\n\n#[cfg(test)]\nmod tests {{}}\n");
+    let err = worktrees_rs_production_slice_is_io_free(&src)
+        .expect_err("a Git-CLI-handle use above the cut fails");
+    assert!(err.contains(git_handle), "{err}");
+}
+
+#[test]
+fn worktrees_rs_production_slice_check_ignores_a_needle_below_the_cut() {
+    // The complement: an I/O name in the test module alone, with none above the cut,
+    // must not fail the claim — the slice boundary is load-bearing, not an exemption.
+    let src = "pub fn a() {}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    fn t() {
+        let _ = std::fs::read_to_string(\"x\");
+    }
+}
+";
+    worktrees_rs_production_slice_is_io_free(src)
+        .expect("a needle only below the cut must not fail");
+}
+
+#[test]
+fn worktrees_rs_production_slice_check_rejects_an_empty_slice() {
+    let err = worktrees_rs_production_slice_is_io_free("#[cfg(test)]\nmod tests {}\n")
+        .expect_err("an empty production slice must fail rather than pass vacuously");
+    assert!(err.contains("empty"), "{err}");
+}
+
+/// `worktree-changes` :: "A planted I/O name or CLI handle fails the claim" and "An I/O
+/// name in the test module alone does not fail the claim" — the claim itself, over the
+/// real file.
+#[test]
+fn the_production_slice_of_src_worktrees_rs_carries_no_io_clock_view_or_cli_name() {
+    let src = read_doc(&manifest_dir().join("src/worktrees.rs")).expect("read src/worktrees.rs");
+    worktrees_rs_production_slice_is_io_free(&src).expect(
+        "src/worktrees.rs's production slice names no I/O, clock, ratatui, or CLI-handle API",
+    );
+}
+
+// ---------------------------------------------------------------------------
 // `mouse-text-selection` :: "The clipboard write's confinement is bound inside
 // `cargo test`" (`specs/doc-conformance/spec.md`) — the twelfth `tests/doc_contract.rs`
 // claim. `TerminalOps::write_clipboard` (`src/ui/terminal.rs`) is the crate's only
@@ -4997,13 +5168,13 @@ fn the_production_slice_of_src_settings_rs_carries_no_io_clock_or_view_name() {
 
 /// The single source of truth both `AGENTS.md` and `SPEC.md` are checked against below —
 /// a documented number is never trusted on its own, only compared to this. Bump it, and
-/// both prose sites, in the same commit that adds a sixteenth claim.
-const CLAIM_COUNT: usize = 16;
+/// both prose sites, in the same commit that adds a seventeenth claim.
+const CLAIM_COUNT: usize = 17;
 
 /// The number words `agents_md_claim_count` accepts. `ten` is kept alongside the three
 /// values this repository has actually used so the negative-control test below has a
 /// fourth, distinct value to assert is parsed correctly without yet being correct.
-const CLAIM_COUNT_WORDS: [(&str, usize); 7] = [
+const CLAIM_COUNT_WORDS: [(&str, usize); 8] = [
     ("ten", 10),
     ("eleven", 11),
     ("twelve", 12),
@@ -5011,6 +5182,7 @@ const CLAIM_COUNT_WORDS: [(&str, usize); 7] = [
     ("fourteen", 14),
     ("fifteen", 15),
     ("sixteen", 16),
+    ("seventeen", 17),
 ];
 
 /// Parse `AGENTS.md`'s "(<number-word> further claims" marker — the sentence naming how

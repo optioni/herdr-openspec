@@ -1394,6 +1394,7 @@ own such test lives in `ui::tests::load::`, never in a view module.
 - `src/integration.rs`'s production slice ↔ carries no filesystem, process, environment, network, or standard-I/O name, and no view-layer type either — the render crate joins the needle set because `LAUNCHSEAM` covers only the Herdr handle and **no** `make gates` script sweeps this file at all (`agent-client-choice`).
 - Every production slice under `src/` ↔ holds no `/opsx:` literal, so the three Claude Code slash-command prompts cannot come back unnoticed (`agent-client-choice`).
 - `src/settings.rs`'s production slice ↔ carries no filesystem, process, environment, network, standard-I/O, or clock name, and no `ratatui` type either — the render crate joins the needle set on `src/integration.rs`'s own terms, and **no** `make gates` script sweeps this file at all (`settings-window`).
+- `src/worktrees.rs`'s production slice ↔ carries no filesystem, process, environment, network, standard-I/O, clock, or `ratatui` name, and no CLI-handle name either — the module parses `git` stdout and a handle reaching it would move a blocking call into pure code, and **no** `make gates` script sweeps this file at all (`worktree-changes`).
 - A claim with no second site is argued in review, not checked.
 
 ### Gates
