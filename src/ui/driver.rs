@@ -438,7 +438,7 @@ pub fn mouse_action(dashboard: &Dashboard, area: Rect, mouse: &MouseEvent) -> Ac
     // extracted into a sibling function would take one of its `Action`
     // variants (`Action::SelectTab`, say) out of that slice and let the
     // table and the resolver drift with every test still green.
-    if dashboard.overlay.panel.is_some() {
+    if let Some(panel) = dashboard.overlay.panel {
         let point = ratatui::layout::Position::new(mouse.column, mouse.row);
         // Outside the frame is `Action::Ignore` on every event kind, checked
         // before anything else: such a point is outside the band too, but it
@@ -466,10 +466,6 @@ pub fn mouse_action(dashboard: &Dashboard, area: Rect, mouse: &MouseEvent) -> Ac
                 // count, the settings band `ui::settings::content_rows`'s
                 // count over the rows currently drawn.
                 let (body, _) = crate::ui::layout::split_frame(area);
-                let panel = dashboard
-                    .overlay
-                    .panel
-                    .expect("checked by the `is_some()` guard above");
                 let content_rows = match panel {
                     Panel::Help => crate::ui::help::content_rows(),
                     Panel::Settings => crate::ui::settings::content_rows(&dashboard.settings.rows),
