@@ -2221,14 +2221,15 @@ pub fn overlay(
 /// `base`. Lives here, not in `src/refresh.rs`, because a function returning `ChangeSet` by
 /// value outside this file is exactly what `NOLIT-CHANGE`'s own header names as a known false
 /// positive it does not weaken for — "the fix is to move the code" — and every `ChangeSet` this
-/// crate builds already lives in this one file. `members` and `touched` are parallel and
-/// index-aligned, on `worktree-overlay`'s own terms; `refresh::FamilyDerivation` stays private
-/// to `src/refresh.rs` and is never named here.
+/// crate builds already lives in this one file. `members` pairs each member with its own
+/// `Touched` set in one `Vec` rather than two parallel slices (Change Review follow-up,
+/// `worktree-changes` task 11.2 item 2) — a length mismatch between the two can no longer be
+/// dropped silently by a zip here; `refresh::FamilyDerivation` stays private to
+/// `src/refresh.rs` and is never named here.
 pub(crate) fn overlay_family(
     base: ChangeSet,
     base_archive_dirs: &[String],
-    members: &[crate::worktrees::Worktree],
-    touched: &[crate::worktrees::Touched],
+    members: &[(crate::worktrees::Worktree, crate::worktrees::Touched)],
     scope: ArchivedScope,
 ) -> ChangeSet {
     let owned: Vec<(
@@ -2237,7 +2238,6 @@ pub(crate) fn overlay_family(
         OwnedChanges,
     )> = members
         .iter()
-        .zip(touched.iter())
         .map(|(member, touched)| {
             let owned = from_files_owned(&member.root, touched, scope);
             (member.clone(), touched.clone(), owned)

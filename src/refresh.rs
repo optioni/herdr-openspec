@@ -251,16 +251,17 @@ fn drain_and_fold(first: Request, rx: &mpsc::Receiver<Request>) -> Request {
 }
 
 /// One cycle's worktree derivation: the family in `git worktree list`'s own order
-/// (never the base), each member's `Touched` set — parallel and index-aligned with
-/// `members` — and every problem the derivation itself produced (a `git` too old to
-/// accept `worktree list -z`, or one member's failing query). Shared, unchanged, by an
-/// ordinary cycle's step 2 and by the idle re-check (design.md -> Decision 6 and task
-/// 8.5's REFACTOR): the two can never derive a family by two different rules because
-/// both call exactly [`derive_family`].
+/// (never the base), each member paired with its own `Touched` set — one `Vec` rather
+/// than two parallel ones, so a length mismatch between members and their `Touched`
+/// sets cannot arise and be dropped silently by `changes::overlay_family`'s own zip
+/// (Change Review follow-up, `worktree-changes` task 11.2 item 2) — and every problem
+/// the derivation itself produced (a `git` too old to accept `worktree list -z`, or one
+/// member's failing query). Shared, unchanged, by an ordinary cycle's step 2 and by the
+/// idle re-check (design.md -> Decision 6 and task 8.5's REFACTOR): the two can never
+/// derive a family by two different rules because both call exactly [`derive_family`].
 #[derive(Debug, Clone, Default)]
 struct FamilyDerivation {
-    members: Vec<crate::worktrees::Worktree>,
-    touched: Vec<crate::worktrees::Touched>,
+    members: Vec<(crate::worktrees::Worktree, crate::worktrees::Touched)>,
     problems: Vec<String>,
 }
 
@@ -320,7 +321,6 @@ fn derive_family(repo: &Path, git: &dyn GitCli) -> FamilyDerivation {
         }) => {
             return FamilyDerivation {
                 members: Vec::new(),
-                touched: Vec::new(),
                 problems: vec![TOO_OLD_GIT_PROBLEM.to_string()],
             };
         }
@@ -355,24 +355,19 @@ fn derive_family(repo: &Path, git: &dyn GitCli) -> FamilyDerivation {
     } else {
         format!("{}/openspec/changes", family.prefix.to_string_lossy())
     };
-    let members: Vec<crate::worktrees::Worktree> = family
-        .members
-        .iter()
-        .map(|(_, worktree)| worktree.clone())
-        .collect();
-    let mut touched = Vec::with_capacity(members.len());
+    let mut members = Vec::with_capacity(family.members.len());
     let mut problems = Vec::new();
 
     // `top` is the member's own canonical top level — never `Worktree::root`, its
     // OpenSpec root — because `-C` must point at the checkout `diff-tree`/`status`
     // report paths relative to; `<changes>` above is the pathspec that recovers the
     // OpenSpec prefix those reported paths carry.
-    for (top, _) in &family.members {
+    for (top, worktree) in &family.members {
         match git_call(git, top, &["merge-base", "HEAD", &base_head]) {
             Ok(out) => {
                 let merge_base = out.trim();
                 if merge_base.is_empty() {
-                    touched.push(crate::worktrees::Touched::default());
+                    members.push((worktree.clone(), crate::worktrees::Touched::default()));
                     continue;
                 }
                 let diff_out = match git_call(
@@ -393,7 +388,7 @@ fn derive_family(repo: &Path, git: &dyn GitCli) -> FamilyDerivation {
                     Ok(out) => out,
                     Err(err) => {
                         problems.push(member_query_failed(top, "diff-tree", &err));
-                        touched.push(crate::worktrees::Touched::default());
+                        members.push((worktree.clone(), crate::worktrees::Touched::default()));
                         continue;
                     }
                 };
@@ -413,30 +408,29 @@ fn derive_family(repo: &Path, git: &dyn GitCli) -> FamilyDerivation {
                     Ok(out) => out,
                     Err(err) => {
                         problems.push(member_query_failed(top, "status", &err));
-                        touched.push(crate::worktrees::Touched::default());
+                        members.push((worktree.clone(), crate::worktrees::Touched::default()));
                         continue;
                     }
                 };
-                touched.push(crate::worktrees::touched(&diff_out, &status_out, &changes));
+                members.push((
+                    worktree.clone(),
+                    crate::worktrees::touched(&diff_out, &status_out, &changes),
+                ));
             }
             // Unrelated history — an orphan-branch worktree is a normal thing to have,
             // per `worktree-overlay` — is silent, and the other two commands do not
             // run for this member.
             Err(CliError::Failed { code: Some(1), .. }) => {
-                touched.push(crate::worktrees::Touched::default());
+                members.push((worktree.clone(), crate::worktrees::Touched::default()));
             }
             Err(err) => {
                 problems.push(member_query_failed(top, "merge-base", &err));
-                touched.push(crate::worktrees::Touched::default());
+                members.push((worktree.clone(), crate::worktrees::Touched::default()));
             }
         }
     }
 
-    FamilyDerivation {
-        members,
-        touched,
-        problems,
-    }
+    FamilyDerivation { members, problems }
 }
 
 /// The base's own archive directory names, read the same way `changes::from_files`'s
@@ -519,7 +513,6 @@ fn worker_body(
                         rem.merged.clone(),
                         &rem.base_archive_dirs,
                         &derivation.members,
-                        &derivation.touched,
                         rem.archived,
                     );
                     overlaid
@@ -551,7 +544,6 @@ fn worker_body(
                     files.clone(),
                     &base_archive_dirs,
                     &rem.family.members,
-                    &rem.family.touched,
                     request.archived,
                 );
                 overlaid
@@ -579,7 +571,6 @@ fn worker_body(
             merged.clone(),
             &base_archive_dirs,
             &derivation.members,
-            &derivation.touched,
             request.archived,
         );
         merged_overlaid
