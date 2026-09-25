@@ -23,8 +23,8 @@ spec is wrong, update the spec as part of that change rather than letting the tw
 `schema-model`, `task-parsing`, `changes-from-files`, `subprocess-seam`,
 `changes-from-cli`, `tui-shell`, `list-view`, `markdown-viewer`,
 `detail-view`, `tasks-tab`, `live-refresh`, `agent-polling`,
-`agent-attribution`, `agent-launch`, `plugin-actions`, and
-`markdown-legibility` have landed: the crate builds with six third-party dependencies (`toml`,
+`agent-attribution`, `agent-launch`, `plugin-actions`,
+`markdown-legibility`, and `worktree-changes` have landed: the crate builds with six third-party dependencies (`toml`,
 `yaml-rust2`, `serde_json`, `ratatui` — reached through `ratatui::crossterm`'s
 re-export, not a direct dependency — `pulldown-cmark`, and `notify`), `make check` runs
 every quality gate locally and in CI — `COLWIDTH` among them, sweeping every pure view
@@ -98,10 +98,11 @@ what keeps a one-heading file on a one-path artifact byte-identical to the flat
 document it was; and
 `Detail::foldable` is the crate's one site for that question and derives it from
 the section count, never storing it. The header's gauge is drawn on **every**
-artifact tab, not only the tracked-tasks one, and it is first in the header's
-drop-whole order, so every width band below 26 columns is byte-identical to the
-pre-gauge grammar and a change with no tasks draws no gauge and reserves no space
-for one. It is `ui::tasks::gauge_of`, `pub(crate)`, which is the durable rule
+artifact tab, not only the tracked-tasks one, and it is second in the header's
+drop-whole order — behind `worktree-changes`' own branch cell, present only on a
+change a linked worktree owns — so every width band below 26 columns is
+byte-identical to the pre-gauge grammar and a change with no tasks draws no gauge
+and reserves no space for one. It is `ui::tasks::gauge_of`, `pub(crate)`, which is the durable rule
 here: the crate has **one** gauge run beside its **one** progress cell
 (`ui::list::progress_cell`), and every further rendering of a change's progress
 calls them rather than formatting its own — two implementations of one fact
@@ -212,6 +213,8 @@ instead reads the workspace's own cwd from its injected Herdr context
 open re-lists and focuses the pane it just opened, rather than reading the
 open response — a later change would otherwise reach for
 `result.plugin_pane.pane.pane_id`, admitting a second Herdr envelope shape.
+`worktree-changes` overlays a linked worktree family's own changes onto the
+`ChangeSet`, re-checked on its own idle timer besides an ordinary refresh.
 
 Important files:
 
@@ -243,6 +246,8 @@ Important files:
 - **OpenSpec CLI** (`@fission-ai/openspec`) — optional for the plugin at runtime,
   required for the workflow below. Installed under nvm here, so it is not always on
   the `PATH` a non-login shell inherits.
+- **git** — optional at runtime, for `worktree-overlay`'s linked-worktree family;
+  measured at 2.48.1 on the reference machine.
 - **Platforms:** macOS and Linux. Windows is out of scope.
 
 ## Vendored files — do not edit in place
@@ -390,28 +395,32 @@ unreachable and the tests become integration tests by accident.
 
 - **Nothing spawns a process outside `cli`.** `src/cli.rs` is the one module in the
   crate permitted to name a process-spawn API (`process::Command`, `Command::new`,
-  `Stdio`) — `OpenspecCli` and `HerdrCli` are traits whose real implementations spawn
-  and return stdout, and `RealOpenspecCli` alone also accepts two constructor
-  arguments neither trait decides for itself: a caller-supplied working directory,
-  the one lever that works because `openspec` resolves its own root from the
-  process's cwd and has no flag naming one, and a caller-supplied one-entry `PATH`
-  overlay, because `openspec` is an `#!/usr/bin/env node` shim installed beside the
-  very `node` it needs, so the probe chain reaches steps 3 and 4 exactly when the
-  child's inherited `PATH` cannot exec it — `RealHerdrCli` keeps both prohibitions.
+  `Stdio`) — `OpenspecCli`, `HerdrCli`, and `GitCli` are three traits whose real
+  implementations spawn and return stdout, and `RealOpenspecCli` alone also accepts two
+  constructor arguments neither of the other two traits decides for itself: a
+  caller-supplied working directory, the one lever that works because `openspec`
+  resolves its own root from the process's cwd and has no flag naming one, and a
+  caller-supplied one-entry `PATH` overlay, because `openspec` is an
+  `#!/usr/bin/env node` shim installed beside the very `node` it needs, so the probe
+  chain reaches steps 3 and 4 exactly when the child's inherited `PATH` cannot exec it
+  — `RealHerdrCli` and `RealGitCli` keep both prohibitions; `RealGitCli` instead names
+  its own directory with git's own `-C <dir>` argument, and its handle is confined to
+  `src/cli.rs`, `src/refresh.rs`, and `src/ui/mod.rs`.
   Parsing, merging, and decisions live on the testable side of that seam.
-  `src/tasks.rs`, `src/specs.rs`, and `src/integration.rs` are that side's pure
-  classifiers: markdown
-  checkboxes to groups and counts, a delta spec's operation headings and a
-  scenario clause's keyword to `DeltaOp` and `Clause`, and `herdr integration
-  status`' plain text to an ordered list of kinds plus the five-step agent-kind
-  precedence. All three live outside
-  `src/ui/` — `specs` and `integration` deliberately, so that adding either moves
-  neither `NOIO-VIEW`'s
+  `src/tasks.rs`, `src/specs.rs`, `src/integration.rs`, and `src/worktrees.rs` are
+  that side's pure classifiers: markdown checkboxes to groups and counts, a delta
+  spec's operation headings and a scenario clause's keyword to `DeltaOp` and
+  `Clause`, `herdr integration status`' plain text to an ordered list of kinds
+  plus the five-step agent-kind precedence, and `git worktree list --porcelain
+  -z`'s own stdout to the worktree family. All four live outside `src/ui/` —
+  `specs`, `integration`, and `worktrees` deliberately, so that adding any one
+  moves neither `NOIO-VIEW`'s
   "eleven pure files" nor `COLWIDTH`'s "ten pure view files", counts four documents
   carry. The cost of that placement is that **no `make gates` script sweeps
-  `src/specs.rs` or `src/integration.rs` at all**, so each one's freedom from I/O
-  is its own `tests/doc_contract.rs` claim over its production slice instead —
-  the eleventh and the fourteenth — falsifiable by
+  `src/specs.rs`, `src/integration.rs`, or `src/worktrees.rs` at all**, so each
+  one's freedom from I/O is its own `tests/doc_contract.rs` claim over its
+  production slice instead — the eleventh, the fourteenth, and the seventeenth —
+  falsifiable by
   a planted `use std::fs;` above the `#[cfg(test)]` line. `integration`'s needle
   set additionally forbids the render crate's own types, which `LAUNCHSEAM` does
   not cover; the `integration status` **call** lives in `src/launch.rs`'s worker
