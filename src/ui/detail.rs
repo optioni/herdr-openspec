@@ -23,6 +23,23 @@ use crate::ui::layout::{columns, truncate_columns};
 /// than the longest change name this repository has.
 const HEADER_GAUGE_COLUMNS: u16 = 12;
 
+/// The minimum width `header_row` needs to draw its **full** form — name + schema +
+/// gauge + progress, when `has_gauge` — or its gauge-less form — name + schema +
+/// progress, when it is not: `4 + schema_len + gauge_len + progress_len` and
+/// `3 + schema_len + progress_len` respectively, the same two thresholds
+/// `header_row`'s own `name_field_full`/`name_field_no_gauge` bands imply (a band
+/// draws once its name field is at least one column, i.e. once `width` reaches this
+/// minimum). Shared with [`branched_header_row`] so the two functions cannot compute
+/// a different number for the same question (Change Review follow-up,
+/// `worktree-changes` task 11.2 item 5).
+fn full_form_width(schema_len: i64, progress_len: i64, has_gauge: bool) -> i64 {
+    if has_gauge {
+        4 + schema_len + i64::from(HEADER_GAUGE_COLUMNS) + progress_len
+    } else {
+        3 + schema_len + progress_len
+    }
+}
+
 /// The change header's fixed-field grammar. When `progress.total > 0` it is
 /// `[name field][space][schema cell][space][gauge cell][space][progress
 /// cell]`, exactly `width` display columns; when `progress.total == 0` it
@@ -62,8 +79,7 @@ pub fn header_row(
     // what this function produced before the gauge existed — rather than
     // reserving the gauge's columns and then declining to draw it.
     if progress.total > 0 {
-        let gauge_len = i64::from(HEADER_GAUGE_COLUMNS);
-        let name_field_full = w - 3 - schema_len - gauge_len - progress_len;
+        let name_field_full = w - full_form_width(schema_len, progress_len, true) + 1;
         if name_field_full >= 1 {
             let name_field = crate::ui::list::pad_or_truncate_right(name, name_field_full as usize);
             let gauge_cell = crate::ui::tasks::gauge_of(progress, HEADER_GAUGE_COLUMNS);
@@ -75,7 +91,7 @@ pub fn header_row(
     // + progress. This and the two bands below it are the three the header had
     // before the gauge cell, at the same boundaries and producing the same
     // strings, which is what places the gauge first in the drop order.
-    let name_field_no_gauge = w - 2 - schema_len - progress_len;
+    let name_field_no_gauge = w - full_form_width(schema_len, progress_len, false) + 1;
     if name_field_no_gauge >= 1 {
         let name_field = crate::ui::list::pad_or_truncate_right(name, name_field_no_gauge as usize);
         return format!("{name_field} {schema_cell} {progress_cell}");
@@ -110,12 +126,10 @@ pub fn header_row(
 /// and the result is exactly `header_row(name, schema, progress, width)`,
 /// byte-identical to a change that came from no worktree at all.
 ///
-/// The full-form threshold is computed independently here rather than by
-/// probing `header_row`'s own output, on the same terms `header_row`
-/// computes it for itself: `4 + schema cell + gauge cell + progress cell`
-/// when `progress.total > 0` (`header_row`'s own gauge band, requiring a
-/// non-empty name field), and `3 + schema cell + progress cell` when it is
-/// not (the gauge-less band immediately below it).
+/// The full-form threshold is computed by [`full_form_width`], the same
+/// function `header_row` itself calls for its own two bands — so this
+/// function and `header_row` can never compute a different number for the
+/// same question — rather than by probing `header_row`'s own output.
 pub fn branched_header_row(
     name: &str,
     branch: &str,
@@ -133,11 +147,7 @@ pub fn branched_header_row(
     let schema_len = columns(&schema_cell) as i64;
     let gauge_len = i64::from(HEADER_GAUGE_COLUMNS);
 
-    let min_full = if progress.total > 0 {
-        4 + schema_len + gauge_len + progress_len
-    } else {
-        3 + schema_len + progress_len
-    };
+    let min_full = full_form_width(schema_len, progress_len, progress.total > 0);
 
     let w = i64::from(width);
     let reduced = w - (b + 1);
