@@ -187,8 +187,10 @@ No type in this module SHALL derive or implement `Default`, enum or struct.
 #### Scenario: Every probe step is named by the step that won
 
 - **WHEN** `Provenance::Probe(source).label()` is called for each of `resolve::BinSource`'s
-  four variants — `Configured`, `Path`, `Nvm`, `NpmPrefix`
-- **THEN** each label is non-empty and names that step distinctly from the other three
+  five variants — `Configured`, `Path`, `Nvm`, `NpmPrefix`, `Homebrew`
+- **THEN** each label is non-empty and names that step distinctly from the other four
+- **AND** `Homebrew`'s label is `Homebrew`, naming the package manager the reader installed
+  with rather than the directory the step happened to find
 - **AND** the labels for two steps that resolved the **same path** still differ, which is
   the reason `openspec-binary` made the winning step part of the contract rather than a
   debugging aid

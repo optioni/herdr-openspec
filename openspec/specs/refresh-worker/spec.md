@@ -584,9 +584,12 @@ Herdr argument vector that needs one already carries it explicitly.
 ### Requirement: The resolved `openspec` binary is spawned in an environment where its interpreter resolves
 
 `openspec` is not a self-contained executable. The path the probe chain resolves is a
-symbolic link to `@fission-ai/openspec/bin/openspec.js`, whose first line is
-`#!/usr/bin/env node`, so the spawned child must find `node` on **its own inherited `PATH`**
-before any of this crate's logic runs.
+symbolic link to `@fission-ai/openspec/bin/openspec.js`. As npm installs it — the case steps
+3 and 4 reach — that file's first line is `#!/usr/bin/env node`, so the spawned child must
+find `node` on **its own inherited `PATH`** before any of this crate's logic runs. Homebrew's
+`openspec` formula, which step 5 reaches, rewrites that line to an absolute interpreter path
+(`#!/opt/homebrew/opt/node/bin/node`), so a Homebrew-installed binary needs no `PATH` to exec
+and the rule below is merely harmless for it.
 
 The failure is structural rather than incidental, and the probe chain reaches it by
 construction: `openspec` is installed in the **same** directory as the `node` that runs it
@@ -664,8 +667,19 @@ naming the command and its exit code. Carrying the child's stderr on that row is
 - **WHEN** the probe resolves `openspec` at `/usr/local/bin/openspec` with an inherited
   `PATH` of `/usr/local/bin:/usr/bin`
 - **THEN** the overlay is `PATH` → `/usr/local/bin:/usr/local/bin:/usr/bin`
-- **AND** the rule is therefore uniform across all four probe steps, so neither the seam nor
+- **AND** the rule is therefore uniform across all five probe steps, so neither the seam nor
   the composition root needs to know which step resolved the binary
+
+#### Scenario: A binary found under a Homebrew prefix gets the same overlay
+
+- **WHEN** `ui::start_collaborators` is driven with an injected environment lookup reporting
+  `PATH` as `/usr/bin:/bin`, a `Config` naming no `openspec_bin`, an `npm` hook returning
+  `None`, and a Homebrew prefix list naming a scratch prefix `B` whose `B/bin/openspec` is an
+  executable regular file
+- **THEN** the overlay is exactly one entry, `PATH` → `B/bin:/usr/bin:/bin`
+- **AND** Homebrew's own `openspec` formula names its interpreter by absolute path in its
+  shebang, so the overlay is unneeded there and harmless, which is why step 5 needs no rule of
+  its own
 
 #### Scenario: A shim whose interpreter is unreachable exits 127 and renders a problem row
 

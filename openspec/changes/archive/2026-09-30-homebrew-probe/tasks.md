@@ -234,6 +234,6 @@ Planning-time selection counts below come from
       `tests/degraded_coverage.rs`, had drifted with groups 1–2's insertions. Each was
       re-pointed at its baseline text's one match. The second run exited 0, with production
       coverage at 96.26%.
-- [ ] 6.9 After `openspec archive homebrew-probe`, rewrite `openspec/specs/openspec-binary/spec.md`
+- [x] 6.9 After `openspec archive homebrew-probe`, rewrite `openspec/specs/openspec-binary/spec.md`
       → `## Purpose` to name five steps and the Homebrew prefixes. `grep -n "four-step"
       openspec/specs/openspec-binary/spec.md` must print nothing. Commit it with the archive.

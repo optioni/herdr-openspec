@@ -89,7 +89,9 @@ not have the `opsx` plugin installed — while the CLI shape works in all of the
 The prompt SHALL name the plugin's own **resolved absolute path** to `openspec`, not the bare
 command `openspec`. Measured on the reference machine, a fresh interactive `zsh` with a reset
 `PATH` reports `openspec not found` even though `.zshrc` references nvm, because nvm is
-lazy-loaded; the plugin's four-step probe — configuration, `PATH`, nvm, `npm prefix -g` — is
+lazy-loaded — and, for a Homebrew install, because `brew shellenv` runs only from
+`.zprofile`, which an interactive non-login shell does not read; the plugin's five-step probe — configuration, `PATH`, nvm, `npm prefix -g`, the
+Homebrew prefixes — is
 strictly more thorough than a shell lookup, so a bare `openspec` in the prompt would fail for
 an agent even when the plugin itself found one.
 
@@ -169,7 +171,7 @@ others.
 
 ### Requirement: With no resolved `openspec` binary there is no prompt, and `a`/`c`/`s` say so
 
-In file mode — no `openspec` binary resolved by any of the probe's four steps — there is no
+In file mode — no `openspec` binary resolved by any of the probe's five steps — there is no
 absolute path to name, and the measurement above shows the launched agent's own shell will
 not resolve `openspec` either, so no prompt this capability can build would work.
 
@@ -194,8 +196,8 @@ needs no binary.
 
 #### Scenario: File mode carries no path and builds no prompt
 
-- **WHEN** `start_collaborators` runs with the configured path, `PATH`, nvm, and the
-  `npm prefix -g` hook all unable to produce a usable binary
+- **WHEN** `start_collaborators` runs with the configured path, `PATH`, nvm, the
+  `npm prefix -g` hook, and the Homebrew prefix list all unable to produce a usable binary
 - **THEN** `Collaborators::file_mode` is `true`, and pressing `a` records a problem row naming
   the absent `openspec` binary while the invocation log stays empty of `pane split`
 - **AND** a control run whose probe resolves a binary has `file_mode` `false` and completes the

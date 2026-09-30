@@ -1024,8 +1024,9 @@ join the required-name list, making it thirteen, with a positive control anchore
 `^pub fn install_panic_hook\(` in `src/ui/terminal.rs` so a rename fails in the file that
 defines it rather than leaving the leg hunting a name nobody defines.
 
-`mouse-input`'s `mouse_problem` SHALL **not** join that list, and the required-name count
-SHALL stay thirteen. Leg 1 searches the whole production slice of `src/ui/mod.rs`, and
+`mouse-input`'s `mouse_problem` SHALL **not** join that list; `worktree-changes`' `git_cli_via`
+did, so the required-name count is **fourteen**, the figure the script's own `WIRED OK` line
+prints, and `homebrew-probe` SHALL leave it at fourteen. Leg 1 searches the whole production slice of `src/ui/mod.rs`, and
 `pub struct Startup<'a>` is declared in that slice — so the field's own declaration would
 satisfy a leg-1 name while `ui::run` had stopped passing a value, which is precisely the
 failure leg 5 documents for `state::read` and answers by scoping to `$body`.
@@ -1037,6 +1038,16 @@ that can never appear, with every test green — every test constructs its own `
 drives `run_wired` directly. This is the defect class `live-refresh` shipped and
 `gate-integrity` closed for the panic hook, arriving at the one kind of name leg 1 cannot
 see.
+
+`homebrew-probe`'s `resolve::HOMEBREW_PREFIXES` SHALL likewise **not** join leg 1, for the
+mirror-image reason: leg 1 would catch a `run` passing `&[]` (the field is spelled
+`homebrew_prefixes`, and the search is case-sensitive), but would stay green if the constant
+moved out of `run` into `start_collaborators`, whose body sits in the same slice — making
+the injection decorative, since every test drives `start_collaborators` with its own list.
+`WIRED` SHALL instead carry a **body-scoped leg 8**: `pub fn run()`'s own body SHALL name
+`HOMEBREW_PREFIXES`, and `start_collaborators`' own body SHALL NOT. A positive control SHALL
+anchor on `^pub const HOMEBREW_PREFIXES` in `src/resolve.rs`, so a rename fails in the file
+that defines it.
 
 The **behaviour** of the hook — that it must be inert off the render thread — is out of scope
 here and belongs to `seam-resilience`. This requirement makes the wiring provable, nothing
@@ -1081,6 +1092,20 @@ more.
   rather than on leg 1 naming a call site
 - **AND** the stripper's own control fails when `code()` is edited to strip nothing, so a
   stripper reduced to the identity function cannot pass
+
+#### Scenario: Emptying or relocating the Homebrew prefix list fails leg 8
+
+- **WHEN** `homebrew_prefixes: crate::resolve::HOMEBREW_PREFIXES,` in `ui::run`'s `Startup`
+  construction is replaced with `homebrew_prefixes: &[],` and `make gates` is run
+- **THEN** `WIRED` exits non-zero on leg 8, naming `HOMEBREW_PREFIXES` as absent from `run`'s
+  body
+- **AND** a second plant that restores `run` but makes `start_collaborators` pass
+  `crate::resolve::HOMEBREW_PREFIXES` to the probe in place of its parameter also exits
+  non-zero on leg 8
+- **AND** renaming the constant in `src/resolve.rs` alone exits non-zero on its positive
+  control, naming `src/resolve.rs`
+- **AND** each plant is recorded as a `[[control]]` in `tests/gate-controls.toml`, so a leg 8
+  reduced to `true` fails `cargo test`
 
 ### Requirement: Every gate's positive control is executed, not attested
 
