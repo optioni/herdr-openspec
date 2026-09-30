@@ -285,7 +285,7 @@ fn intent_name(intent: Intent) -> &'static str {
 /// `openspec` is the **resolved absolute path**, never the bare command:
 /// measured, a fresh interactive `zsh` with a reset `PATH` reports
 /// `openspec not found` even though `.zshrc` references nvm, because nvm is
-/// lazy-loaded, and the plugin's four-step probe is strictly more thorough than
+/// lazy-loaded, and the plugin's five-step probe is strictly more thorough than
 /// a shell lookup. It is rendered with `Path::to_string_lossy`, so a non-UTF-8
 /// path is spelled lossily rather than refusing the launch.
 ///

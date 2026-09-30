@@ -16,13 +16,13 @@ Planning-time selection counts below come from
 ## 1. The fifth probe step
 <!-- kind: behavior -->
 
-- [ ] 1.1 RED setup: Regenerate `$T/list.txt` with the command above, then count every filter
+- [x] 1.1 RED setup: Regenerate `$T/list.txt` with the command above, then count every filter
       in design.md → Test Strategy:
       `grep -o 'cargo test --lib [^ \`]*' openspec/changes/homebrew-probe/design.md | awk '{print $4}' | sort -u | while read f; do echo "$(grep -c -- "$f" "$T/list.txt") $f"; done`.
       At planning time, every existing filter printed `1`, and every filter for a new test
       printed `0`. An existing filter printing `0`, or any filter printing `2`, is a failed
       check.
-- [ ] 1.2 RED: In `src/resolve.rs`'s tests, write these new tests:
+- [x] 1.2 RED: In `src/resolve.rs`'s tests, write these new tests:
       - `a_homebrew_prefix_is_searched_when_nothing_earlier_resolves`, including the empty-list
         arm and the `HOMEBREW_PREFIX`-in-env arm;
       - `the_npm_prefix_outranks_the_homebrew_prefixes`;
@@ -43,7 +43,7 @@ Planning-time selection counts below come from
 
       Expect a compile failure naming `openspec_bin`'s arity, `BinSource::Homebrew`,
       `homebrew_candidates`, and `HOMEBREW_PREFIXES`: the missing interface.
-- [ ] 1.3 GREEN: Add these to `src/resolve.rs`, per design.md → Boundaries and Decisions 1–5:
+- [x] 1.3 GREEN: Add these to `src/resolve.rs`, per design.md → Boundaries and Decisions 1–5:
       - `pub const HOMEBREW_PREFIXES: &[&str]`;
       - `BinSource::Homebrew`;
       - `homebrew_candidates`;
@@ -58,9 +58,9 @@ Planning-time selection counts below come from
 
       Rewrite the two `src/resolve.rs` doc comments design.md → Boundaries lists, and
       `src/launch.rs:288`'s "four-step".
-- [ ] 1.4 REFACTOR: If steps 4 and 5 both spell `prefix.join("bin").join("openspec")`, extract
+- [x] 1.4 REFACTOR: If steps 4 and 5 both spell `prefix.join("bin").join("openspec")`, extract
       one private helper that both call. Otherwise record that no refactor was needed.
-- [ ] 1.5 Run the group's tests and prove the source-text test can fail:
+- [x] 1.5 Run the group's tests and prove the source-text test can fail:
       - `cargo test --all-features --lib resolve::tests` → 47 passed. That is 41 at planning
         time (`grep -c '^resolve::tests::' "$T/list.txt"`) plus six new tests.
       - `cargo test --all-features --lib settings::tests` → 9 passed, unchanged.
@@ -68,7 +68,7 @@ Planning-time selection counts below come from
         `the_composition_passes_the_production_homebrew_prefix_list` fail, revert, and see it
         pass.
       - `cargo test --all-features --lib` is green, and `make lint` reports 0 warnings.
-- [ ] 1.6 Commit: `feat(resolve): probe Homebrew's default prefixes as a fifth step`.
+- [x] 1.6 Commit: `feat(resolve): probe Homebrew's default prefixes as a fifth step`.
 
 ## 2. The composition root injects the Homebrew prefix list
 <!-- kind: behavior -->

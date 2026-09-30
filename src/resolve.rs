@@ -77,7 +77,17 @@ pub enum BinSource {
     Path,
     Nvm,
     NpmPrefix,
+    Homebrew,
 }
+
+/// Homebrew's documented default prefixes, in probe order: Apple Silicon
+/// macOS, Linux, then Intel macOS. Apple Silicon leads because a migrated Mac
+/// can keep a stale Rosetta Homebrew under `/usr/local`, and a swapped order
+/// would silently resolve the stale binary. Every entry is absolute, so no
+/// candidate is ever resolved against the pane's working directory. A
+/// non-default prefix is `openspec_bin`'s job.
+pub const HOMEBREW_PREFIXES: &[&str] =
+    &["/opt/homebrew", "/home/linuxbrew/.linuxbrew", "/usr/local"];
 
 /// A usable `openspec` binary and the step that found it. The path is
 /// returned exactly as the chain constructed it — never canonicalized — so a
@@ -112,6 +122,26 @@ fn is_usable_binary(path: &Path) -> bool {
         Ok(metadata) => metadata.is_file() && metadata.permissions().mode() & 0o111 != 0,
         Err(_) => false,
     }
+}
+
+/// `<prefix>/bin/openspec`: the one spelling steps 4 and 5 share.
+fn prefixed_binary(prefix: &Path) -> PathBuf {
+    prefix.join("bin").join("openspec")
+}
+
+/// Step 5's candidate list, as a pure function of the injected prefix list —
+/// no filesystem access, on `path_candidates`' terms. An entry that is empty,
+/// blank, or not absolute contributes no candidate: a relative prefix would
+/// resolve against the pane's working directory, which is not a location this
+/// plugin searches.
+pub(crate) fn homebrew_candidates(prefixes: &[&str]) -> Vec<PathBuf> {
+    prefixes
+        .iter()
+        .filter(|prefix| crate::config::non_blank(Some((**prefix).to_string())).is_some())
+        .map(Path::new)
+        .filter(|prefix| prefix.is_absolute())
+        .map(prefixed_binary)
+        .collect()
 }
 
 /// Step 2's candidate list, as a pure function of the `PATH` string — no
@@ -228,8 +258,17 @@ fn step3_nvm(env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
 /// prefix and the result is usable.
 fn step4_npm_prefix(npm_prefix: &dyn Fn() -> Option<PathBuf>) -> Option<PathBuf> {
     let prefix = npm_prefix()?;
-    let candidate = prefix.join("bin").join("openspec");
+    let candidate = prefixed_binary(&prefix);
     is_usable_binary(&candidate).then_some(candidate)
+}
+
+/// Step 5's candidate: the first usable `<prefix>/bin/openspec` over the
+/// injected Homebrew prefix list, in list order. A filesystem check only —
+/// no process is spawned and no environment variable is read.
+fn step5_homebrew(prefixes: &[&str]) -> Option<PathBuf> {
+    homebrew_candidates(prefixes)
+        .into_iter()
+        .find(|c| is_usable_binary(c))
 }
 
 /// Probe for the `openspec` binary in exactly this order, taking the first
@@ -249,6 +288,7 @@ pub fn openspec_bin(
     configured: Option<&Path>,
     env: &dyn Fn(&str) -> Option<String>,
     npm_prefix: &dyn Fn() -> Option<PathBuf>,
+    homebrew_prefixes: &[&str],
 ) -> BinResolution {
     let mut problems = Vec::new();
 
@@ -298,6 +338,16 @@ pub fn openspec_bin(
         };
     }
 
+    if let Some(path) = step5_homebrew(homebrew_prefixes) {
+        return BinResolution {
+            found: Some(FoundBin {
+                path,
+                source: BinSource::Homebrew,
+            }),
+            problems,
+        };
+    }
+
     BinResolution {
         found: None,
         problems,
@@ -321,8 +371,8 @@ impl BinCache {
 }
 
 /// The single composition against the real process environment: the
-/// configured value, `config::env_lookup`, and `cli`'s real npm-prefix
-/// binding, and nothing else — the crate's untestable residue does not grow
+/// configured value, `config::env_lookup`, `cli`'s real npm-prefix binding,
+/// and `HOMEBREW_PREFIXES`, and nothing else — the crate's untestable residue does not grow
 /// past this one line. See `openspec/changes/repo-resolution/design.md` ->
 /// Contracts and `openspec/changes/subprocess-seam/design.md` for the
 /// binding itself.
@@ -332,6 +382,7 @@ pub fn openspec_bin_from_env(config: &crate::config::Config) -> BinResolution {
         config.openspec_bin.as_deref(),
         &env,
         &crate::cli::npm_prefix,
+        HOMEBREW_PREFIXES,
     )
 }
 
@@ -662,6 +713,7 @@ mod tests {
             None,
             &env(&[("PATH", &d.display().to_string())]),
             &no_prefix,
+            &[],
         );
         assert_eq!(
             result.found,
@@ -693,7 +745,7 @@ mod tests {
         );
 
         let path_value = format!("{}:{}", a.display(), b.display());
-        let result = super::openspec_bin(None, &env(&[("PATH", &path_value)]), &no_prefix);
+        let result = super::openspec_bin(None, &env(&[("PATH", &path_value)]), &no_prefix, &[]);
         assert_eq!(
             result.found,
             Some(super::FoundBin {
@@ -712,7 +764,7 @@ mod tests {
         write_with_mode(&b.join("openspec"), b"#!/bin/sh\n", 0o755);
 
         let path_value = format!("{}:{}", a.display(), b.display());
-        let result = super::openspec_bin(None, &env(&[("PATH", &path_value)]), &no_prefix);
+        let result = super::openspec_bin(None, &env(&[("PATH", &path_value)]), &no_prefix, &[]);
         assert_eq!(
             result.found,
             Some(super::FoundBin {
@@ -734,6 +786,7 @@ mod tests {
             None,
             &env(&[("PATH", &a.display().to_string())]),
             &no_prefix,
+            &[],
         );
         let found = result.found.expect("a binary should be found");
         assert_eq!(found.path, a.join("openspec"));
@@ -750,7 +803,7 @@ mod tests {
         write_with_mode(&b.join("openspec"), b"#!/bin/sh\n", 0o755);
 
         let path_value = format!("{}:{}", a.display(), b.display());
-        let result = super::openspec_bin(None, &env(&[("PATH", &path_value)]), &no_prefix);
+        let result = super::openspec_bin(None, &env(&[("PATH", &path_value)]), &no_prefix, &[]);
         assert_eq!(
             result.found,
             Some(super::FoundBin {
@@ -769,13 +822,13 @@ mod tests {
         write_with_mode(&b.join("openspec"), b"#!/bin/sh\n", 0o755);
 
         let ab = format!("{}:{}", a.display(), b.display());
-        let result_ab = super::openspec_bin(None, &env(&[("PATH", &ab)]), &no_prefix);
+        let result_ab = super::openspec_bin(None, &env(&[("PATH", &ab)]), &no_prefix, &[]);
         assert_eq!(result_ab.found.map(|f| f.path), Some(a.join("openspec")));
 
         // Re-run with the two directories swapped, so the test cannot pass by
         // accident of directory-creation order.
         let ba = format!("{}:{}", b.display(), a.display());
-        let result_ba = super::openspec_bin(None, &env(&[("PATH", &ba)]), &no_prefix);
+        let result_ba = super::openspec_bin(None, &env(&[("PATH", &ba)]), &no_prefix, &[]);
         assert_eq!(result_ba.found.map(|f| f.path), Some(b.join("openspec")));
     }
 
@@ -793,7 +846,7 @@ mod tests {
         let candidates = super::path_candidates(&path_value);
         assert_eq!(candidates, vec![d.join("openspec")]);
 
-        let result = super::openspec_bin(None, &env(&[("PATH", &path_value)]), &no_prefix);
+        let result = super::openspec_bin(None, &env(&[("PATH", &path_value)]), &no_prefix, &[]);
         assert_eq!(
             result.found,
             Some(super::FoundBin {
@@ -818,6 +871,7 @@ mod tests {
             Some(&g),
             &env(&[("PATH", &d.display().to_string())]),
             &no_prefix,
+            &[],
         );
         assert_eq!(
             result.found,
@@ -843,6 +897,7 @@ mod tests {
             Some(&configured),
             &env(&[("PATH", &d.display().to_string())]),
             &no_prefix,
+            &[],
         );
         assert_eq!(
             result.found,
@@ -860,7 +915,7 @@ mod tests {
         let scratch = ScratchDir::new();
         let configured = scratch.path().join("nowhere").join("openspec");
 
-        let result = super::openspec_bin(Some(&configured), &env(&[]), &no_prefix);
+        let result = super::openspec_bin(Some(&configured), &env(&[]), &no_prefix, &[]);
         assert_eq!(result.found, None);
         assert_eq!(result.problems.len(), 1);
         assert!(result.problems[0].contains(&configured.display().to_string()));
@@ -902,6 +957,7 @@ mod tests {
                 ("HOME", &home.display().to_string()),
             ]),
             &no_prefix,
+            &[],
         );
         assert_eq!(
             result.found,
@@ -923,6 +979,7 @@ mod tests {
             None,
             &env(&[("HOME", &home.display().to_string())]),
             &no_prefix,
+            &[],
         );
         assert_eq!(
             result.found.map(|f| f.path),
@@ -948,6 +1005,7 @@ mod tests {
             None,
             &env(&[("HOME", &home.display().to_string())]),
             &no_prefix,
+            &[],
         );
         assert_eq!(
             result.found.map(|f| f.path),
@@ -965,6 +1023,7 @@ mod tests {
             None,
             &env(&[("HOME", &home1.display().to_string())]),
             &no_prefix,
+            &[],
         );
         assert_eq!(
             result1.found,
@@ -987,6 +1046,7 @@ mod tests {
             None,
             &env(&[("HOME", &home2.display().to_string())]),
             &no_prefix,
+            &[],
         );
         assert_eq!(
             result2.found.map(|f| f.path),
@@ -1018,18 +1078,18 @@ mod tests {
             ("HOME", home_str.as_str()),
         ];
         let with_both = env(&both_pairs);
-        let result = super::openspec_bin(None, &with_both, &no_prefix);
+        let result = super::openspec_bin(None, &with_both, &no_prefix, &[]);
         assert_eq!(result.found.map(|f| f.path), Some(nvm_dir_bin.clone()));
 
         // A blank NVM_DIR falls through to the default HOME-based root.
         let blank_pairs = [("NVM_DIR", "   "), ("HOME", home_str.as_str())];
         let with_blank = env(&blank_pairs);
-        let result = super::openspec_bin(None, &with_blank, &no_prefix);
+        let result = super::openspec_bin(None, &with_blank, &no_prefix, &[]);
         assert_eq!(result.found.map(|f| f.path), Some(home_bin));
 
         // Neither variable available: no binary and no panic.
         let with_neither = env(&[]);
-        let result = super::openspec_bin(None, &with_neither, &no_prefix);
+        let result = super::openspec_bin(None, &with_neither, &no_prefix, &[]);
         assert_eq!(result.found, None);
     }
 
@@ -1057,7 +1117,7 @@ mod tests {
         let pairs = [("PATH", d_str.as_str()), ("HOME", home_str.as_str())];
         let lookup = env(&pairs);
 
-        let result = super::openspec_bin(Some(&configured), &lookup, &no_prefix);
+        let result = super::openspec_bin(Some(&configured), &lookup, &no_prefix, &[]);
         assert_eq!(
             result.found,
             Some(super::FoundBin {
@@ -1069,7 +1129,7 @@ mod tests {
 
         // Dropping the configured argument yields the PATH answer, so the
         // ordering itself is what is under test.
-        let dropped = super::openspec_bin(None, &lookup, &no_prefix);
+        let dropped = super::openspec_bin(None, &lookup, &no_prefix, &[]);
         assert_eq!(
             dropped.found,
             Some(super::FoundBin {
@@ -1091,7 +1151,7 @@ mod tests {
         let home_str = home.display().to_string();
         let pairs = [("PATH", d_str.as_str()), ("HOME", home_str.as_str())];
         let lookup = env(&pairs);
-        let result = super::openspec_bin(None, &lookup, &no_prefix);
+        let result = super::openspec_bin(None, &lookup, &no_prefix, &[]);
         assert_eq!(
             result.found,
             Some(super::FoundBin {
@@ -1114,7 +1174,7 @@ mod tests {
                 None => vec![],
             };
             let lookup = env(&pairs);
-            let result = super::openspec_bin(None, &lookup, &hook);
+            let result = super::openspec_bin(None, &lookup, &hook, &[]);
             assert_eq!(
                 result.found,
                 Some(super::FoundBin {
@@ -1144,7 +1204,7 @@ mod tests {
             ("HOME", home_str.as_str()),
         ];
         let lookup = env(&pairs);
-        let result = super::openspec_bin(None, &lookup, &hook);
+        let result = super::openspec_bin(None, &lookup, &hook, &[]);
         assert_eq!(
             result.found,
             Some(super::FoundBin {
@@ -1168,7 +1228,7 @@ mod tests {
         let path_only_str = path_only.display().to_string();
         let pairs = [("PATH", path_only_str.as_str())];
         let lookup = env(&pairs);
-        let result = super::openspec_bin(None, &lookup, &hook);
+        let result = super::openspec_bin(None, &lookup, &hook, &[]);
         assert_eq!(
             result.found,
             Some(super::FoundBin {
@@ -1186,7 +1246,7 @@ mod tests {
         let hook = || Some(n.clone());
 
         let lookup = env(&[]);
-        let result = super::openspec_bin(None, &lookup, &hook);
+        let result = super::openspec_bin(None, &lookup, &hook, &[]);
         assert_eq!(result.found, None);
         assert!(result.problems.is_empty());
     }
@@ -1344,7 +1404,13 @@ mod tests {
         mkdir(&d);
 
         let home = root.join("home");
-        mkdir(&home.join(".nvm").join("versions").join("node").join("v20.0.0"));
+        mkdir(
+            &home
+                .join(".nvm")
+                .join("versions")
+                .join("node")
+                .join("v20.0.0"),
+        );
 
         let n = root.join("n");
         mkdir(&n);

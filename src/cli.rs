@@ -1379,7 +1379,7 @@ mod tests {
         let lookup = env(&pairs);
         let hook = || super::npm_prefix_via(&npm);
 
-        let result = crate::resolve::openspec_bin(None, &lookup, &hook);
+        let result = crate::resolve::openspec_bin(None, &lookup, &hook, &[]);
         assert_eq!(
             result.found,
             Some(crate::resolve::FoundBin {
@@ -1410,7 +1410,7 @@ mod tests {
         let lookup = env(&pairs);
         let hook = || super::npm_prefix_via(&npm);
 
-        let result = crate::resolve::openspec_bin(None, &lookup, &hook);
+        let result = crate::resolve::openspec_bin(None, &lookup, &hook, &[]);
         assert_eq!(result.found, None);
         assert!(result.problems.is_empty());
     }

@@ -162,7 +162,7 @@ pub struct Collaborators {
 /// environment where its interpreter resolves". When `PATH` is not inherited at all, the
 /// overlay is `bin_parent` alone, with no trailing separator. A pure function, deliberately:
 /// it derives nothing from the filesystem and decides nothing about which probe step found
-/// the binary — the same rule applies uniformly to all four.
+/// the binary — the same rule applies uniformly to all five.
 fn openspec_path_overlay(
     bin_parent: &Path,
     env: &dyn Fn(&str) -> Option<String>,
@@ -218,7 +218,8 @@ pub fn start_collaborators(
     let git_cli = crate::cli::git_cli_via(git);
     let mut problems = config.problems.clone();
 
-    let resolution = crate::resolve::openspec_bin(config.openspec_bin.as_deref(), env, npm_hook);
+    let resolution =
+        crate::resolve::openspec_bin(config.openspec_bin.as_deref(), env, npm_hook, &[]);
     let overlay: Vec<(String, String)> = resolution
         .found
         .as_ref()

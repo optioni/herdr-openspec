@@ -81,6 +81,7 @@ impl Provenance {
                 resolve::BinSource::Path => "PATH".to_string(),
                 resolve::BinSource::Nvm => "nvm".to_string(),
                 resolve::BinSource::NpmPrefix => "npm prefix -g".to_string(),
+                resolve::BinSource::Homebrew => "Homebrew".to_string(),
             },
             Provenance::SoleIntegration => "the sole installed integration".to_string(),
             Provenance::LastResort => "the last resort".to_string(),
