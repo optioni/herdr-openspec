@@ -33,14 +33,17 @@ file other than `src/ui/layout.rs` for a `.chars()`-based width measurement now 
 construction with what `ratatui::buffer::Buffer::set_string` itself consumes — the
 crate reads `config.toml` and derives and records agent-name mappings under
 `HERDR_PLUGIN_STATE_DIR`, it can locate the OpenSpec repository root and the
-`openspec` binary — the binary chain's fourth probe step and the environment
-lookup its `PATH`/nvm steps read both arrive as fields on `Startup`
+`openspec` binary — the binary chain's fourth probe step, its fifth step's
+Homebrew prefix list, and the environment lookup its `PATH`/nvm steps read
+all arrive as fields on `Startup`
 (`degraded-states`' addition), injected on the same terms as `state_dir`:
 `run` passes `config::env_lookup()` for the environment and
 `cli::npm_probe_hook` (itself a thin wrapper around the real `npm prefix -g`
 binding, named to keep the CLI seam's own name out of `src/ui/`) for the
-fourth-step hook, so a test can drive "nothing resolves" without touching
-the real process environment. When every probe step comes up empty, the
+fourth-step hook and `resolve::HOMEBREW_PREFIXES` for the fifth step's list
+(`homebrew-probe`'s addition; a test passes its own list or `&[]`), so a test
+can drive "nothing resolves" without touching the real process environment or
+the machine's real Homebrew. When every probe step comes up empty, the
 dashboard runs in **file mode** — no `openspec` binary backs it, every
 change is file-sourced, and the header badges `file mode` once the header is
 wide enough to hold it — never an error screen. Every change's own
@@ -244,8 +247,9 @@ Important files:
 - **Herdr** 0.7.0 or later, for the plugin manifest format and the `plugin`,
   `agent`, and `pane` CLI surfaces.
 - **OpenSpec CLI** (`@fission-ai/openspec`) — optional for the plugin at runtime,
-  required for the workflow below. Installed under nvm here, so it is not always on
-  the `PATH` a non-login shell inherits.
+  required for the workflow below. Installed by Homebrew here, at
+  `/opt/homebrew/bin/openspec`, so it is not always on the `PATH` a non-login shell
+  inherits.
 - **git** — optional at runtime, for `worktree-overlay`'s linked-worktree family;
   measured at 2.48.1 on the reference machine.
 - **Platforms:** macOS and Linux. Windows is out of scope.

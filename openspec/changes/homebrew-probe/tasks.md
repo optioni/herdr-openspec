@@ -180,7 +180,7 @@ Planning-time selection counts below come from
 ## 5. Documentation
 <!-- kind: operational -->
 
-- [ ] 5.1 Rewrite in `SPEC.md` → the binary probe chain (audience: implementers):
+- [x] 5.1 Rewrite in `SPEC.md` → the binary probe chain (audience: implementers):
       - Append step 5 to the list, which ends at step 4 on line 303.
       - Extend the paragraph "Steps 3 and 4 exist because…" (line 316) to say why step 5
         exists and why it is a fixed, injected list.
@@ -191,7 +191,7 @@ Planning-time selection counts below come from
 
       Durable because `SPEC.md` is the design contract and states the chain's shape. Net
       about +8 lines. Nothing else there goes stale.
-- [ ] 5.2 Rewrite in `AGENTS.md` (the file `CLAUDE.md` links to; audience: every agent
+- [x] 5.2 Rewrite in `AGENTS.md` (the file `CLAUDE.md` links to; audience: every agent
       session):
       - In Environment's "OpenSpec CLI" bullet, replace "Installed under nvm here" with the
         Homebrew install at `/opt/homebrew/bin/openspec`.
@@ -201,12 +201,12 @@ Planning-time selection counts below come from
       Durable because a future change that reaches the real machine in a test would otherwise
       miss it. Net 0 to +2 lines, replacing false text. `worktree-agents` edits other
       paragraphs of this file, so merge carefully.
-- [ ] 5.3 Rewrite in `openspec/config.yaml` → `context` the sentence saying the `openspec` CLI
+- [x] 5.3 Rewrite in `openspec/config.yaml` → `context` the sentence saying the `openspec` CLI
       is nvm-installed (audience: every OpenSpec agent, which receives it verbatim). It is
       Homebrew-installed at `/opt/homebrew/bin/openspec`; prepend `/opt/homebrew/bin` when it
       is not on `PATH`. Leave the `make` command names and the fixture wording intact, since
       `tests/doc_contract.rs` binds them. Net 0 lines.
-- [ ] 5.4 VERIFY: `cargo test --all-features --test doc_contract` is green.
+- [x] 5.4 VERIFY: `cargo test --all-features --test doc_contract` is green.
       `grep -n "nvm-installed\|Installed under nvm" AGENTS.md openspec/config.yaml` prints
       nothing. Commit: `docs: record the Homebrew probe step and the Homebrew-installed CLI`.
 

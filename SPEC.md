@@ -301,6 +301,8 @@ the first usable candidate and probing no further:
    `v10.0.0` precedes `v9.99.99`) with an unparseable name kept and sorted
    after every parsed version
 4. `$(npm prefix -g)/bin/openspec`
+5. `<prefix>/bin/openspec` for each Homebrew prefix in `resolve::HOMEBREW_PREFIXES`
+   — `/opt/homebrew`, `/home/linuxbrew/.linuxbrew`, `/usr/local`, in that order
 
 A step matches only a candidate that is, following symbolic links, an
 executable regular file — a directory named `openspec` does not qualify, and
@@ -323,6 +325,17 @@ binding is `cli::npm_prefix`: it starts the npm program with the arguments `pref
 and `-g`, reads its **stdout only**, trimmed — on the reference machine `npm` writes
 unrelated shell-plugin noise to stderr — and reports no prefix when the program could
 not be started, exited non-zero, or produced empty output.
+
+Step 5 exists because Homebrew's own `openspec` formula is a third common install, and
+`brew shellenv` puts its prefix on `PATH` only from `.zprofile`, which a pane does not
+run. Step 4 cannot find it either, since its `npm` is looked up through that same `PATH`.
+The step reads no `HOMEBREW_PREFIX` and runs no `brew --prefix`: an environment that
+carries the variable already resolves at step 2. It stats a fixed list of Homebrew's
+documented default prefixes, Apple Silicon first so a stale Rosetta install under
+`/usr/local` never wins. The list reaches `resolve::openspec_bin` as an injected
+`&[&str]` on the npm hook's terms, named only by `ui::run` (`WIRED` leg 8), so no test
+consults the machine's real Homebrew. It comes last so that nvm and the active `npm` keep
+their precedence, and it labels its winner `Homebrew`.
 
 ### Refresh
 
@@ -1005,11 +1018,11 @@ is what both `agent start` and `agent prompt` name **positionally**, as the
 agent to act on. The **prompt text itself** names `<change>`, the real change
 name, not the derived name, because OpenSpec knows a change by its real name and
 never by a Herdr-legal agent identifier that may be truncated or hashed. It also
-names `<openspec>`, the **resolved absolute path** the plugin's own four-step
+names `<openspec>`, the **resolved absolute path** the plugin's own five-step
 probe found — never the bare command: measured, a fresh interactive `zsh` with a
 reset `PATH` reports `openspec not found` even where the probe succeeds, because
-nvm is lazy-loaded, so a bare command would fail for the agent even when the
-plugin found one. One CLI-driven shape serves every agent kind, `claude`
+nvm is lazy-loaded, and Homebrew's `brew shellenv` runs only from `.zprofile`, so a
+bare command would fail for the agent even when the plugin found one. One CLI-driven shape serves every agent kind, `claude`
 included: the text depends on the intent, the change and the path only, never on
 the kind, so adding a client requires no mapping at all. `config.toml`'s
 `[prompts.<kind>]` table overrides one intent's text for one kind, substituting
@@ -1312,7 +1325,7 @@ is tested against scratch `#!/bin/sh` programs rather than the real `openspec`,
   plugin-local mapping to per-change badges and one unattributed count, covering all
   three tiers including the deliberate non-attribution case
 - `resolve::find_repo` and `resolve::openspec_bin` — the upward walk for
-  `openspec/` and the four-step binary probe chain, both tested against a
+  `openspec/` and the five-step binary probe chain, both tested against a
   purpose-built scratch directory tree under `std::env::temp_dir()`, not a
   faked filesystem layer
 - `watch::classify`, `watch::invalidate`, `watch::Debounce`, and
