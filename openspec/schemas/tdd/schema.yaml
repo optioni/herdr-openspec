@@ -473,6 +473,16 @@ artifacts:
       nested agent guidance, write each rule into the NARROWEST file that covers it — a
       rule concerning one package never belongs in the root file.
 
+      The always-loaded file is for what EVERY task needs. A rule that matters only for
+      one area, one kind of file, or one procedure goes into an on-demand document
+      instead, and the always-loaded file carries a one-line pointer to it: the path and
+      when to read it. A pointer, not an include or import directive — those load the
+      content at session start anyway. Extend the on-demand document that already covers
+      the topic; create one only when none does, and add its pointer in the same task.
+      Which on-demand mechanisms this repository uses (nested guidance files, path-scoped
+      rules, reference documents) comes from the project context; when it names none, a
+      reference document plus a pointer works for every agent.
+
       Prefer EDITING an existing rule over adding a new one. When this change supersedes,
       narrows, or corrects something already written, rewrite that entry in place and
       delete what is now false rather than appending a second entry beside it. A
@@ -798,8 +808,13 @@ apply:
     Tell it to report NEEDS_CONTEXT rather than searching for anything not provided, and to
     stop and report rather than grind: the same failure surviving three consecutive fixes is
     a BLOCKED, and a file the manifest does not name is a NEEDS_CONTEXT. Both are complete
-    outcomes. Re-dispatch the group to a fresh implementer with that evidence rather than
-    escalating — budget two per group — because every turn pays for the whole context again and
+    outcomes. A task colliding with an existing assertion that a spec scenario or an earlier
+    change pinned is a NEEDS_DECISION: the implementer quotes both and stops rather than
+    rewriting the assertion, and the orchestrator escalates it to the user instead of
+    re-dispatching. Gate each group on the full build, not only the targets it touched, and
+    read its diff for modified pre-existing assertions that no task line or delta scenario
+    accounts for. For BLOCKED and NEEDS_CONTEXT, re-dispatch the group to a fresh implementer
+    with that evidence rather than escalating — budget two per group — because every turn pays for the whole context again and
     a long agent that is still failing is the most expensive thing in the run. After
     completing group N, dispatch all remaining groups marked `<!-- parallel-after: N -->`
     simultaneously, then gate each. Dispatch the Change Review group to the reviewer agent

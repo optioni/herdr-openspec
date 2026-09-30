@@ -87,7 +87,9 @@
      rewrites, or removes, and gives the durable reason it stays useful. A group adding
      more than ~10 lines to one document must also say what it corrects or replaces
      there. Where a repository keeps nested agent guidance, name the NARROWEST file that
-     covers the rule. -->
+     covers the rule. A rule that only one area, file kind, or procedure needs goes into
+     an on-demand document referenced by a one-line pointer from the always-loaded file,
+     never inline in it. -->
 
 - [ ] N+1.1 <Add|Rewrite|Remove> in <doc>: <section> (audience: <who>) — <what changes, what it replaces, and why it stays useful>
 
