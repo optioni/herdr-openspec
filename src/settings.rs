@@ -439,6 +439,7 @@ mod tests {
             resolve::BinSource::Path,
             resolve::BinSource::Nvm,
             resolve::BinSource::NpmPrefix,
+            resolve::BinSource::Homebrew,
         ];
         let labels: Vec<String> = sources
             .iter()
@@ -455,6 +456,10 @@ mod tests {
             unique.len(),
             labels.len(),
             "the labels for two steps that resolved the same path must still differ: {labels:?}"
+        );
+        assert_eq!(
+            Provenance::Probe(resolve::BinSource::Homebrew).label(),
+            "Homebrew"
         );
     }
 

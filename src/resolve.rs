@@ -1194,7 +1194,24 @@ mod tests {
     #[test]
     fn nothing_anywhere_is_a_supported_state_not_a_fault() {
         let lookup = env(&[]);
-        let result = super::openspec_bin(None, &lookup, &no_prefix);
+        let result = super::openspec_bin(None, &lookup, &no_prefix, &[]);
+        assert_eq!(result.found, None);
+        assert!(result.problems.is_empty());
+
+        // A prefix that is empty, and one that was never created, are
+        // ordinary misses: no binary, no problem, no panic.
+        let scratch = ScratchDir::new();
+        let empty = scratch.path().join("empty");
+        mkdir(&empty);
+        let never = scratch.path().join("never-created");
+        let empty_str = empty.display().to_string();
+        let never_str = never.display().to_string();
+        let result = super::openspec_bin(
+            None,
+            &lookup,
+            &no_prefix,
+            &[empty_str.as_str(), never_str.as_str()],
+        );
         assert_eq!(result.found, None);
         assert!(result.problems.is_empty());
     }
@@ -1320,32 +1337,199 @@ mod tests {
         let scratch = ScratchDir::new();
         let root = scratch.path();
 
+        // Steps 1-4 all miss: a PATH directory with no `openspec`, an nvm
+        // tree whose one version directory has no `bin/`, and an npm prefix
+        // with no `bin/openspec`.
         let d = root.join("d");
-        write_with_mode(&d.join("openspec"), b"#!/bin/sh\n", 0o755);
+        mkdir(&d);
 
         let home = root.join("home");
-        write_with_mode(&nvm_bin(&home, "v20.0.0"), b"#!/bin/sh\n", 0o755);
+        mkdir(&home.join(".nvm").join("versions").join("node").join("v20.0.0"));
 
         let n = root.join("n");
-        write_with_mode(&n.join("bin").join("openspec"), b"#!/bin/sh\n", 0o755);
+        mkdir(&n);
 
         // An empty directory too, since it is the entry a listing-only
         // comparison could miss but the extended (1.4) snapshot cannot.
         let empty = root.join("empty");
         mkdir(&empty);
 
+        // Step 5 resolves `B` through `[E, B]`.
+        let b = root.join("b");
+        write_with_mode(&b.join("bin").join("openspec"), b"#!/bin/sh\n", 0o755);
+
         let d_str = d.display().to_string();
         let home_str = home.display().to_string();
+        let empty_str = empty.display().to_string();
+        let b_str = b.display().to_string();
+        let prefixes = [empty_str.as_str(), b_str.as_str()];
         let pairs = [("PATH", d_str.as_str()), ("HOME", home_str.as_str())];
         let lookup = env(&pairs);
         let hook = || Some(n.clone());
 
         let before = snapshot(root);
-        let first = super::openspec_bin(None, &lookup, &hook);
-        let second = super::openspec_bin(None, &lookup, &hook);
+        let first = super::openspec_bin(None, &lookup, &hook, &prefixes);
+        let second = super::openspec_bin(None, &lookup, &hook, &prefixes);
         let after = snapshot(root);
 
         assert_eq!(before, after);
         assert_eq!(first, second);
+        assert_eq!(
+            first.found,
+            Some(super::FoundBin {
+                path: b.join("bin").join("openspec"),
+                source: super::BinSource::Homebrew,
+            })
+        );
+    }
+
+    #[test]
+    fn a_homebrew_prefix_is_searched_when_nothing_earlier_resolves() {
+        let scratch = ScratchDir::new();
+        let b = scratch.path().join("b");
+        write_with_mode(&b.join("bin").join("openspec"), b"#!/bin/sh\n", 0o755);
+        let b_str = b.display().to_string();
+
+        let lookup = env(&[]);
+        let result = super::openspec_bin(None, &lookup, &no_prefix, &[b_str.as_str()]);
+        assert_eq!(
+            result.found,
+            Some(super::FoundBin {
+                path: b.join("bin").join("openspec"),
+                source: super::BinSource::Homebrew,
+            })
+        );
+        assert!(result.problems.is_empty());
+
+        // The list is what produced it.
+        let result = super::openspec_bin(None, &lookup, &no_prefix, &[]);
+        assert_eq!(result.found, None);
+
+        // Step 5 reads no environment variable: `HOMEBREW_PREFIX` alone
+        // resolves nothing.
+        let pairs = [("HOMEBREW_PREFIX", b_str.as_str())];
+        let lookup = env(&pairs);
+        let result = super::openspec_bin(None, &lookup, &no_prefix, &[]);
+        assert_eq!(result.found, None);
+    }
+
+    #[test]
+    fn the_npm_prefix_outranks_the_homebrew_prefixes() {
+        let scratch = ScratchDir::new();
+        let n = scratch.path().join("n");
+        write_with_mode(&n.join("bin").join("openspec"), b"#!/bin/sh\n", 0o755);
+        let b = scratch.path().join("b");
+        write_with_mode(&b.join("bin").join("openspec"), b"#!/bin/sh\n", 0o755);
+        let b_str = b.display().to_string();
+        let hook = || Some(n.clone());
+
+        let lookup = env(&[]);
+        let result = super::openspec_bin(None, &lookup, &hook, &[b_str.as_str()]);
+        assert_eq!(
+            result.found,
+            Some(super::FoundBin {
+                path: n.join("bin").join("openspec"),
+                source: super::BinSource::NpmPrefix,
+            })
+        );
+    }
+
+    #[test]
+    fn homebrew_prefixes_are_tried_in_list_order_skipping_one_without_a_binary() {
+        let scratch = ScratchDir::new();
+        let root = scratch.path();
+        let e = root.join("e");
+        mkdir(&e);
+        let b1 = root.join("b1");
+        write_with_mode(&b1.join("bin").join("openspec"), b"#!/bin/sh\n", 0o755);
+        let b2 = root.join("b2");
+        write_with_mode(&b2.join("bin").join("openspec"), b"#!/bin/sh\n", 0o755);
+        let lookup = env(&[]);
+        let s = |p: &Path| p.display().to_string();
+
+        let (e_s, b1_s, b2_s) = (s(&e), s(&b1), s(&b2));
+        let result = super::openspec_bin(
+            None,
+            &lookup,
+            &no_prefix,
+            &[e_s.as_str(), b1_s.as_str(), b2_s.as_str()],
+        );
+        assert_eq!(
+            result.found,
+            Some(super::FoundBin {
+                path: b1.join("bin").join("openspec"),
+                source: super::BinSource::Homebrew,
+            })
+        );
+
+        // A directory, a non-executable file, and a dangling link are each
+        // skipped by the same usability rule.
+        let dir = root.join("dir");
+        mkdir(&dir.join("bin").join("openspec"));
+        let plain = root.join("plain");
+        write_with_mode(&plain.join("bin").join("openspec"), b"#!/bin/sh\n", 0o644);
+        let dangling = root.join("dangling");
+        symlink(
+            &root.join("does-not-exist"),
+            &dangling.join("bin").join("openspec"),
+        );
+        let (dir_s, plain_s, dangling_s) = (s(&dir), s(&plain), s(&dangling));
+        let result = super::openspec_bin(
+            None,
+            &lookup,
+            &no_prefix,
+            &[
+                dir_s.as_str(),
+                plain_s.as_str(),
+                dangling_s.as_str(),
+                b2_s.as_str(),
+            ],
+        );
+        assert_eq!(
+            result.found,
+            Some(super::FoundBin {
+                path: b2.join("bin").join("openspec"),
+                source: super::BinSource::Homebrew,
+            })
+        );
+    }
+
+    #[test]
+    fn homebrew_candidates_drop_empty_blank_and_relative_entries() {
+        assert_eq!(
+            super::homebrew_candidates(&["", "   ", "rel", "/b"]),
+            vec![std::path::PathBuf::from("/b/bin/openspec")]
+        );
+    }
+
+    #[test]
+    fn the_production_prefix_list_puts_apple_silicon_first_and_intel_last() {
+        assert_eq!(
+            super::HOMEBREW_PREFIXES,
+            &["/opt/homebrew", "/home/linuxbrew/.linuxbrew", "/usr/local"]
+        );
+        for prefix in super::HOMEBREW_PREFIXES {
+            assert!(Path::new(prefix).is_absolute(), "{prefix} must be absolute");
+        }
+    }
+
+    #[test]
+    fn the_composition_passes_the_production_homebrew_prefix_list() {
+        // A behavioural test would resolve whatever Homebrew the machine
+        // running the suite holds, so this reads the source instead.
+        let source = include_str!("resolve.rs");
+        let start = source
+            .find("pub fn openspec_bin_from_env(")
+            .expect("the composition exists");
+        let body: String = source[start..]
+            .lines()
+            .take_while(|line| *line != "}")
+            .map(|line| line.split("//").next().unwrap_or(""))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            body.contains("HOMEBREW_PREFIXES"),
+            "openspec_bin_from_env must pass HOMEBREW_PREFIXES: {body}"
+        );
     }
 }
