@@ -115,6 +115,10 @@ pub struct Startup<'a> {
     /// `HERDR_PROGRAM`'s established pattern: the dashboard shell reaches a production CLI
     /// binding only through a name that says nothing about the CLI seam itself.
     pub npm_hook: &'a dyn Fn() -> Option<std::path::PathBuf>,
+    /// The probe's fifth-step prefix list (`homebrew-probe`), injected on the same terms as
+    /// `npm_hook`: `run` passes `resolve::HOMEBREW_PREFIXES`; a test passes `&[]` or a scratch
+    /// prefix so no test consults the machine's real Homebrew.
+    pub homebrew_prefixes: &'a [&'a str],
     /// `mouse-input`'s addition, on exactly `state_dir`'s and `env`'s terms: the
     /// reason the terminal refused mouse capture, or `None` when it was entered.
     /// `run` fills it from the `TerminalGuard`'s own `mouse_problem()` — a field
@@ -128,6 +132,16 @@ pub struct Startup<'a> {
     /// the worker absorbs, not a second way to say the same thing. Reaches `refresh::start`
     /// through `start_collaborators`, below.
     pub git: &'a Path,
+}
+
+/// The three bindings the binary probe needs, bundled so `start_collaborators` stays under
+/// clippy's parameter limit without an `#[allow(`: `Startup`'s `env`, `npm_hook`, and
+/// `homebrew_prefixes`, read by `resolve::openspec_bin`. Derives nothing, `Default` included:
+/// a neutral bundle would be a silent way to probe nothing.
+pub struct ProbeBindings<'a> {
+    pub env: &'a dyn Fn(&str) -> Option<String>,
+    pub npm_hook: &'a dyn Fn() -> Option<std::path::PathBuf>,
+    pub homebrew_prefixes: &'a [&'a str],
 }
 
 /// The live tier's three collaborators, plus any problem folded in while
@@ -208,8 +222,7 @@ pub fn start_collaborators(
     config: &Config,
     herdr: &Path,
     state_dir: Option<&Path>,
-    env: &dyn Fn(&str) -> Option<String>,
-    npm_hook: &dyn Fn() -> Option<std::path::PathBuf>,
+    probe: ProbeBindings<'_>,
     // `worktree-changes` group 8: built into a git CLI handle and passed into
     // `refresh::start`, never optional (design.md -> Decision 14) — an absent `git`
     // binary is a degraded state the worker itself absorbs.
@@ -218,13 +231,17 @@ pub fn start_collaborators(
     let git_cli = crate::cli::git_cli_via(git);
     let mut problems = config.problems.clone();
 
-    let resolution =
-        crate::resolve::openspec_bin(config.openspec_bin.as_deref(), env, npm_hook, &[]);
+    let resolution = crate::resolve::openspec_bin(
+        config.openspec_bin.as_deref(),
+        probe.env,
+        probe.npm_hook,
+        &[],
+    );
     let overlay: Vec<(String, String)> = resolution
         .found
         .as_ref()
         .and_then(|found| found.path.parent())
-        .map(|parent| openspec_path_overlay(parent, env))
+        .map(|parent| openspec_path_overlay(parent, probe.env))
         .unwrap_or_default();
     let resolved_bin = resolution.found.as_ref().map(|found| found.path.clone());
     // `settings-window`: retained before `resolution` is moved whole into `worker_cli` below —
@@ -320,8 +337,11 @@ pub fn run_wired<B: Backend, E: EventSource>(
         startup.config,
         startup.herdr,
         startup.state_dir,
-        startup.env,
-        startup.npm_hook,
+        ProbeBindings {
+            env: startup.env,
+            npm_hook: startup.npm_hook,
+            homebrew_prefixes: startup.homebrew_prefixes,
+        },
         startup.git,
     );
     // File mode has no worker to resolve the archive later, so the archive it never opens is
@@ -476,6 +496,7 @@ pub fn run() -> Result<(), StartError> {
         state_dir: state_dir.as_deref(),
         env: &env,
         npm_hook: &crate::cli::npm_probe_hook,
+        homebrew_prefixes: crate::resolve::HOMEBREW_PREFIXES,
         mouse_problem: guard.mouse_problem(),
         // `worktree-changes` group 7: `WIRED`'s leg 7 now rejects a bare `"git"` literal here —
         // see design.md -> Decision 14.
@@ -3300,6 +3321,7 @@ apply:
                 state_dir,
                 env: &no_env,
                 npm_hook: &no_npm_hook,
+                homebrew_prefixes: &[],
                 mouse_problem: None,
                 git: &git,
             };
@@ -3335,6 +3357,7 @@ apply:
             state_dir: Option<&'a Path>,
             env: &'a dyn Fn(&str) -> Option<String>,
             npm_hook: &'a dyn Fn() -> Option<PathBuf>,
+            homebrew_prefixes: &'a [&'a str],
             /// `mouse-input`'s addition, on `env`'s terms: the reason a terminal
             /// refused mouse capture, as `TerminalGuard::mouse_problem` would
             /// have reported it. `run_wired_at` passes `None`, which is what
@@ -3366,6 +3389,7 @@ apply:
                 state_dir: p.state_dir,
                 env: p.env,
                 npm_hook: p.npm_hook,
+                homebrew_prefixes: p.homebrew_prefixes,
                 mouse_problem: p.mouse_problem,
                 git: p.git,
             };
@@ -3686,6 +3710,7 @@ apply:
                 state_dir: None,
                 env: &no_env,
                 npm_hook: &no_npm_hook,
+                homebrew_prefixes: &[],
                 mouse_problem: None,
                 git: &git,
             };
@@ -3918,6 +3943,7 @@ esac
                 state_dir,
                 env: &no_env,
                 npm_hook: &no_npm_hook,
+                homebrew_prefixes: &[],
                 mouse_problem: None,
                 git: &git,
             };
@@ -5235,6 +5261,7 @@ esac
                 state_dir: Some(state.path()),
                 env: &no_env,
                 npm_hook: &no_npm_hook,
+                homebrew_prefixes: &[],
                 mouse_problem: None,
                 git: &git,
             };
@@ -5399,6 +5426,7 @@ esac
                 state_dir: None,
                 env: &no_env,
                 npm_hook: &no_npm_hook,
+                homebrew_prefixes: &[],
                 mouse_problem: None,
                 git: &git,
             };
@@ -5440,6 +5468,7 @@ esac
                     state_dir: None,
                     env: &no_env,
                     npm_hook: &no_npm_hook,
+                    homebrew_prefixes: &[],
                     mouse_problem: None,
                     git: &git,
                 },
@@ -5469,6 +5498,7 @@ esac
                     state_dir: None,
                     env: &no_env,
                     npm_hook: &resolving_npm,
+                    homebrew_prefixes: &[],
                     mouse_problem: None,
                     git: &git,
                 },
@@ -5485,6 +5515,79 @@ esac
                  the injected npm hook, proving the probe reached step 4 rather than a cached \
                  negative"
             );
+        }
+
+        /// `homebrew-probe` :: `openspec-binary` "An outer test drives a failing probe without
+        /// touching the machine" (the Homebrew-list control). A pane whose only `openspec`
+        /// sits under a Homebrew prefix leaves file mode. `B` is a scratch prefix, never the
+        /// real list, so the machine's own Homebrew decides nothing here.
+        #[test]
+        fn a_homebrew_only_install_leaves_file_mode() {
+            for width in [120u16, 60u16] {
+                let scratch = scratch_repo_with_alpha();
+                let root = scratch.path();
+                let herdr = root.join("does-not-exist-herdr");
+                let git = root.join("does-not-exist-git");
+                let prefix = ScratchDir::new();
+                let log = root.join("openspec-via-homebrew.log");
+                let _ = openspec_script(prefix.path(), &log, root);
+                let b = prefix.path().display().to_string();
+                let prefixes = [b.as_str()];
+
+                let predicate = || log_lines(&log) >= 1;
+                let (result, rows) = run_wired_probed(
+                    ProbedStartup {
+                        width,
+                        root,
+                        config: &Config::default(),
+                        herdr: &herdr,
+                        state_dir: None,
+                        env: &no_env,
+                        npm_hook: &no_npm_hook,
+                        homebrew_prefixes: &prefixes,
+                        mouse_problem: None,
+                        git: &git,
+                    },
+                    &predicate,
+                );
+                let dashboard = result.expect("a Homebrew-resolved binary is a supported state");
+                assert!(
+                    !dashboard.file_mode,
+                    "width {width}: a binary under an injected Homebrew prefix must leave file mode"
+                );
+                assert!(
+                    log_lines(&log) >= 1,
+                    "width {width}: the stand-in under the injected prefix must be the binary that ran"
+                );
+                if width == 120 {
+                    assert!(
+                        !rows.iter().any(|row| row.contains("file mode")),
+                        "width {width}: no file mode badge may be drawn: {rows:?}"
+                    );
+                }
+
+                let (control, _rows) = run_wired_probed(
+                    ProbedStartup {
+                        width,
+                        root,
+                        config: &Config::default(),
+                        herdr: &herdr,
+                        state_dir: None,
+                        env: &no_env,
+                        npm_hook: &no_npm_hook,
+                        homebrew_prefixes: &[],
+                        mouse_problem: None,
+                        git: &git,
+                    },
+                    &|| true,
+                );
+                assert!(
+                    control
+                        .expect("no usable binary is a supported state")
+                        .file_mode,
+                    "width {width}: the same run with an empty prefix list must be file mode"
+                );
+            }
         }
 
         /// `dashboard-loop` :: "`file_mode` is set by the composition root and by nothing
@@ -5734,6 +5837,7 @@ esac
                     state_dir: None,
                     env: &env,
                     npm_hook: &no_npm_hook,
+                    homebrew_prefixes: &[],
                     mouse_problem: None,
                     git: &git,
                 },
@@ -5747,6 +5851,64 @@ esac
                 printed_path,
                 format!("{}:{inherited}", bin_parent.display())
             );
+        }
+
+        /// `refresh-worker` :: "A binary found under a Homebrew prefix gets the same overlay"
+        /// -- step 5 resolves the binary, and the overlay is its own `bin` directory ahead of
+        /// the inherited `PATH`.
+        #[test]
+        fn collaborators_overlay_a_binary_found_under_a_homebrew_prefix() {
+            let scratch = scratch_repo_with_alpha();
+            let root = scratch.path();
+            let path_log = root.join("path-homebrew.log");
+            let prefix = ScratchDir::new();
+            let bin = prefix.path().join("bin");
+            std::fs::create_dir_all(&bin).expect("create the prefix's bin");
+            let script = bin.join("openspec");
+            write_with_mode(
+                &script,
+                format!(
+                    "#!/bin/sh\nprintf '%s\\n' \"$PATH\" >> \"{path_log}\"\n\
+                     printf '%s' '{{\"changes\":[],\"root\":{{\"path\":\"{root}\",\"source\":\"nearest\"}}}}'\n",
+                    path_log = path_log.display(),
+                    root = root.display(),
+                )
+                .as_bytes(),
+                0o755,
+            );
+            let inherited = "/usr/bin:/bin".to_string();
+            let inherited_for_env = inherited.clone();
+            let env = move |name: &str| match name {
+                "PATH" => Some(inherited_for_env.clone()),
+                _ => None,
+            };
+            let config = Config::default();
+            let herdr = root.join("does-not-exist-herdr");
+            let git = root.join("does-not-exist-git");
+            let b = prefix.path().display().to_string();
+            let prefixes = [b.as_str()];
+            let predicate = || log_lines(&path_log) >= 1;
+
+            let (result, _buf) = run_wired_probed(
+                ProbedStartup {
+                    width: 120,
+                    root,
+                    config: &config,
+                    herdr: &herdr,
+                    state_dir: None,
+                    env: &env,
+                    npm_hook: &no_npm_hook,
+                    homebrew_prefixes: &prefixes,
+                    mouse_problem: None,
+                    git: &git,
+                },
+                &predicate,
+            );
+            let _dashboard = result.expect("a Homebrew-resolved binary is a supported state");
+
+            let logged = std::fs::read_to_string(&path_log).expect("path.log should exist");
+            let printed_path = logged.lines().next().expect("PATH printed a first line");
+            assert_eq!(printed_path, format!("{}:{inherited}", bin.display()));
         }
 
         /// `refresh-worker` :: "An absent inherited `PATH` yields the directory alone".
@@ -5781,6 +5943,7 @@ esac
                     state_dir: None,
                     env: &env,
                     npm_hook: &no_npm_hook,
+                    homebrew_prefixes: &[],
                     mouse_problem: None,
                     git: &git,
                 },
@@ -5828,6 +5991,7 @@ esac
                     state_dir: None,
                     env: &env,
                     npm_hook: &no_npm_hook,
+                    homebrew_prefixes: &[],
                     mouse_problem: None,
                     git: &git,
                 },
@@ -5871,8 +6035,11 @@ esac
                 &config,
                 &herdr,
                 None,
-                &no_env,
-                &no_npm_hook,
+                super::super::ProbeBindings {
+                    env: &no_env,
+                    npm_hook: &no_npm_hook,
+                    homebrew_prefixes: &[],
+                },
                 &git,
             );
 
@@ -5950,6 +6117,7 @@ esac
                     state_dir: None,
                     env: &no_env,
                     npm_hook: &no_npm_hook,
+                    homebrew_prefixes: &[],
                     mouse_problem: Some("enable_mouse: no mouse".to_string()),
                     git: &git,
                 },
@@ -6022,6 +6190,7 @@ esac
                     state_dir: None,
                     env: &no_env,
                     npm_hook: &no_npm_hook,
+                    homebrew_prefixes: &[],
                     mouse_problem: None,
                     git: &git,
                 },
@@ -6377,8 +6546,11 @@ esac
                     &config,
                     &herdr,
                     None,
-                    &no_env,
-                    &no_npm_hook,
+                    super::super::ProbeBindings {
+                        env: &no_env,
+                        npm_hook: &no_npm_hook,
+                        homebrew_prefixes: &[],
+                    },
                     &git,
                 );
                 assert_eq!(
