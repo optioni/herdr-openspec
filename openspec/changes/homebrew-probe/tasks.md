@@ -73,13 +73,13 @@ Planning-time selection counts below come from
 ## 2. The composition root injects the Homebrew prefix list
 <!-- kind: behavior -->
 
-- [ ] 2.1 RED: In `ui::tests::wiring`, write the acceptance test
+- [x] 2.1 RED: In `ui::tests::wiring`, write the acceptance test
       `a_homebrew_only_install_leaves_file_mode` at 120×20 and 60×20, with the four assertions
       in design.md → Test Strategy. Also write
       `collaborators_overlay_a_binary_found_under_a_homebrew_prefix`, which asserts that the
       overlay `PATH` is `B/bin:/usr/bin:/bin`. Expect a compile failure on the missing
       `homebrew_prefixes` field and `ProbeBindings`.
-- [ ] 2.2 RED (behavioural): Add `ProbeBindings`, `Startup::homebrew_prefixes` and
+- [x] 2.2 RED (behavioural): Add `ProbeBindings`, `Startup::homebrew_prefixes` and
       `ProbedStartup::homebrew_prefixes`. Reshape `start_collaborators` to
       `(repo, config, herdr, state_dir, probe, git)`, still handing `&[]` to `openspec_bin`.
       Fill every literal and call site exactly as design.md → Contracts lists them. `run`
@@ -87,26 +87,28 @@ Planning-time selection counts below come from
       `p.homebrew_prefixes`. Run
       `cargo test --all-features --lib ui::tests::wiring::a_homebrew_only_install` and record
       that it **fails on `!dashboard.file_mode`**, 1 test selected.
-- [ ] 2.3 GREEN: In `start_collaborators`, hand `probe.homebrew_prefixes` to
+      Observed: `width 120: a binary under an injected Homebrew prefix must leave file mode`.
+- [x] 2.3 GREEN: In `start_collaborators`, hand `probe.homebrew_prefixes` to
       `resolve::openspec_bin`, and read `probe.env` for the overlay. Rewrite the two
       `src/ui/mod.rs` doc comments that design.md → Boundaries lists.
-- [ ] 2.4 CHECK: Contract gate. Run
+- [x] 2.4 CHECK: Contract gate. Run
       `git diff -U0 c261940 -- src | grep -E '^[-+].*(fn openspec_bin\(|fn start_collaborators\(|homebrew_prefixes|ProbeBindings|Homebrew)'`
       and confirm that every changed signature is one design.md → Contracts names, and that
       each named consumer compiles against it.
-- [ ] 2.5 CHECK: No test slice outside `src/resolve.rs` names the real list. Run
+- [x] 2.5 CHECK: No test slice outside `src/resolve.rs` names the real list. Run
       `for f in $(grep -rl HOMEBREW_PREFIXES src); do [ "$f" = src/resolve.rs ] && continue; c=$(grep -n '^#\[cfg(test)\]' "$f" | head -1 | cut -d: -f1); [ -n "$c" ] && echo "$(awk -v c="$c" 'NR>c && !/^[[:space:]]*\/\//' "$f" | grep -c HOMEBREW_PREFIXES) $f"; done`.
       It prints only `0 …` lines. Negative control: add
       `let _ = crate::resolve::HOMEBREW_PREFIXES;` to one test in `src/ui/mod.rs`, see `1
       src/ui/mod.rs`, then revert.
-- [ ] 2.6 REFACTOR: none expected, since the bundle mirrors the parameters it replaces field for
+- [x] 2.6 REFACTOR: none expected, since the bundle mirrors the parameters it replaces field for
       field. Record that, or the cleanup made.
-- [ ] 2.7 Run the group's tests and lint:
+      Recorded: none needed; the bundle mirrors the parameters it replaced field for field.
+- [x] 2.7 Run the group's tests and lint:
       - `cargo test --all-features --lib ui::tests::wiring` → 41 passed. That is 39 at
         planning time (`grep -c '^ui::tests::wiring::' "$T/list.txt"`) plus two new tests.
       - `cargo test --all-features --lib` is green.
       - `make lint` reports 0 warnings, so `start_collaborators` is at 6 parameters.
-- [ ] 2.8 Commit: `feat(ui): inject the Homebrew prefix list through Startup`.
+- [x] 2.8 Commit: `feat(ui): inject the Homebrew prefix list through Startup`.
 
 ## 3. `WIRED` leg 8 binds the value `run` passes
 <!-- kind: operational -->

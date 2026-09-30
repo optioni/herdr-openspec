@@ -202,9 +202,11 @@ fn openspec_path_overlay(
 /// — a pane with no repository has no change to launch onto and no badge to focus, so the
 /// inert double costs nothing and represents the truth.
 ///
-/// `degraded-states`' addition: `env` and `npm_hook` reach the binary probe
-/// (`resolve::openspec_bin`) directly rather than through `cli::worker_cli_from_env`, which
-/// hardcodes the real environment and the real `npm`. `Collaborators::problems` folds three
+/// `degraded-states`' addition, widened by `homebrew-probe`: the `probe` bundle's `env`,
+/// `npm_hook`, and `homebrew_prefixes` reach the binary probe (`resolve::openspec_bin`)
+/// directly rather than through `cli::worker_cli_from_env`, which hardcodes the real
+/// environment, the real `npm`, and the real Homebrew prefixes. This function names no
+/// production binding itself; `run` supplies them. `Collaborators::problems` folds three
 /// standing-condition sources in causal order (design.md -> Decision 4): the configuration's
 /// own fallbacks lead, then the probe's, then the watcher's — the reader meets them in the
 /// order they actually happened.
@@ -235,7 +237,7 @@ pub fn start_collaborators(
         config.openspec_bin.as_deref(),
         probe.env,
         probe.npm_hook,
-        &[],
+        probe.homebrew_prefixes,
     );
     let overlay: Vec<(String, String)> = resolution
         .found
