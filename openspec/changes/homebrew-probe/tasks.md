@@ -149,20 +149,33 @@ Planning-time selection counts below come from
 ## 4. Change Review
 <!-- kind: operational -->
 
-- [ ] 4.1 CHECK: Dispatch an `outside-in-tdd-reviewer`, giving it only this change's artifacts
+- [x] 4.1 CHECK: Dispatch an `outside-in-tdd-reviewer`, giving it only this change's artifacts
       and `git diff c261940..HEAD`, never this session's reasoning. It reports CRITICAL /
       WARNING / SUGGESTION findings against the proposal, all five delta specs, the design and
       the tasks.
-- [ ] 4.2 CHANGE: Fix every CRITICAL. Resolve each WARNING, or accept it with a one-line reason
+- [x] 4.2 CHANGE: Fix every CRITICAL. Resolve each WARNING, or accept it with a one-line reason
       recorded here. Note SUGGESTIONs, and re-run the affected groups' tests.
-- [ ] 4.3 VERIFY: Confirm that no blocking or unowned finding remains, and commit any fixes.
-- [ ] 4.4 VERIFY: Live check on the reference machine, whose only `openspec` is
+      Review of c261940..b71ff08: 0 CRITICAL, 1 WARNING, 3 SUGGESTION.
+      - WARNING fixed: `openspec_bin`'s doc comment still listed four steps; it now names
+        step 5 and `homebrew_prefixes` (task 1.3's first stale comment).
+      - SUGGESTION fixed: rewrapped `openspec_bin_from_env`'s over-long doc line.
+      - SUGGESTION accepted: leg 8 does not scan `run_wired`, so a `run_wired` naming the
+        constant would pass the gate. `a_homebrew_only_install_leaves_file_mode`'s `&[]`
+        control arm and its `!file_mode` arm catch that, so the gate need not.
+      - SUGGESTION accepted: `homebrew_candidates` keeps a trailing-space entry, as
+        `path_candidates` does. The production list is a constant, so it has no effect.
+- [x] 4.3 VERIFY: Confirm that no blocking or unowned finding remains, and commit any fixes.
+- [x] 4.4 VERIFY: Live check on the reference machine, whose only `openspec` is
       `/opt/homebrew/bin/openspec`. Run `make build`. Then, in a real terminal at the repository
       root, run
       `env -i HOME="$HOME" TERM="$TERM" PATH=/usr/bin:/bin ./target/release/herdr-openspec ui`.
       The header shows no `file mode` badge, and the settings panel (key listed under `?`)
       shows the `openspec_bin` row reading `/opt/homebrew/bin/openspec` with provenance
       `Homebrew`. Record what was seen. This is the one step no automated test reaches.
+      Seen (tmux, 140×30, `TERM=xterm-256color`, after `make build` at b71ff08): the header
+      read ` herdr-openspec` with no `file mode` badge, the list showed CLI progress
+      (`homebrew-probe [18/35]`), and `,` opened Settings with
+      `openspec_bin: /opt/homebrew/bin/openspec` / `Homebrew, read-only`.
 
 ## 5. Documentation
 <!-- kind: operational -->

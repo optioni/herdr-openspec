@@ -275,9 +275,10 @@ fn step5_homebrew(prefixes: &[&str]) -> Option<PathBuf> {
 /// usable candidate and probing no further: step 1, the configured path;
 /// step 2, each `PATH` entry in order; step 3, the nvm version trees, newest
 /// first; step 4, `<npm prefix>/bin/openspec`, where the prefix comes from
-/// the injected `npm_prefix` hook. A mis-configured `configured` path falls
-/// through to the remaining steps rather than winning or ending the chain,
-/// and records exactly one problem naming it — silently substituting a
+/// the injected `npm_prefix` hook; step 5, `<prefix>/bin/openspec` for each
+/// entry of the injected `homebrew_prefixes`, in list order. A mis-configured
+/// `configured` path falls through to the remaining steps rather than
+/// winning or ending the chain, and records exactly one problem naming it — silently substituting a
 /// different binary would hide a user's mistake, and refusing to look
 /// further would fail closed, which `SPEC.md` forbids. When no step
 /// produces a usable binary, `found` is `None` and `problems` carries
@@ -372,8 +373,8 @@ impl BinCache {
 
 /// The single composition against the real process environment: the
 /// configured value, `config::env_lookup`, `cli`'s real npm-prefix binding,
-/// and `HOMEBREW_PREFIXES`, and nothing else — the crate's untestable residue does not grow
-/// past this one line. See `openspec/changes/repo-resolution/design.md` ->
+/// and `HOMEBREW_PREFIXES`, and nothing else — the crate's untestable
+/// residue does not grow past this one line. See `openspec/changes/repo-resolution/design.md` ->
 /// Contracts and `openspec/changes/subprocess-seam/design.md` for the
 /// binding itself.
 pub fn openspec_bin_from_env(config: &crate::config::Config) -> BinResolution {
