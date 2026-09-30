@@ -20,6 +20,7 @@
 set -u
 MOD="${MOD:-src/ui/mod.rs}"
 CLI="${CLI:-src/cli.rs}"
+RESOLVE="${RESOLVE:-src/resolve.rs}"
 STATE="${STATE:-src/state.rs}"
 LAUNCH="${LAUNCH:-src/launch.rs}"
 TERMINAL="${TERMINAL:-src/ui/terminal.rs}"
@@ -28,6 +29,7 @@ fail() { echo "WIRED FAIL: $1" >&2; exit 1; }
 
 [ -f "$MOD" ] || fail "$MOD missing - the subject is gone"
 [ -f "$CLI" ] || fail "$CLI missing - the positive controls have nothing to match"
+[ -f "$RESOLVE" ] || fail "$RESOLVE missing - leg 8's positive control has nothing to match"
 [ -f "$STATE" ] || fail "$STATE missing - the mapping-read control has nothing to match"
 [ -f "$LAUNCH" ] || fail "$LAUNCH missing - leg 1's ninth name would point at nothing"
 [ -f "$TERMINAL" ] || fail "$TERMINAL missing - the panic-hook positive control has nothing to match"
@@ -138,6 +140,11 @@ grep -qE '^pub fn worker_cli\(' "$CLI" \
   || fail "positive control - $CLI defines no 'pub fn worker_cli('"
 grep -qE '^pub fn npm_probe_hook\(' "$CLI" \
   || fail "positive control - $CLI defines no 'pub fn npm_probe_hook(' - degraded-states's wrapper around the real npm-prefix binding, named so ui/ can reach it without NOCLI-SHELL's CLI_RE firing"
+# homebrew-probe: leg 8's own positive control, on npm_probe_hook's terms - anchored in the
+# DEFINING file, so renaming the constant fails HERE, naming $RESOLVE, rather than leg 8
+# searching `run`'s body for a name nobody defines any more.
+grep -qE '^pub const HOMEBREW_PREFIXES' "$RESOLVE" \
+  || fail "positive control - $RESOLVE defines no 'pub const HOMEBREW_PREFIXES' - leg 8 would search for a name that no longer exists"
 grep -qE '^pub const HERDR_PROGRAM' "$CLI" \
   || fail "positive control - $CLI defines no 'pub const HERDR_PROGRAM'"
 # worktree-changes: git_cli_via/GIT_PROGRAM's own positive controls, on HERDR_PROGRAM's exact
@@ -282,5 +289,21 @@ if printf '%s\n' "$body" | grep -qF '"git"'; then
   fail "leg 7: 'pub fn run()' hardcodes a \"git\" literal - Startup.git would not follow cli::GIT_PROGRAM"
 fi
 
+# Leg 8 - NEW in homebrew-probe. `run` supplies `Startup::homebrew_prefixes` from
+# `resolve::HOMEBREW_PREFIXES`, and `start_collaborators` only ever receives the bundle
+# (design.md -> Decision 8). Leg 1 cannot bind this: it searches the whole production slice, so
+# the constant moving INTO `start_collaborators` - which makes the injection decorative, since
+# every test drives that function with its own list - would still pass it. Two halves, on leg 7's
+# terms: `run`'s body names the constant, and `start_collaborators`' body does not.
+printf '%s\n' "$body" | grep -q 'HOMEBREW_PREFIXES' \
+  || fail "leg 8: 'pub fn run()' does not name HOMEBREW_PREFIXES - Startup.homebrew_prefixes would be a literal or an empty list"
+sc_body=$(code "$MOD" | awk '/^pub fn start_collaborators\(/{f=1} f{print} f && /^\}$/{exit}')
+[ -n "$sc_body" ] || fail "leg 8: could not find 'pub fn start_collaborators(' in $MOD's production slice"
+printf '%s\n' "$sc_body" | grep -q '^}$' \
+  || fail "leg 8: 'pub fn start_collaborators(' has no closing brace at column zero - the cut ran to EOF"
+if printf '%s\n' "$sc_body" | grep -q 'HOMEBREW_PREFIXES'; then
+  fail "leg 8: 'start_collaborators' names HOMEBREW_PREFIXES - the list must arrive through the bundle 'run' builds, not be read where every test injects its own"
+fi
+
 lines=$(printf '%s\n' "$body" | wc -l | tr -d ' ')
-echo "WIRED OK: fourteen names present in $MOD; run resolves state::state_dir; run threads the guard's mouse_problem( (leg 5c); run names startup_dir(; $MOD names config.agent_kind; run names GIT_PROGRAM with no \"git\" literal (leg 7); 'pub fn run()' is $lines lines with no branch and no loop; no \"herdr\" and no \"claude\" literal under $UIDIR"
+echo "WIRED OK: fourteen names present in $MOD; run resolves state::state_dir; run threads the guard's mouse_problem( (leg 5c); run names startup_dir(; $MOD names config.agent_kind; run names GIT_PROGRAM with no \"git\" literal (leg 7); run names HOMEBREW_PREFIXES (leg 8); 'pub fn run()' is $lines lines with no branch and no loop; no \"herdr\" and no \"claude\" literal under $UIDIR"

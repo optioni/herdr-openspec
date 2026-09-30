@@ -958,3 +958,30 @@ plant_find = "python3 scripts/coverage-prod.py target/llvm-cov.json tests/degrad
 plant_replace = "PROD_MIN=0 python3 scripts/coverage-prod.py target/llvm-cov.json tests/degraded-coverage.toml"
 expect = "NOWAIVER FAIL: Makefile's production-coverage floor line carries a PROD_MIN= override"
 why = "task 9.3 (CRITICAL 2): scripts/coverage-prod.py reads a PROD_MIN environment override with no floor of its own - a PROD_MIN=0 prefix on the Makefile's coverage-prod.py line would silence the production floor entirely while make check, make gates, and every other control stayed green"
+
+[[control]]
+id = "wired-homebrew-prefixes-emptied"
+script = "wired.sh"
+plant_file = "src/ui/mod.rs"
+plant_find = "homebrew_prefixes: crate::resolve::HOMEBREW_PREFIXES,"
+plant_replace = "homebrew_prefixes: &[],"
+expect = "WIRED FAIL: leg 8"
+why = "homebrew-probe: leg 8's `run` half - `run` must pass resolve::HOMEBREW_PREFIXES into Startup; an emptied list there ships a binary whose fifth probe step can never find anything, with every test green because each builds its own Startup. Measured against the unextended gate: exit 0"
+
+[[control]]
+id = "wired-homebrew-prefixes-relocated"
+script = "wired.sh"
+plant_file = "src/ui/mod.rs"
+plant_find = "probe.homebrew_prefixes,"
+plant_replace = "crate::resolve::HOMEBREW_PREFIXES,"
+expect = "WIRED FAIL: leg 8"
+why = "homebrew-probe: leg 8's `start_collaborators` half - reading the constant where the bundle should be read leaves `run`'s own line intact (so leg 1 and the first half stay green) while making the injection decorative, since every test drives start_collaborators with its own list. Measured against the unextended gate: exit 0"
+
+[[control]]
+id = "wired-homebrew-prefixes-renamed"
+script = "wired.sh"
+plant_file = "src/resolve.rs"
+plant_find = "pub const HOMEBREW_PREFIXES: &[&str] ="
+plant_replace = "pub const HOMEBREW_PREFIX_LIST: &[&str] ="
+expect = "src/resolve.rs defines no 'pub const HOMEBREW_PREFIXES'"
+why = "homebrew-probe: leg 8's positive control - a renamed constant must fail in the defining file, naming src/resolve.rs, rather than leaving leg 8 searching run's body for a name nobody defines any more"

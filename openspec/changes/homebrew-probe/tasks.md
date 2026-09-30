@@ -113,7 +113,7 @@ Planning-time selection counts below come from
 ## 3. `WIRED` leg 8 binds the value `run` passes
 <!-- kind: operational -->
 
-- [ ] 3.1 CHECK: Against the *unextended* gate, confirm it misses both defects:
+- [x] 3.1 CHECK (measured: plant 1 exit 0, plant 2 exit 0 against the unextended gate; both reverted): Against the *unextended* gate, confirm it misses both defects:
       - plant 1: in `run`, replace `homebrew_prefixes: crate::resolve::HOMEBREW_PREFIXES,` with
         `homebrew_prefixes: &[],`;
       - plant 2: restore `run`, and make `start_collaborators` pass
@@ -124,7 +124,7 @@ Planning-time selection counts below come from
       exit **0** for both, since no leg names `HOMEBREW_PREFIXES` yet: that is the gap leg 8
       closes. Revert both. This cannot run at planning time, because the planted line only
       exists after group 2.
-- [ ] 3.2 CHANGE: In `scripts/gates/wired.sh`, add `RESOLVE=src/resolve.rs` beside `$CLI`, and
+- [x] 3.2 CHANGE: In `scripts/gates/wired.sh`, add `RESOLVE=src/resolve.rs` beside `$CLI`, and
       a positive control `grep -qE '^pub const HOMEBREW_PREFIXES' "$RESOLVE" || fail "…"`
       beside `npm_probe_hook`'s. Add **leg 8** on leg 7's terms:
       - `printf '%s\n' "$body" | grep -q HOMEBREW_PREFIXES` must succeed;
@@ -137,14 +137,14 @@ Planning-time selection counts below come from
       `WIRED FAIL: leg 8`), and `wired-homebrew-prefixes-renamed` (rename the constant in
       `src/resolve.rs` only, expect the positive control's message). Each gets a `why`, per
       design.md → Decision 8.
-- [ ] 3.3 VERIFY:
+- [x] 3.3 VERIFY:
       - `/bin/sh scripts/gates/wired.sh` exits 0.
       - Plants 1 and 2 each exit 1 naming leg 8, and the rename exits 1 naming
         `src/resolve.rs`. Revert each.
       - `make gates` exits 0.
       - `cargo test --all-features --test gate_controls` is green. Run it with the tree quiet
         for its ~78 s: it fails on any concurrent edit.
-- [ ] 3.4 Commit: `test(gates): bind the Homebrew prefix list to run in WIRED leg 8`.
+- [x] 3.4 Commit: `test(gates): bind the Homebrew prefix list to run in WIRED leg 8`.
 
 ## 4. Change Review
 <!-- kind: operational -->
