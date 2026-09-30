@@ -213,21 +213,27 @@ Planning-time selection counts below come from
 ## 6. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 6.1 CHECK: The affected tiers are:
+- [x] 6.1 CHECK: The affected tiers are:
       - unit (`resolve`, `settings`);
       - wiring (`ui::tests::wiring`);
       - gate (`WIRED`);
       - contract (`doc_contract`, `gate_controls`).
 
       All of them run inside `make check`. Run it with no other session editing this tree.
-- [ ] 6.2 VERIFY: `make lint` → 0 warnings.
-- [ ] 6.3 VERIFY: `make fmt-check` → clean.
-- [ ] 6.4 VERIFY: `make gates` → exit 0.
-- [ ] 6.5 VERIFY: `make test` → green.
-- [ ] 6.6 VERIFY: `make coverage` → both floors hold.
-- [ ] 6.7 VERIFY: `openspec validate homebrew-probe --strict` → valid.
-- [ ] 6.8 VERIFY: `make check` as the single gate → exit 0. If it fails, name the failing
+- [x] 6.2 VERIFY: `make lint` → 0 warnings.
+- [x] 6.3 VERIFY: `make fmt-check` → clean.
+- [x] 6.4 VERIFY: `make gates` → exit 0.
+- [x] 6.5 VERIFY: `make test` → green.
+- [x] 6.6 VERIFY: `make coverage` → both floors hold.
+- [x] 6.7 VERIFY: `openspec validate homebrew-probe --strict` → valid.
+- [x] 6.8 VERIFY: `make check` as the single gate → exit 0. If it fails, name the failing
       sub-command here.
+      First run failed at `make covers-check` (`degraded_coverage`, 3 tests): the line
+      ranges in `tests/degraded-coverage.toml` for `src/resolve.rs`, `src/ui/mod.rs` (two)
+      and `src/settings.rs`, plus the scanner control's `src/ui/mod.rs:2686-2688` in
+      `tests/degraded_coverage.rs`, had drifted with groups 1–2's insertions. Each was
+      re-pointed at its baseline text's one match. The second run exited 0, with production
+      coverage at 96.26%.
 - [ ] 6.9 After `openspec archive homebrew-probe`, rewrite `openspec/specs/openspec-binary/spec.md`
       → `## Purpose` to name five steps and the Homebrew prefixes. `grep -n "four-step"
       openspec/specs/openspec-binary/spec.md` must print nothing. Commit it with the archive.

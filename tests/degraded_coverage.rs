@@ -1059,16 +1059,16 @@ fn a_struct_field_only_covers_range_is_rejected() {
 /// a string literal desyncs a counter for the remainder of the file and its failure mode is
 /// **vacuous acceptance**: fields stop being recognised and the very range this rule exists to
 /// reject passes again. `src/ui/mod.rs` holds `{` inside string literals well before line
-/// 2686 (`r#"{"workspace_id":"w8",…}"#` at 712, 751 and 778), and 2686-2688 is `struct
+/// 2710 (`r#"{"workspace_id":"w8",…}"#` at 736, 775 and 802), and 2710-2712 is `struct
 /// Recorder`'s two field declarations.
 #[test]
 fn field_recognition_does_not_desync_on_a_brace_in_a_string_literal() {
-    let (condition, err) = covers_error(("src/ui/mod.rs", 2686, 2688));
+    let (condition, err) = covers_error(("src/ui/mod.rs", 2710, 2712));
     assert!(
         err.contains(&condition),
         "the failure must name the row's condition: {err:?}"
     );
-    assert!(err.contains("src/ui/mod.rs:2686-2688"), "{err:?}");
+    assert!(err.contains("src/ui/mod.rs:2710-2712"), "{err:?}");
     assert!(err.contains("holds no statement"), "{err:?}");
 
     // The same property asserted directly on the classifier, where the desync can be planted
