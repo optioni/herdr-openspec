@@ -6245,6 +6245,313 @@ apply:
             assert_eq!(first_problems, second_problems);
         }
 
+        // --- locations: a worker-lifetime memory of `schema which` answers ---
+
+        use super::super::{CliCache, Selection, from_cli_cached, locate_schemas};
+
+        const FOUR: &[(&str, &str)] = &[
+            ("proposal", "proposal.md"),
+            ("specs", "specs/**/*.md"),
+            ("design", "design.md"),
+            ("tasks", "tasks.md"),
+        ];
+
+        fn which_args(name: &str) -> Vec<String> {
+            ["schema", "which", name, "--json"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect()
+        }
+
+        fn which_failure(name: &str) -> CliError {
+            CliError::Failed {
+                program: "openspec".to_string(),
+                args: which_args(name),
+                code: Some(1),
+                stderr: String::new(),
+            }
+        }
+
+        fn which_count(fake: &FakeCli) -> usize {
+            fake.calls()
+                .iter()
+                .filter(|(_, args)| args.first().map(String::as_str) == Some("schema"))
+                .count()
+        }
+
+        /// Register `list --json` and one apply payload per name, every one
+        /// reporting `schema`.
+        fn register_changes(
+            fake: &FakeCli,
+            repo: &std::path::Path,
+            names: &[&str],
+            schema: &str,
+        ) {
+            let entries: Vec<String> = names
+                .iter()
+                .map(|name| {
+                    format!(
+                        r#"{{"name":{name:?},"completedTasks":0,"totalTasks":0,"lastModified":"x","status":"y"}}"#
+                    )
+                })
+                .collect();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(format!(
+                    r#"{{"changes":[{}],"root":{{"path":{:?},"source":"nearest"}}}}"#,
+                    entries.join(","),
+                    repo.display().to_string()
+                )),
+            );
+            for name in names {
+                fake.register_openspec(
+                    &["instructions", "apply", "--change", name, "--json"],
+                    Ok(format!(
+                        r#"{{"schemaName":{schema:?},"changeDir":{:?},"contextFiles":{{}}}}"#,
+                        repo.join("openspec/changes").join(name).display().to_string()
+                    )),
+                );
+            }
+        }
+
+        fn artifact_ids(change: &Change) -> Vec<&str> {
+            change.artifacts.iter().map(|a| a.id.as_str()).collect()
+        }
+
+        const FOUR_IDS: [&str; 4] = ["proposal", "specs", "design", "tasks"];
+
+        #[test]
+        fn a_remembered_location_is_loaded_without_a_spawn() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            let pkg_dir = repo.join("pkg/spec-driven");
+            write_schema_yaml(&pkg_dir, "spec-driven", FOUR);
+            let fake = FakeCli::new();
+            register_changes(&fake, &repo, &["alpha", "mike", "zulu"], "spec-driven");
+
+            let mut cache = CliCache::default();
+            cache
+                .locations
+                .dirs
+                .insert("spec-driven".to_string(), pkg_dir.clone());
+            let result = from_cli_cached(&fake, &repo, &Selection::All, &mut cache);
+
+            assert_eq!(result.active.len(), 3);
+            for change in &result.active {
+                assert_eq!(artifact_ids(change), FOUR_IDS, "{}", change.name);
+                assert!(change.problems.is_empty(), "{}", change.name);
+            }
+            assert_eq!(which_count(&fake), 0);
+        }
+
+        #[test]
+        fn a_successful_lookup_fills_the_cache_for_the_next_call() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            let pkg_dir = repo.join("pkg/spec-driven");
+            write_schema_yaml(&pkg_dir, "spec-driven", FOUR);
+            let fake = FakeCli::new();
+            register_changes(&fake, &repo, &["alpha"], "spec-driven");
+            fake.register_openspec(
+                &["schema", "which", "spec-driven", "--json"],
+                which_response(&pkg_dir, "spec-driven"),
+            );
+
+            let mut cache = CliCache::default();
+            let first = from_cli_cached(&fake, &repo, &Selection::All, &mut cache);
+            let second = from_cli_cached(&fake, &repo, &Selection::All, &mut cache);
+
+            assert_eq!(artifact_ids(&first.active[0]), FOUR_IDS);
+            assert_eq!(artifact_ids(&second.active[0]), FOUR_IDS);
+            assert_eq!(which_count(&fake), 1);
+            assert_eq!(
+                cache.locations().dirs.get("spec-driven"),
+                Some(&pkg_dir),
+                "the directory is what is remembered"
+            );
+        }
+
+        #[test]
+        fn an_unusable_directory_is_not_remembered() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            let empty_dir = repo.join("pkg/empty");
+            mkdir(&empty_dir);
+            let fake = FakeCli::new();
+            register_changes(&fake, &repo, &["alpha"], "spec-driven");
+            fake.register_openspec(
+                &["schema", "which", "spec-driven", "--json"],
+                which_response(&empty_dir, "spec-driven"),
+            );
+
+            let mut cache = CliCache::default();
+            let first = from_cli_cached(&fake, &repo, &Selection::All, &mut cache);
+            let second = from_cli_cached(&fake, &repo, &Selection::All, &mut cache);
+
+            for result in [&first, &second] {
+                let alpha = &result.active[0];
+                assert!(alpha.artifacts.is_empty());
+                assert_eq!(alpha.problems.len(), 1);
+                assert!(
+                    alpha.problems[0].contains(&empty_dir.display().to_string()),
+                    "{}",
+                    alpha.problems[0]
+                );
+                assert!(
+                    alpha.problems[0].ends_with("is not vendored: no schema.yaml there"),
+                    "{}",
+                    alpha.problems[0]
+                );
+            }
+            assert!(cache.locations().dirs.is_empty());
+            assert_eq!(which_count(&fake), 2);
+        }
+
+        #[test]
+        fn a_miss_does_not_outlive_the_call() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            let fake = FakeCli::new();
+            register_changes(&fake, &repo, &["alpha"], "spec-driven");
+            fake.register_openspec(
+                &["schema", "which", "spec-driven", "--json"],
+                Err(which_failure("spec-driven")),
+            );
+
+            let mut cache = CliCache::default();
+            cache
+                .locations
+                .misses
+                .insert("spec-driven".to_string(), "recorded".to_string());
+            let consumed = from_cli_cached(&fake, &repo, &Selection::All, &mut cache);
+            assert_eq!(consumed.active[0].problems, vec!["recorded".to_string()]);
+            assert_eq!(which_count(&fake), 0);
+            assert!(cache.locations().misses.is_empty());
+
+            from_cli_cached(&fake, &repo, &Selection::All, &mut cache);
+            assert_eq!(which_count(&fake), 1);
+        }
+
+        #[test]
+        fn a_cycle_miss_is_named_without_a_second_spawn() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            write_project_config(&repo, "spec-driven");
+            mkdir(&repo.join("openspec/changes/alpha"));
+            let fake = FakeCli::new();
+            register_changes(&fake, &repo, &["alpha"], "spec-driven");
+            fake.register_openspec(
+                &["schema", "which", "spec-driven", "--json"],
+                Err(which_failure("spec-driven")),
+            );
+
+            let files = from_files(&repo, ArchivedScope::Full);
+            let mut cache = CliCache::default();
+            let learned = locate_schemas(&fake, &repo, &files, &mut cache);
+            assert_eq!(learned, 0);
+            let cycle = from_cli_cached(&fake, &repo, &Selection::All, &mut cache);
+
+            let fresh_fake = FakeCli::new();
+            register_changes(&fresh_fake, &repo, &["alpha"], "spec-driven");
+            fresh_fake.register_openspec(
+                &["schema", "which", "spec-driven", "--json"],
+                Err(which_failure("spec-driven")),
+            );
+            let fresh = from_cli_cached(&fresh_fake, &repo, &Selection::All, &mut CliCache::default());
+
+            assert_eq!(cycle.active[0].problems.len(), 1);
+            assert!(cycle.active[0].problems[0].contains("schema which spec-driven --json"));
+            assert!(cycle.active[0].problems[0].contains("code 1"));
+            assert_eq!(cycle.active[0].problems, fresh.active[0].problems);
+            assert_eq!(which_count(&fake), 1);
+        }
+
+        #[test]
+        fn a_vendored_schema_wins_over_a_location() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            let pkg_dir = repo.join("pkg/spec-driven");
+            write_schema_yaml(&pkg_dir, "spec-driven", FOUR);
+            vendor_schema(
+                &repo,
+                "spec-driven",
+                &[("proposal", "proposal.md"), ("tasks", "tasks.md")],
+            );
+            let fake = FakeCli::new();
+            register_changes(&fake, &repo, &["alpha"], "spec-driven");
+
+            let mut cache = CliCache::default();
+            cache
+                .locations
+                .dirs
+                .insert("spec-driven".to_string(), pkg_dir);
+            let result = from_cli_cached(&fake, &repo, &Selection::All, &mut cache);
+
+            assert_eq!(artifact_ids(&result.active[0]), vec!["proposal", "tasks"]);
+            assert_eq!(which_count(&fake), 0);
+        }
+
+        #[test]
+        fn locate_schemas_learns_nothing_for_a_vendored_schema() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            write_project_config(&repo, "tdd");
+            mkdir(&repo.join("openspec/changes/alpha"));
+            // No `schema which` registration: an unregistered call panics.
+            let fake = FakeCli::new();
+
+            let files = from_files(&repo, ArchivedScope::Full);
+            let mut cache = CliCache::default();
+            let learned = locate_schemas(&fake, &repo, &files, &mut cache);
+
+            assert_eq!(learned, 0);
+            assert!(fake.calls().is_empty());
+            assert!(cache.locations().dirs.is_empty());
+        }
+
+        #[test]
+        fn a_parser_problem_read_by_both_producers_appears_once() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            let pkg_dir = repo.join("pkg/spec-driven");
+            write(
+                &pkg_dir.join("schema.yaml"),
+                "name: spec-driven\nartifacts:\n  - generates: no-id.md\n  - id: proposal\n    generates: proposal.md\n  - id: tasks\n    generates: tasks.md\n",
+            );
+            write_project_config(&repo, "spec-driven");
+            mkdir(&repo.join("openspec/changes/alpha"));
+            let fake = FakeCli::new();
+            register_changes(&fake, &repo, &["alpha"], "spec-driven");
+            fake.register_openspec(
+                &["schema", "which", "spec-driven", "--json"],
+                which_response(&pkg_dir, "spec-driven"),
+            );
+
+            let mut cache = CliCache::default();
+            let files = from_files(&repo, ArchivedScope::Full);
+            assert_eq!(locate_schemas(&fake, &repo, &files, &mut cache), 1);
+            let (active_names, archived_list, problems) = list_changes(&repo);
+            let files = from_files_with_listing(
+                &repo,
+                ArchivedScope::Full,
+                active_names,
+                archived_list,
+                problems,
+                cache.locations(),
+            );
+            let cli = from_cli_cached(&fake, &repo, &Selection::All, &mut cache);
+            let file_alpha = files.active.iter().find(|c| c.name == "alpha").unwrap();
+            let cli_alpha = cli.active.iter().find(|c| c.name == "alpha").unwrap();
+            assert_eq!(file_alpha.problems.len(), 1, "{:?}", file_alpha.problems);
+            assert_eq!(file_alpha.problems, cli_alpha.problems);
+
+            let merged = merge(files, cli);
+            let alpha = merged.active.iter().find(|c| c.name == "alpha").unwrap();
+            assert_eq!(alpha.problems.len(), 1, "{:?}", alpha.problems);
+        }
+
+
         #[test]
         fn three_changes_sharing_one_unvendored_schema_ask_the_cli_once() {
             let scratch = ScratchDir::new();
