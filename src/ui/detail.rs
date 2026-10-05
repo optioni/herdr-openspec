@@ -3084,6 +3084,60 @@ mod tests {
         }
     }
 
+    /// `bundled-schema-resolution` :: a located schema's change draws its tabs and no
+    /// problem row, at both mandated interior widths (78 and 58).
+    #[test]
+    fn a_located_schema_renders_tabs_and_no_problem_row() {
+        let repo = crate::testutil::ScratchDir::new();
+        let root = repo.path();
+        crate::testutil::write_with_mode(
+            &root.join("openspec/config.yaml"),
+            b"schema: spec-driven\n",
+            0o644,
+        );
+        crate::testutil::write_with_mode(
+            &root.join("openspec/changes/alpha/proposal.md"),
+            b"# alpha\n",
+            0o644,
+        );
+        let loc = crate::testutil::ScratchDir::new();
+        crate::testutil::write_with_mode(
+            &loc.path().join("schema.yaml"),
+            b"name: spec-driven\nartifacts:\n  - id: proposal\n    generates: proposal.md\n  - id: specs\n    generates: specs/**/*.md\n  - id: design\n    generates: design.md\n  - id: tasks\n    generates: tasks.md\n",
+            0o644,
+        );
+        let mut locations = crate::changes::SchemaLocations::default();
+        locations
+            .dirs
+            .insert("spec-driven".to_string(), loc.path().to_path_buf());
+        let (active, archived, problems) = crate::changes::list_changes(root);
+        let files = crate::changes::from_files_with_listing(
+            root,
+            crate::changes::ArchivedScope::Full,
+            active,
+            archived,
+            problems,
+            &locations,
+        );
+        let change = files.active.first().expect("change alpha is read");
+        assert_eq!(change.artifacts.len(), 4);
+        assert!(change.problems.is_empty(), "{:?}", change.problems);
+
+        for width in [78u16, 58u16] {
+            let tabs = tab_bar(&change.artifacts, 0, width);
+            let text: String = tabs.iter().map(|t| t.text.clone()).collect();
+            assert!(text.contains("proposal"), "width {width}: {text:?}");
+            assert!(!text.contains("no artifacts"), "width {width}: {text:?}");
+            let detail = crate::ui::app::Detail::default();
+            let rows = content_lines(&detail, Some(change), width);
+            assert!(
+                rows.iter().all(|r| !r.text().contains('!')),
+                "width {width}: {:?}",
+                lines_text(&rows)
+            );
+        }
+    }
+
     /// `degraded-coverage` :: "A schema with no tasks artifact renders every tab as
     /// markdown and still counts" — SPEC.md row 6. A real schema with three artifacts, no
     /// `apply.tracks` and no artifact whose id is `tasks`, so `tracks_tasks` is `false`

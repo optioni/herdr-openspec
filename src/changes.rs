@@ -3761,6 +3761,126 @@ apply:
         ("planning-review", "planning-review.md"),
     ];
 
+    // --- bundled-schema-resolution: the file producer loads a located schema ---
+
+    const LOCATED_ARTIFACTS: &[(&str, &str)] = &[
+        ("proposal", "proposal.md"),
+        ("specs", "specs/**/*.md"),
+        ("design", "design.md"),
+        ("tasks", "tasks.md"),
+    ];
+
+    /// A repository declaring `spec-driven`, vendoring nothing, holding active `alpha`,
+    /// plus a second scratch directory holding a real `schema.yaml` and the locations
+    /// mapping the name to it.
+    fn located_fixture() -> (ScratchDir, ScratchDir, std::path::PathBuf, SchemaLocations) {
+        let repo_scratch = ScratchDir::new();
+        let repo = canonical(repo_scratch.path());
+        write_project_config(&repo, "spec-driven");
+        write(&repo.join("openspec/changes/alpha/proposal.md"), "# a\n");
+        let loc_scratch = ScratchDir::new();
+        let loc = canonical(loc_scratch.path());
+        let mut yaml = String::from("name: spec-driven\nartifacts:\n");
+        for (id, generates) in LOCATED_ARTIFACTS {
+            yaml.push_str(&format!("  - id: {id}\n    generates: {generates}\n"));
+        }
+        write(&loc.join("schema.yaml"), &yaml);
+        let mut locations = SchemaLocations::default();
+        locations.dirs.insert("spec-driven".to_string(), loc);
+        (repo_scratch, loc_scratch, repo, locations)
+    }
+
+    fn build_with_listing(
+        repo: &std::path::Path,
+        scope: ArchivedScope,
+        locations: &SchemaLocations,
+    ) -> ChangeSet {
+        let (active, archived, problems) = list_changes(repo);
+        from_files_with_listing(repo, scope, active, archived, problems, locations)
+    }
+
+    #[test]
+    fn a_located_schema_gives_an_active_change_its_artifacts() {
+        let (_r, _l, repo, locations) = located_fixture();
+        let set = build_with_listing(&repo, ArchivedScope::Names, &locations);
+        let alpha = &set.active[0];
+        let ids: Vec<&str> = alpha.artifacts.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, vec!["proposal", "specs", "design", "tasks"]);
+        assert!(alpha.artifacts[3].tracks_tasks);
+        assert!(alpha.problems.is_empty(), "{:?}", alpha.problems);
+    }
+
+    #[test]
+    fn a_located_schema_gives_an_archived_change_its_artifacts() {
+        let (_r, _l, repo, locations) = located_fixture();
+        let dir = repo.join("openspec/changes/archive/2026-05-05-structured-player-actions");
+        write(&dir.join("tasks.md"), &"- [x] a\n".repeat(24));
+        let set = build_with_listing(&repo, ArchivedScope::Full, &locations);
+        assert_eq!(set.archived.len(), 1);
+        let archived = &set.archived[0];
+        let ids: Vec<&str> = archived.artifacts.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, vec!["proposal", "specs", "design", "tasks"]);
+        assert_eq!(archived.progress.completed, 24);
+        assert_eq!(archived.progress.total, 24);
+        assert!(archived.problems.is_empty(), "{:?}", archived.problems);
+    }
+
+    #[test]
+    fn from_files_without_locations_still_reports_not_vendored() {
+        let (_r, _l, repo, _locations) = located_fixture();
+        let set = from_files(&repo, ArchivedScope::Full);
+        let alpha = &set.active[0];
+        assert!(alpha.artifacts.is_empty());
+        let want = format!(
+            "{} is not vendored: no schema.yaml there",
+            repo.join("openspec/schemas/spec-driven/schema.yaml").display()
+        );
+        assert_eq!(alpha.problems, vec![want]);
+    }
+
+    #[test]
+    fn a_location_without_a_schema_file_names_the_location() {
+        let (_r, _l, repo, _locations) = located_fixture();
+        write(&repo.join("openspec/changes/alpha/tasks.md"), "- [x] a\n- [ ] b\n");
+        let empty = ScratchDir::new();
+        let empty_dir = canonical(empty.path());
+        let mut locations = SchemaLocations::default();
+        locations
+            .dirs
+            .insert("spec-driven".to_string(), empty_dir.clone());
+        let set = build_with_listing(&repo, ArchivedScope::Names, &locations);
+        let alpha = &set.active[0];
+        assert!(alpha.artifacts.is_empty());
+        assert_eq!(alpha.problems.len(), 1, "{:?}", alpha.problems);
+        assert!(
+            alpha.problems[0].contains(&empty_dir.display().to_string()),
+            "{:?}",
+            alpha.problems
+        );
+        assert!(!alpha.problems[0].contains("openspec/schemas/spec-driven"));
+        assert_eq!(alpha.progress.total, 2);
+        assert_eq!(alpha.progress.completed, 1);
+    }
+
+    #[test]
+    fn a_vendored_schema_ignores_the_locations() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+        write_project_config(&repo, "tdd");
+        write(&repo.join("openspec/changes/alpha/proposal.md"), "# a\n");
+        let loc_scratch = ScratchDir::new();
+        let loc = canonical(loc_scratch.path());
+        write(
+            &loc.join("schema.yaml"),
+            "name: tdd\nartifacts:\n  - id: one\n    generates: one.md\n  - id: two\n    generates: two.md\n",
+        );
+        let mut locations = SchemaLocations::default();
+        locations.dirs.insert("tdd".to_string(), loc);
+        let set = build_with_listing(&repo, ArchivedScope::Names, &locations);
+        assert_eq!(set.active[0].artifacts.len(), 5);
+    }
+
     #[test]
     fn a_fully_written_active_change_becomes_one_value() {
         let scratch = ScratchDir::new();
@@ -8629,6 +8749,32 @@ apply:
                         .to_string()
                 })
                 .collect()
+        }
+
+        #[test]
+        fn a_members_located_schema_resolves() {
+            let scratch = ScratchDir::new();
+            let member = canonical(scratch.path());
+            write_project_config(&member, "spec-driven");
+            write(&member.join("openspec/changes/alpha/proposal.md"), "# a\n");
+            let loc_scratch = ScratchDir::new();
+            let loc = canonical(loc_scratch.path());
+            write(
+                &loc.join("schema.yaml"),
+                "name: spec-driven\nartifacts:\n  - id: proposal\n    generates: proposal.md\n  - id: tasks\n    generates: tasks.md\n",
+            );
+            let mut locations = SchemaLocations::default();
+            locations.dirs.insert("spec-driven".to_string(), loc);
+            let t = touched(&["alpha"], &[]);
+            let owned = from_files_owned(&member, &t, ArchivedScope::Full, &locations);
+            let alpha = &owned.active[0];
+            let ids: Vec<&str> = alpha.artifacts.iter().map(|a| a.id.as_str()).collect();
+            assert_eq!(ids, vec!["proposal", "tasks"]);
+            assert!(
+                alpha.problems.iter().all(|p| !p.contains("is not vendored")),
+                "{:?}",
+                alpha.problems
+            );
         }
 
         /// worktree-overlay -> "A worktree's live progress replaces the
