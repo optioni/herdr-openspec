@@ -256,21 +256,23 @@ group's new filters must then print `1`.
 ## 8. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 8.1 CHECK: The affected tiers are:
+- [x] 8.1 CHECK: The affected tiers are:
       - unit (`changes`, `refresh`);
       - view (`ui::detail`);
       - wiring (`ui::tests::wiring`);
       - contract (`degraded_coverage`, `doc_contract`).
 
       `make test` runs all of them.
-- [ ] 8.2 VERIFY: `make fmt-check` is clean.
-- [ ] 8.3 VERIFY: `make lint` reports 0 warnings. Clippy with `-D warnings` is this crate's
+- [x] 8.2 VERIFY: `make fmt-check` is clean.
+- [x] 8.3 VERIFY: `make lint` reports 0 warnings. Clippy with `-D warnings` is this crate's
       type and lint gate.
-- [ ] 8.4 VERIFY: `make gates` exits 0.
-- [ ] 8.5 VERIFY: `make covers-check` exits 0.
-- [ ] 8.6 VERIFY: `make test` is green.
-- [ ] 8.7 VERIFY: `make coverage` holds both the 80% total and the production-slice floor.
-- [ ] 8.8 VERIFY: `make check` is green as the single gate. If it fails, name the failing
+- [x] 8.4 VERIFY: `make gates` exits 0.
+- [x] 8.5 VERIFY: `make covers-check` exits 0.
+- [x] 8.6 VERIFY: `make test` is green.
+- [x] 8.7 VERIFY: `make coverage` holds both the 80% total and the production-slice floor.
+- [x] 8.8 VERIFY: `make check` is green as the single gate. If it fails, name the failing
       sub-command here.
-- [ ] 8.9 VERIFY: `openspec validate bundled-schema-resolution --strict` reports the change
+      Green at 33f940d: lib 1733/1733, contract tier 124/124, line coverage 95.13% total,
+      production slice 96.32% (floor 96%).
+- [x] 8.9 VERIFY: `openspec validate bundled-schema-resolution --strict` reports the change
       as valid.
