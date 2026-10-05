@@ -3417,7 +3417,8 @@ worktree {}\0HEAD eeee\0detached\0\0",
     // --- `bundled-schema-resolution` group 3: the worker locates before it merges ---
 
     // Aliases keep the `Change`/`ChangeSet` literal gate (`NOLIT-CHANGE`) from reading a
-    // return type's `{` as a construction site.
+    // return type's `{` as a construction site. No literal may use these aliases --
+    // `Row { ... }` would slip past the grep (GATE-MECH1 remains the primary check).
     type Found = crate::changes::ChangeSet;
     type Row = crate::changes::Change;
 
@@ -3994,6 +3995,31 @@ apply:
             ),
             Ok(" M openspec/changes/alpha/tasks.md\0".to_string()),
         );
+        // The idle re-check's own answer: the member now also owns `beta`, so the
+        // re-check's overlaid set differs from `last_sent` and is sent.
+        crate::testutil::write_with_mode(
+            &member_root.join("openspec/changes/beta/tasks.md"),
+            b"- [ ] c\n",
+            0o644,
+        );
+        git_fake.register_git(
+            &git_args(
+                &member_str,
+                &[
+                    "status",
+                    "--porcelain=v1",
+                    "-z",
+                    "--no-renames",
+                    "--untracked-files=all",
+                    "--",
+                    "openspec/changes",
+                ],
+            ),
+            Ok(
+                " M openspec/changes/alpha/tasks.md\0?? openspec/changes/beta/tasks.md\0"
+                    .to_string(),
+            ),
+        );
         let git: Arc<dyn GitCli> = git_fake;
 
         let (mut refresher, rx, _exit) =
@@ -4007,7 +4033,14 @@ apply:
         assert_eq!(artifact_ids(alpha), PACKAGE_IDS);
         assert_no_not_vendored(alpha);
 
-        // Whatever the idle re-check sends next, and then the next request's `Files`.
+        // The idle re-check fires before any further request and sends the set that
+        // now also holds `beta`, read with the locations the cache holds.
+        let rechecked = files_of(next_result(&rx));
+        let alpha = active(&rechecked, "alpha");
+        assert_eq!(artifact_ids(alpha), PACKAGE_IDS);
+        assert_no_not_vendored(alpha);
+        assert!(rechecked.active.iter().any(|c| c.name == "beta"));
+
         refresher.request(Selection::All, ArchivedScope::Names);
         let files = files_of(next_result(&rx));
         let alpha = active(&files, "alpha");
