@@ -3123,12 +3123,20 @@ mod tests {
         assert_eq!(change.artifacts.len(), 4);
         assert!(change.problems.is_empty(), "{:?}", change.problems);
 
-        for width in [78u16, 58u16] {
+        for width in [78, 58] {
             let tabs = tab_bar(&change.artifacts, 0, width);
             let text: String = tabs.iter().map(|t| t.text.clone()).collect();
             assert!(text.contains("proposal"), "width {width}: {text:?}");
             assert!(!text.contains("no artifacts"), "width {width}: {text:?}");
-            let detail = crate::ui::app::Detail::default();
+            let detail = Detail {
+                sections: Vec::new(),
+                scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
+                expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
+            };
             let rows = content_lines(&detail, Some(change), width);
             assert!(
                 rows.iter().all(|r| !r.text().contains('!')),

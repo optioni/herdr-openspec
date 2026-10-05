@@ -43,7 +43,7 @@ group's new filters must then print `1`.
 ## 1. The file producer loads a located schema
 <!-- kind: behavior -->
 
-- [ ] 1.1 RED: Write the change-artifacts tests named in design.md → Test Strategy:
+- [x] 1.1 RED: Write the change-artifacts tests named in design.md → Test Strategy:
       - `a_located_schema_gives_an_active_change_its_artifacts`;
       - `a_located_schema_gives_an_archived_change_its_artifacts`;
       - `from_files_without_locations_still_reports_not_vendored`;
@@ -54,7 +54,7 @@ group's new filters must then print `1`.
 
       Expect a compile failure naming `SchemaLocations` and the new parameters. That
       failure is the missing interface.
-- [ ] 1.2 GREEN: Add `SchemaLocations` and `SchemaLoads`. Thread the locations through
+- [x] 1.2 GREEN: Add `SchemaLocations` and `SchemaLoads`. Thread the locations through
       `load_schema_cached`, `build_change` (inside `SchemaLoads`, still seven parameters),
       `from_files_with_listing`, `from_files_owned`, and `overlay_family`, per design.md →
       Boundaries and Decision 9. `from_files` passes `&SchemaLocations::default()`.
@@ -66,13 +66,13 @@ group's new filters must then print `1`.
         (`grep -c "from_files_with_listing(\|overlay_family(" src/refresh.rs` → 4).
 
       Group 3 replaces the defaults in `src/refresh.rs`.
-- [ ] 1.3 REFACTOR: Keep `schema_load_problem` as the single renderer for a location's
+- [x] 1.3 REFACTOR: Keep `schema_load_problem` as the single renderer for a location's Outcome: no further refactor needed; the Ok/Err arms were folded into `parsed_load` and `failed_load` during GREEN, and `schema_load_problem` renders every failure.
       failure. Fold any duplicated `Ok`/`Err` arm in `load_schema_cached`, or record "no
       refactor needed".
-- [ ] 1.4 Run `cargo test --all-features --lib changes::` and
+- [x] 1.4 Run `cargo test --all-features --lib changes::` and
       `cargo test --all-features --lib ui::detail`. The 7 new tests and every existing test
       must pass, and `make lint` must exit 0.
-- [ ] 1.5 Commit: `feat(changes): load a not-vendored schema from a supplied location`.
+- [x] 1.5 Commit: `feat(changes): load a not-vendored schema from a supplied location`.
 
 ## 2. The CLI tier shares and fills the locations
 <!-- kind: behavior -->

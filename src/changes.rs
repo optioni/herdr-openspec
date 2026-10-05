@@ -1081,27 +1081,89 @@ struct CachedSchemaLoad {
     problems: Vec<String>,
 }
 
-/// Look `name` up in `cache`, loading it from `repo` on a miss. The cache is
-/// a plain `HashMap` owned by one `from_files` call, never a `static` —
+/// Where schemas the repository does not vendor can be read from, by name:
+/// `dirs` maps a name to a directory holding its `schema.yaml`, and `misses`
+/// maps a name to the already-rendered problem that explains why no directory
+/// could be found. Read-only to the file producer; empty means "no locations",
+/// which is file mode and every caller that has no `openspec` binary to ask.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SchemaLocations {
+    pub(crate) dirs: std::collections::HashMap<String, PathBuf>,
+    pub(crate) misses: std::collections::HashMap<String, String>,
+}
+
+/// One `from_files` call's schema state: the per-call cache by name, and the
+/// read-only locations a not-vendored name may fall back to. Bundled so
+/// `build_change` keeps seven parameters (design.md -> Decision 9).
+struct SchemaLoads<'a> {
+    cache: std::collections::HashMap<String, CachedSchemaLoad>,
+    locations: &'a SchemaLocations,
+}
+
+impl<'a> SchemaLoads<'a> {
+    fn new(locations: &'a SchemaLocations) -> Self {
+        SchemaLoads {
+            cache: std::collections::HashMap::new(),
+            locations,
+        }
+    }
+}
+
+fn failed_load(problem: String) -> CachedSchemaLoad {
+    CachedSchemaLoad {
+        schema: None,
+        problems: vec![problem],
+    }
+}
+
+fn parsed_load(
+    result: Result<crate::schema::ParsedSchema, crate::schema::LoadError>,
+) -> CachedSchemaLoad {
+    match result {
+        Ok(parsed) => CachedSchemaLoad {
+            schema: Some(parsed.schema),
+            problems: parsed.problems,
+        },
+        Err(err) => failed_load(schema_load_problem(&err)),
+    }
+}
+
+/// Look `name` up in `loads.cache`, loading it from `repo` on a miss, and from
+/// a supplied location when the repository does not vendor it. The cache is
+/// owned by one `from_files` call, never a `static` —
 /// `resolve::BinCache`'s reason: the suite runs the crate's tests in
 /// parallel threads of one process, and a process-global cache would let
 /// the first test decide the answer for every other.
 fn load_schema_cached<'a>(
     repo: &std::path::Path,
     name: &str,
-    cache: &'a mut std::collections::HashMap<String, CachedSchemaLoad>,
+    loads: &'a mut SchemaLoads<'_>,
 ) -> &'a CachedSchemaLoad {
-    cache
+    let locations = loads.locations;
+    loads
+        .cache
         .entry(name.to_string())
         .or_insert_with(|| match crate::schema::load(repo, name) {
-            Ok(parsed) => CachedSchemaLoad {
-                schema: Some(parsed.schema),
-                problems: parsed.problems,
-            },
-            Err(err) => CachedSchemaLoad {
-                schema: None,
-                problems: vec![schema_load_problem(&err)],
-            },
+            Err(crate::schema::LoadError::NotVendored { path }) => {
+                if let Some(dir) = locations.dirs.get(name) {
+                    if dir.join("schema.yaml").is_file() {
+                        parsed_load(crate::schema::load_dir(dir, name))
+                    } else {
+                        failed_load(schema_load_problem(
+                            &crate::schema::LoadError::NotVendored {
+                                path: dir.join("schema.yaml"),
+                            },
+                        ))
+                    }
+                } else if let Some(miss) = locations.misses.get(name) {
+                    failed_load(miss.clone())
+                } else {
+                    failed_load(schema_load_problem(
+                        &crate::schema::LoadError::NotVendored { path },
+                    ))
+                }
+            }
+            other => parsed_load(other),
         })
 }
 
@@ -1123,7 +1185,7 @@ fn build_change(
     origin: Origin,
     project_config_path: &std::path::Path,
     project_config_text: &crate::schema::FileText,
-    schema_cache: &mut std::collections::HashMap<String, CachedSchemaLoad>,
+    loads: &mut SchemaLoads<'_>,
 ) -> Change {
     let change_config_path = dir.join(".openspec.yaml");
     let change_config_text = crate::schema::read_file(&change_config_path);
@@ -1135,7 +1197,7 @@ fn build_change(
 
     let mut problems = selection.problems;
 
-    let cached = load_schema_cached(repo, &selection.name, schema_cache);
+    let cached = load_schema_cached(repo, &selection.name, loads);
     problems.extend(cached.problems.iter().cloned());
 
     let (artifacts, artifact_problems) = match &cached.schema {
@@ -1947,7 +2009,14 @@ pub fn empty_set() -> ChangeSet {
 /// full contract.
 pub fn from_files(repo: &std::path::Path, archived: ArchivedScope) -> ChangeSet {
     let (active_names, archived_list, problems) = list_changes(repo);
-    from_files_with_listing(repo, archived, active_names, archived_list, problems)
+    from_files_with_listing(
+        repo,
+        archived,
+        active_names,
+        archived_list,
+        problems,
+        &SchemaLocations::default(),
+    )
 }
 
 /// [`from_files`]'s own body, taking [`list_changes`]'s result rather than calling it —
@@ -1963,14 +2032,14 @@ pub(crate) fn from_files_with_listing(
     active_names: Vec<String>,
     archived_list: Vec<ArchivedEntry>,
     problems: Vec<String>,
+    locations: &SchemaLocations,
 ) -> ChangeSet {
     let project_config_path = repo.join("openspec").join("config.yaml");
     let project_config_text = crate::schema::read_file(&project_config_path);
 
     let archived_total = archived_list.len();
 
-    let mut schema_cache: std::collections::HashMap<String, CachedSchemaLoad> =
-        std::collections::HashMap::new();
+    let mut schema_loads = SchemaLoads::new(locations);
 
     let active = active_names
         .into_iter()
@@ -1983,7 +2052,7 @@ pub(crate) fn from_files_with_listing(
                 Origin::Active,
                 &project_config_path,
                 &project_config_text,
-                &mut schema_cache,
+                &mut schema_loads,
             )
         })
         .collect();
@@ -1999,7 +2068,7 @@ pub(crate) fn from_files_with_listing(
                     Origin::Archived { date: entry.date },
                     &project_config_path,
                     &project_config_text,
-                    &mut schema_cache,
+                    &mut schema_loads,
                 )
             })
             .collect(),
@@ -2054,6 +2123,7 @@ pub fn from_files_owned(
     root: &std::path::Path,
     touched: &crate::worktrees::Touched,
     scope: ArchivedScope,
+    locations: &SchemaLocations,
 ) -> OwnedChanges {
     // A member that touched nothing on either side cannot own anything below —
     // every active and archived filter tests against `touched`'s two sets, so
@@ -2072,8 +2142,7 @@ pub fn from_files_owned(
 
     let project_config_path = root.join("openspec").join("config.yaml");
     let project_config_text = crate::schema::read_file(&project_config_path);
-    let mut schema_cache: std::collections::HashMap<String, CachedSchemaLoad> =
-        std::collections::HashMap::new();
+    let mut schema_loads = SchemaLoads::new(locations);
 
     let (active_names, _active_problems, active_unreadable) = active_change_names(root);
     let active = active_names
@@ -2088,7 +2157,7 @@ pub fn from_files_owned(
                 Origin::Active,
                 &project_config_path,
                 &project_config_text,
-                &mut schema_cache,
+                &mut schema_loads,
             )
         })
         .collect();
@@ -2116,7 +2185,7 @@ pub fn from_files_owned(
                     },
                     &project_config_path,
                     &project_config_text,
-                    &mut schema_cache,
+                    &mut schema_loads,
                 )),
                 ArchivedScope::Names => None,
             };
@@ -2274,6 +2343,7 @@ pub(crate) fn overlay_family(
     base_archive_dirs: &[String],
     members: &[(crate::worktrees::Worktree, crate::worktrees::Touched)],
     scope: ArchivedScope,
+    locations: &SchemaLocations,
 ) -> ChangeSet {
     let owned: Vec<(
         crate::worktrees::Worktree,
@@ -2282,7 +2352,7 @@ pub(crate) fn overlay_family(
     )> = members
         .iter()
         .map(|(member, touched)| {
-            let owned = from_files_owned(&member.root, touched, scope);
+            let owned = from_files_owned(&member.root, touched, scope, locations);
             (member.clone(), touched.clone(), owned)
         })
         .collect();
@@ -3833,7 +3903,8 @@ apply:
         assert!(alpha.artifacts.is_empty());
         let want = format!(
             "{} is not vendored: no schema.yaml there",
-            repo.join("openspec/schemas/spec-driven/schema.yaml").display()
+            repo.join("openspec/schemas/spec-driven/schema.yaml")
+                .display()
         );
         assert_eq!(alpha.problems, vec![want]);
     }
@@ -3841,7 +3912,10 @@ apply:
     #[test]
     fn a_location_without_a_schema_file_names_the_location() {
         let (_r, _l, repo, _locations) = located_fixture();
-        write(&repo.join("openspec/changes/alpha/tasks.md"), "- [x] a\n- [ ] b\n");
+        write(
+            &repo.join("openspec/changes/alpha/tasks.md"),
+            "- [x] a\n- [ ] b\n",
+        );
         let empty = ScratchDir::new();
         let empty_dir = canonical(empty.path());
         let mut locations = SchemaLocations::default();
@@ -8771,7 +8845,10 @@ apply:
             let ids: Vec<&str> = alpha.artifacts.iter().map(|a| a.id.as_str()).collect();
             assert_eq!(ids, vec!["proposal", "tasks"]);
             assert!(
-                alpha.problems.iter().all(|p| !p.contains("is not vendored")),
+                alpha
+                    .problems
+                    .iter()
+                    .all(|p| !p.contains("is not vendored")),
                 "{:?}",
                 alpha.problems
             );
@@ -8801,7 +8878,12 @@ apply:
             write(&member_repo.join("openspec/changes/x/tasks.md"), &tasks);
 
             let t = touched(&["x"], &[]);
-            let owned = from_files_owned(&member_repo, &t, ArchivedScope::Full);
+            let owned = from_files_owned(
+                &member_repo,
+                &t,
+                ArchivedScope::Full,
+                &SchemaLocations::default(),
+            );
 
             let result = overlay(base, &[], &[(worktree(&member_repo, "feat"), t, owned)]);
 
@@ -8834,7 +8916,12 @@ apply:
             );
 
             let t = touched(&["b"], &[]);
-            let owned = from_files_owned(&member_repo, &t, ArchivedScope::Full);
+            let owned = from_files_owned(
+                &member_repo,
+                &t,
+                ArchivedScope::Full,
+                &SchemaLocations::default(),
+            );
             let result = overlay(base, &[], &[(worktree(&member_repo, "feat"), t, owned)]);
 
             let names: Vec<&str> = result.active.iter().map(|c| c.name.as_str()).collect();
@@ -8878,7 +8965,12 @@ apply:
             let t = touched(&["y"], &["2026-09-24-y"]);
 
             let base_names = from_files(&base_repo, ArchivedScope::Names);
-            let owned_names = from_files_owned(&member_repo, &t, ArchivedScope::Names);
+            let owned_names = from_files_owned(
+                &member_repo,
+                &t,
+                ArchivedScope::Names,
+                &SchemaLocations::default(),
+            );
             let names_result = overlay(
                 base_names,
                 &base_archive_dirs,
@@ -8890,7 +8982,12 @@ apply:
             assert_set_invariants(&names_result);
 
             let base_full = from_files(&base_repo, ArchivedScope::Full);
-            let owned_full = from_files_owned(&member_repo, &t, ArchivedScope::Full);
+            let owned_full = from_files_owned(
+                &member_repo,
+                &t,
+                ArchivedScope::Full,
+                &SchemaLocations::default(),
+            );
             let full_result = overlay(
                 base_full,
                 &base_archive_dirs,
@@ -8932,7 +9029,12 @@ apply:
             // archived one stripping to `y` — a bare deletion.
 
             let t = touched(&["y"], &[]);
-            let owned = from_files_owned(&member_repo, &t, ArchivedScope::Full);
+            let owned = from_files_owned(
+                &member_repo,
+                &t,
+                ArchivedScope::Full,
+                &SchemaLocations::default(),
+            );
             let result = overlay(base, &[], &[(worktree(&member_repo, "feat"), t, owned)]);
 
             assert_eq!(result.active.len(), 1);
@@ -8966,7 +9068,12 @@ apply:
             );
 
             let t = touched(&[], &["2026-08-01-old"]);
-            let owned = from_files_owned(&member_repo, &t, ArchivedScope::Full);
+            let owned = from_files_owned(
+                &member_repo,
+                &t,
+                ArchivedScope::Full,
+                &SchemaLocations::default(),
+            );
             let result = overlay(
                 base,
                 &base_archive_dirs,
@@ -9051,9 +9158,19 @@ apply:
             write(&fix_repo.join("openspec/changes/x/tasks.md"), &fix_tasks);
 
             let feat_touched = touched(&["x"], &[]);
-            let feat_owned = from_files_owned(&feat_repo, &feat_touched, ArchivedScope::Full);
+            let feat_owned = from_files_owned(
+                &feat_repo,
+                &feat_touched,
+                ArchivedScope::Full,
+                &SchemaLocations::default(),
+            );
             let fix_touched = touched(&["x"], &[]);
-            let fix_owned = from_files_owned(&fix_repo, &fix_touched, ArchivedScope::Full);
+            let fix_owned = from_files_owned(
+                &fix_repo,
+                &fix_touched,
+                ArchivedScope::Full,
+                &SchemaLocations::default(),
+            );
 
             let result = overlay(
                 base,
@@ -9103,12 +9220,22 @@ apply:
                     (
                         worktree(&feat_repo, "feat"),
                         feat_touched.clone(),
-                        from_files_owned(&feat_repo, &feat_touched, ArchivedScope::Full),
+                        from_files_owned(
+                            &feat_repo,
+                            &feat_touched,
+                            ArchivedScope::Full,
+                            &SchemaLocations::default(),
+                        ),
                     ),
                     (
                         worktree(&fix_repo, "fix"),
                         fix_touched.clone(),
-                        from_files_owned(&fix_repo, &fix_touched, ArchivedScope::Full),
+                        from_files_owned(
+                            &fix_repo,
+                            &fix_touched,
+                            ArchivedScope::Full,
+                            &SchemaLocations::default(),
+                        ),
                     ),
                 ],
             );
@@ -9120,7 +9247,12 @@ apply:
                 &[(
                     worktree(&feat_repo, "feat"),
                     feat_touched.clone(),
-                    from_files_owned(&feat_repo, &feat_touched, ArchivedScope::Full),
+                    from_files_owned(
+                        &feat_repo,
+                        &feat_touched,
+                        ArchivedScope::Full,
+                        &SchemaLocations::default(),
+                    ),
                 )],
             );
             assert!(!only_feat.problems.iter().any(|p| p.contains('x')));
@@ -9146,7 +9278,8 @@ apply:
 
             let _ = crate::schema::take_recorded_reads();
             let _ = crate::tasks::take_recorded_reads();
-            let owned = from_files_owned(&repo, &t, ArchivedScope::Full);
+            let owned =
+                from_files_owned(&repo, &t, ArchivedScope::Full, &SchemaLocations::default());
 
             let schema_reads = crate::schema::take_recorded_reads();
             let task_reads = crate::tasks::take_recorded_reads();
@@ -9200,7 +9333,8 @@ apply:
 
             let _ = crate::schema::take_recorded_reads();
             let _ = crate::tasks::take_recorded_reads();
-            let owned = from_files_owned(&repo, &t, ArchivedScope::Full);
+            let owned =
+                from_files_owned(&repo, &t, ArchivedScope::Full, &SchemaLocations::default());
 
             assert_eq!(
                 crate::schema::take_recorded_reads(),

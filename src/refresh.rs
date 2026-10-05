@@ -504,6 +504,7 @@ fn worker_body(
                         &rem.base_archive_dirs,
                         &derivation.members,
                         rem.archived,
+                        &crate::changes::SchemaLocations::default(),
                     );
                     overlaid
                         .problems
@@ -548,6 +549,7 @@ fn worker_body(
             active_names,
             archived_list,
             list_problems,
+            &crate::changes::SchemaLocations::default(),
         );
         let files_overlaid = match &remembered {
             Some(rem) => {
@@ -556,6 +558,7 @@ fn worker_body(
                     &base_archive_dirs,
                     &rem.family.members,
                     request.archived,
+                    &crate::changes::SchemaLocations::default(),
                 );
                 overlaid
                     .problems
@@ -583,6 +586,7 @@ fn worker_body(
             &base_archive_dirs,
             &derivation.members,
             request.archived,
+            &crate::changes::SchemaLocations::default(),
         );
         merged_overlaid
             .problems
