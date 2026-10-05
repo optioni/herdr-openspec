@@ -25,20 +25,20 @@ group's new filters must then print `1`.
 ## 0. Acceptance Test — Outer Loop RED
 <!-- kind: behavior -->
 
-- [ ] 0.1 In `src/ui/mod.rs`'s `tests::wiring`, add a stand-in
+- [x] 0.1 In `src/ui/mod.rs`'s `tests::wiring`, add a stand-in
       `openspec_script_schema_which(dir, log, root, schema_dir)`. It answers `list --json`
       with an empty change list rooted at `root`, and `schema which spec-driven --json` with
       `{"name":"spec-driven","source":"package","path":"<schema_dir>","shadows":[]}`. It
       logs its argv as its last act, per `openspec_script_failing`'s doc comment.
-- [ ] 0.2 RED: Write `a_package_schema_draws_no_not_vendored_row`, driven through
+- [x] 0.2 RED: Write `a_package_schema_draws_no_not_vendored_row`, driven through
       `run_wired_staged` with `Config { openspec_bin: Some(script), .. }` and the two stages
       that design.md → Test Strategy names, at 120×20 and at 60×20. Make every assertion
       that section lists.
-- [ ] 0.3 Run `cargo test --all-features --lib ui::tests::wiring::a_package_schema_draws`,
+- [x] 0.3 Run `cargo test --all-features --lib ui::tests::wiring::a_package_schema_draws`,
       which must select 1 test. It must fail on the tab-id, `problems`, or `schema which`
       count assertion, with `completed == true`. A `completed == false` result is a harness
       fault, not a valid RED.
-- [ ] 0.4 Commit: `test(ui): pin a package-bundled schema drawing no not-vendored row`.
+- [x] 0.4 Commit: `test(ui): pin a package-bundled schema drawing no not-vendored row`.
 
 ## 1. The file producer loads a located schema
 <!-- kind: behavior -->
