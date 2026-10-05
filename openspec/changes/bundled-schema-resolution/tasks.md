@@ -119,7 +119,7 @@ group's new filters must then print `1`.
 ## 3. The worker locates before it merges
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: In `refresh::tests`, write these tests through `worker_for_test` with
+- [x] 3.1 RED: In `refresh::tests`, write these tests through `worker_for_test` with
       `recv_timeout(10s)` waits:
       - `an_active_package_schema_change_loses_its_problem_on_merged`;
       - `an_archived_package_schema_change_gets_its_artifacts`;
@@ -134,22 +134,25 @@ group's new filters must then print `1`.
 
       Also write the GUARDS `a_collapsed_archive_asks_nothing` and
       `a_vendored_schema_is_never_located`. These pass now.
-- [ ] 3.2 GREEN: In `worker_body`, at all four sites design.md → Boundaries names:
+  Note: `a_failed_lookup_is_asked_once_per_cycle` already passed pre-GREEN (a regression guard against double-asking); `a_collapsed_archive_asks_nothing` failed only on its post-`Full` leg.
+- [x] 3.2 GREEN: In `worker_body`, at all four sites design.md → Boundaries names:
       - pass `cache.locations()`;
       - keep a clone of step 1's `list_changes` results;
       - in step 2, call `locate_schemas`, and when it returns `> 0`, rebuild `files` from
         that clone before `from_cli_cached`.
-- [ ] 3.3 CHECK (guard controls): Delete the `NotVendored` filter in `locate_schemas`. Then
+- [x] 3.3 CHECK (guard controls): Delete the `NotVendored` filter in `locate_schemas`. Then
       `cargo test --all-features --lib -- a_collapsed_archive_asks_nothing a_vendored_schema_is_never_located locate_schemas_learns_nothing`
       must select 3 tests and fail all 3. Restore the filter, and the same command must
       pass 3.
-- [ ] 3.4 CHECK: `make gates` exits 0, with `NOBLOCK` and `READONLY-UI` included.
+  Result: with the filter deleted the 3 selected tests all failed; restored, all 3 pass.
+- [x] 3.4 CHECK: `make gates` exits 0, with `NOBLOCK` and `READONLY-UI` included.
       `grep -c "thread::spawn" src/refresh.rs` still prints 5, its planning-time value.
-- [ ] 3.5 REFACTOR: If step 1 and the step-2 rebuild repeat the build lines, extract one
+- [x] 3.5 REFACTOR: If step 1 and the step-2 rebuild repeat the build lines, extract one
       private helper in `src/refresh.rs`. Otherwise record "no refactor needed".
-- [ ] 3.6 Run `cargo test --all-features --lib refresh::`. The 9 new tests and the 8 carried
+  Outcome: no refactor needed (the step-1 and rebuild calls differ in ownership: clones vs moves).
+- [x] 3.6 Run `cargo test --all-features --lib refresh::`. The 9 new tests and the 8 carried
       worker scenarios must pass.
-- [ ] 3.7 Commit: `feat(refresh): locate not-vendored schemas before merging`.
+- [x] 3.7 Commit: `feat(refresh): locate not-vendored schemas before merging`.
 
 ## 4. Re-point the coverage map
 <!-- kind: operational -->

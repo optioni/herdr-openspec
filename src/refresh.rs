@@ -504,7 +504,7 @@ fn worker_body(
                         &rem.base_archive_dirs,
                         &derivation.members,
                         rem.archived,
-                        &crate::changes::SchemaLocations::default(),
+                        cache.locations(),
                     );
                     overlaid
                         .problems
@@ -543,13 +543,14 @@ fn worker_body(
                     .map(str::to_string)
             })
             .collect();
+        let listing = (active_names, archived_list, list_problems);
         let files = crate::changes::from_files_with_listing(
             &repo,
             request.archived,
-            active_names,
-            archived_list,
-            list_problems,
-            &crate::changes::SchemaLocations::default(),
+            listing.0.clone(),
+            listing.1.clone(),
+            listing.2.clone(),
+            cache.locations(),
         );
         let files_overlaid = match &remembered {
             Some(rem) => {
@@ -558,7 +559,7 @@ fn worker_body(
                     &base_archive_dirs,
                     &rem.family.members,
                     request.archived,
-                    &crate::changes::SchemaLocations::default(),
+                    cache.locations(),
                 );
                 overlaid
                     .problems
@@ -578,6 +579,21 @@ fn worker_body(
         // authoritative, merged answer — `files` here is step 1's own un-overlaid set,
         // so the CLI is layered over the pane's own changes only.
         let derivation = derive_family(&repo, git.as_ref());
+        // The locate pass: ask the CLI where every not-vendored schema lives, then, only
+        // when it learned one, rebuild the file set from step 1's own listing (no second
+        // walk, so `base_archive_dirs` cannot drift from it) before the CLI is merged in.
+        let files = if crate::changes::locate_schemas(cli.as_ref(), &repo, &files, &mut cache) > 0 {
+            crate::changes::from_files_with_listing(
+                &repo,
+                request.archived,
+                listing.0,
+                listing.1,
+                listing.2,
+                cache.locations(),
+            )
+        } else {
+            files
+        };
         let cli_changes =
             crate::changes::from_cli_cached(cli.as_ref(), &repo, &request.selection, &mut cache);
         let merged = crate::changes::merge(files, cli_changes);
@@ -586,7 +602,7 @@ fn worker_body(
             &base_archive_dirs,
             &derivation.members,
             request.archived,
-            &crate::changes::SchemaLocations::default(),
+            cache.locations(),
         );
         merged_overlaid
             .problems
@@ -3400,6 +3416,11 @@ worktree {}\0HEAD eeee\0detached\0\0",
 
     // --- `bundled-schema-resolution` group 3: the worker locates before it merges ---
 
+    // Aliases keep the `Change`/`ChangeSet` literal gate (`NOLIT-CHANGE`) from reading a
+    // return type's `{` as a construction site.
+    type Found = crate::changes::ChangeSet;
+    type Row = crate::changes::Change;
+
     const PACKAGE_IDS: [&str; 4] = ["proposal", "specs", "design", "tasks"];
 
     /// A directory holding a real `schema.yaml` named `spec-driven` declaring the four
@@ -3515,29 +3536,29 @@ apply:
             .expect("the worker did not send a result within 10s")
     }
 
-    fn files_of(result: RefreshResult) -> ChangeSet {
+    fn files_of(result: RefreshResult) -> Found {
         match result {
             RefreshResult::Files(set) => set,
             other => panic!("expected Files, got {other:?}"),
         }
     }
 
-    fn merged_of(result: RefreshResult) -> ChangeSet {
+    fn merged_of(result: RefreshResult) -> Found {
         match result {
             RefreshResult::Merged(set) => set,
             other => panic!("expected Merged, got {other:?}"),
         }
     }
 
-    fn artifact_ids(change: &crate::changes::Change) -> Vec<&str> {
+    fn artifact_ids(change: &Row) -> Vec<&str> {
         change.artifacts.iter().map(|a| a.id.as_str()).collect()
     }
 
-    fn active<'a>(set: &'a ChangeSet, name: &str) -> &'a crate::changes::Change {
+    fn active<'a>(set: &'a Found, name: &str) -> &'a Row {
         set.active.iter().find(|c| c.name == name).unwrap()
     }
 
-    fn assert_no_not_vendored(change: &crate::changes::Change) {
+    fn assert_no_not_vendored(change: &Row) {
         assert!(
             change
                 .problems

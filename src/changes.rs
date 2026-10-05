@@ -1761,8 +1761,6 @@ pub struct CliCache {
 
 impl CliCache {
     /// The schema locations learned so far, which the file producer reads.
-    // Wired into the refresh worker by `bundled-schema-resolution` group 3; remove then.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn locations(&self) -> &SchemaLocations {
         &self.locations
     }
@@ -1775,8 +1773,6 @@ impl CliCache {
 /// `from_cli_cached` re-asks about those changes. Returns how many locations
 /// it learned. Total, records no problem of its own, and clears the cycle's
 /// misses before it starts.
-// Wired into the refresh worker by `bundled-schema-resolution` group 3; remove then.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn locate_schemas(
     cli: &dyn crate::cli::OpenspecCli,
     repo: &std::path::Path,
