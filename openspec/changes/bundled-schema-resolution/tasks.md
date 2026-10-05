@@ -77,7 +77,7 @@ group's new filters must then print `1`.
 ## 2. The CLI tier shares and fills the locations
 <!-- kind: behavior -->
 
-- [ ] 2.1 RED: In `changes::tests::schema_fallback`, write these tests, each counting
+- [x] 2.1 RED: In `changes::tests::schema_fallback`, write these tests, each counting
       invocations through the fake's record:
       - `a_remembered_location_is_loaded_without_a_spawn`;
       - `a_successful_lookup_fills_the_cache_for_the_next_call`;
@@ -89,14 +89,14 @@ group's new filters must then print `1`.
 
       Also write the GUARD `locate_schemas_learns_nothing_for_a_vendored_schema`. Expect
       compile failures naming `CliCache::locations` and `locate_schemas`.
-- [ ] 2.2 GREEN: Add `CliCache`'s `locations` field and accessor.
+- [x] 2.2 GREEN: Add `CliCache`'s `locations` field and accessor.
       `resolve_cli_schema`/`resolve_cli_schema_uncached` take `&mut SchemaLocations` and
       follow design.md → Contracts: usable dirs first, then misses, then a spawn, with a miss
       recorded for every non-usable outcome. `from_cli_cached` passes `&mut cache.locations`
       and clears `misses` before it returns. The 23 test call sites
       (`grep -c "resolve_cli_schema(&fake" src/changes.rs` → 23) pass a fresh
       `&mut SchemaLocations::default()`.
-- [ ] 2.3 GREEN: Add `pub(crate) fn locate_schemas(cli, repo, files: &ChangeSet, cache: &mut CliCache) -> usize`,
+- [x] 2.3 GREEN: Add `pub(crate) fn locate_schemas(cli, repo, files: &ChangeSet, cache: &mut CliCache) -> usize`,
       per design.md → Contracts and Decisions 6–8 and 10. It:
       - clears `misses`;
       - collects names from the built `active` and `archived` changes;
@@ -105,16 +105,16 @@ group's new filters must then print `1`.
       - asks once for each remaining name;
       - drops the `CliCache` entries of every newly located name;
       - returns the count learned.
-- [ ] 2.4 CHECK: `changes::tests::from_cli_cached::a_rejected_schema_is_cached_like_any_other`
+- [x] 2.4 CHECK: `changes::tests::from_cli_cached::a_rejected_schema_is_cached_like_any_other`
       passes unmodified (Decision 11). With `X='/fn a_rejected_schema_is_cached_like_any_other/,/^        }$/p'`,
       `diff <(git show e77dac3:src/changes.rs | sed -n "$X") <(sed -n "$X" src/changes.rs)`
       must exit 0 with no output. At planning time it exited 0 and selected 114 lines.
-- [ ] 2.5 CHECK: `make gates` exits 0, including `NOSPAWN-GREP`. Every new spawn goes
+- [x] 2.5 CHECK: `make gates` exits 0, including `NOSPAWN-GREP`. Every new spawn goes
       through `OpenspecCli`.
-- [ ] 2.6 Run `cargo test --all-features --lib changes::`. The 8 new tests and every existing
+- [x] 2.6 Run `cargo test --all-features --lib changes::`. The 8 new tests and every existing
       `schema_fallback`, `from_cli`, `from_cli_cached`, `merge`, and `join_artifacts` test must
       pass.
-- [ ] 2.7 Commit: `feat(changes): remember schema which locations in CliCache`.
+- [x] 2.7 Commit: `feat(changes): remember schema which locations in CliCache`.
 
 ## 3. The worker locates before it merges
 <!-- kind: behavior -->

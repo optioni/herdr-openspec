@@ -1549,15 +1549,72 @@ struct CachedCliSchema {
     problems: Vec<String>,
 }
 
+/// A location is usable when `<dir>/schema.yaml` is a regular file — the one
+/// filesystem read the locations add (`bundled-schema-resolution` design ->
+/// Contracts).
+fn location_usable(dir: &std::path::Path) -> bool {
+    dir.join("schema.yaml").is_file()
+}
+
+/// Ask `openspec schema which` where `name` lives and record the outcome in
+/// `locations`: a usable directory is remembered and returned; every other
+/// outcome (a `CliError`, an unusable payload, a directory with no regular
+/// `schema.yaml`) leaves no location behind and records a miss holding the one
+/// problem that outcome renders, which is also returned. The single site both
+/// the locate pass and the fallback tier ask through.
+fn ask_schema_location(
+    cli: &dyn crate::cli::OpenspecCli,
+    name: &str,
+    locations: &mut SchemaLocations,
+) -> Result<PathBuf, String> {
+    let args = ["schema", "which", name, "--json"];
+    let problem = match cli.run(&args) {
+        Ok(text) => match parse_schema_which(&text) {
+            Ok(dir) => {
+                if location_usable(&dir) {
+                    locations.misses.remove(name);
+                    locations.dirs.insert(name.to_string(), dir.clone());
+                    return Ok(dir);
+                }
+                schema_load_problem(&crate::schema::LoadError::NotVendored {
+                    path: dir.join("schema.yaml"),
+                })
+            }
+            Err(reason) => {
+                format!("openspec schema which {name:?} --json payload is unusable: {reason}")
+            }
+        },
+        Err(err) => cli_error_problem(&format!("schema {name:?}"), &args, &err),
+    };
+    locations.dirs.remove(name);
+    locations.misses.insert(name.to_string(), problem.clone());
+    Err(problem)
+}
+
+fn cli_schema_from_dir(dir: &std::path::Path, name: &str) -> CachedCliSchema {
+    match crate::schema::load_dir(dir, name) {
+        Ok(parsed) => CachedCliSchema {
+            schema: Some(parsed.schema),
+            problems: parsed.problems,
+        },
+        Err(err) => CachedCliSchema {
+            schema: None,
+            problems: vec![schema_load_problem(&err)],
+        },
+    }
+}
+
 /// The uncached half of [`resolve_cli_schema`]: repository tier, then — on
-/// `LoadError::NotVendored` only — the `openspec schema which` tier. See
-/// `schema-cli-fallback` -> "A not-vendored schema is repaired through
-/// `openspec schema which`" and "Every failure of the fallback tier
-/// degrades and names itself".
+/// `LoadError::NotVendored` only — a remembered usable location, a miss
+/// recorded earlier in the cycle, and last the `openspec schema which` tier.
+/// See `schema-cli-fallback` -> "A located schema directory is remembered
+/// for the worker's lifetime and shared with the file producer" and "Every
+/// failure of the fallback tier degrades and names itself".
 fn resolve_cli_schema_uncached(
     cli: &dyn crate::cli::OpenspecCli,
     repo: &std::path::Path,
     name: &str,
+    locations: &mut SchemaLocations,
 ) -> CachedCliSchema {
     match crate::schema::load(repo, name) {
         Ok(parsed) => CachedCliSchema {
@@ -1565,29 +1622,22 @@ fn resolve_cli_schema_uncached(
             problems: parsed.problems,
         },
         Err(crate::schema::LoadError::NotVendored { path: _ }) => {
-            let args = ["schema", "which", name, "--json"];
-            match cli.run(&args) {
-                Ok(text) => match parse_schema_which(&text) {
-                    Ok(dir) => match crate::schema::load_dir(&dir, name) {
-                        Ok(parsed) => CachedCliSchema {
-                            schema: Some(parsed.schema),
-                            problems: parsed.problems,
-                        },
-                        Err(err) => CachedCliSchema {
-                            schema: None,
-                            problems: vec![schema_load_problem(&err)],
-                        },
-                    },
-                    Err(reason) => CachedCliSchema {
-                        schema: None,
-                        problems: vec![format!(
-                            "openspec schema which {name:?} --json payload is unusable: {reason}"
-                        )],
-                    },
-                },
-                Err(err) => CachedCliSchema {
+            if let Some(dir) = locations.dirs.get(name)
+                && location_usable(dir)
+            {
+                return cli_schema_from_dir(dir, name);
+            }
+            if let Some(problem) = locations.misses.get(name) {
+                return CachedCliSchema {
                     schema: None,
-                    problems: vec![cli_error_problem(&format!("schema {name:?}"), &args, &err)],
+                    problems: vec![problem.clone()],
+                };
+            }
+            match ask_schema_location(cli, name, locations) {
+                Ok(dir) => cli_schema_from_dir(&dir, name),
+                Err(problem) => CachedCliSchema {
+                    schema: None,
+                    problems: vec![problem],
                 },
             }
         }
@@ -1606,6 +1656,7 @@ fn resolve_cli_schema_uncached(
 /// (`resolve::BinCache`'s reason: the suite runs this crate's tests in
 /// parallel threads of one process). Every caller sharing `cache` for the
 /// same `name` receives a clone of the same problems, not only the first.
+/// `locations` outlives the call when the caller is the worker's `CliCache`.
 /// See `schema-cli-fallback` -> "A schema is resolved at most once per name
 /// per call".
 fn resolve_cli_schema(
@@ -1613,10 +1664,11 @@ fn resolve_cli_schema(
     repo: &std::path::Path,
     name: &str,
     cache: &mut std::collections::HashMap<String, CachedCliSchema>,
+    locations: &mut SchemaLocations,
 ) -> (Option<crate::schema::Schema>, Vec<String>) {
     let cached = cache
         .entry(name.to_string())
-        .or_insert_with(|| resolve_cli_schema_uncached(cli, repo, name));
+        .or_insert_with(|| resolve_cli_schema_uncached(cli, repo, name, locations));
     (cached.schema.clone(), cached.problems.clone())
 }
 
@@ -1704,6 +1756,61 @@ struct CliCacheEntry {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CliCache {
     entries: std::collections::HashMap<String, CliCacheEntry>,
+    locations: SchemaLocations,
+}
+
+impl CliCache {
+    /// The schema locations learned so far, which the file producer reads.
+    // Wired into the refresh worker by `bundled-schema-resolution` group 3; remove then.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn locations(&self) -> &SchemaLocations {
+        &self.locations
+    }
+}
+
+/// The locate pass (`refresh-worker` -> "Step 2 locates every not-vendored
+/// schema before it merges"): over the built `files`, ask `schema which` once
+/// for every distinct not-vendored schema name `cache` holds no usable location
+/// for, and drop the per-change entries of every name it newly locates so
+/// `from_cli_cached` re-asks about those changes. Returns how many locations
+/// it learned. Total, records no problem of its own, and clears the cycle's
+/// misses before it starts.
+// Wired into the refresh worker by `bundled-schema-resolution` group 3; remove then.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn locate_schemas(
+    cli: &dyn crate::cli::OpenspecCli,
+    repo: &std::path::Path,
+    files: &ChangeSet,
+    cache: &mut CliCache,
+) -> usize {
+    cache.locations.misses.clear();
+    let names: std::collections::BTreeSet<&str> = files
+        .active
+        .iter()
+        .chain(files.archived.iter())
+        .map(|change| change.schema.as_str())
+        .collect();
+
+    let mut learned = 0;
+    for name in names {
+        if !matches!(
+            crate::schema::load(repo, name),
+            Err(crate::schema::LoadError::NotVendored { path: _ })
+        ) {
+            continue;
+        }
+        if let Some(dir) = cache.locations.dirs.get(name) {
+            if location_usable(dir) {
+                continue;
+            }
+            cache.locations.dirs.remove(name);
+        }
+        if ask_schema_location(cli, name, &mut cache.locations).is_ok() {
+            learned += 1;
+            cache.entries.retain(|_, entry| entry.schema != name);
+        }
+    }
+    learned
 }
 
 /// Build one `Change` from CLI-sourced parts, naming every field explicitly
@@ -1739,6 +1846,19 @@ fn build_cli_change(
 /// never `unwrap`s on any input. See `specs/refresh-worker/spec.md` for the
 /// full contract this function implements.
 pub fn from_cli_cached(
+    cli: &dyn crate::cli::OpenspecCli,
+    repo: &std::path::Path,
+    selection: &Selection,
+    cache: &mut CliCache,
+) -> CliChanges {
+    let result = from_cli_cached_inner(cli, repo, selection, cache);
+    // A miss lives for one cycle (design.md -> Decision 11): the locate pass
+    // fills it, this call consumes it, and nothing carries it further.
+    cache.locations.misses.clear();
+    result
+}
+
+fn from_cli_cached_inner(
     cli: &dyn crate::cli::OpenspecCli,
     repo: &std::path::Path,
     selection: &Selection,
@@ -1854,8 +1974,13 @@ pub fn from_cli_cached(
             continue;
         }
 
-        let (schema, mut change_problems) =
-            resolve_cli_schema(cli, repo, &apply.schema_name, &mut schema_cache);
+        let (schema, mut change_problems) = resolve_cli_schema(
+            cli,
+            repo,
+            &apply.schema_name,
+            &mut schema_cache,
+            &mut cache.locations,
+        );
 
         let (artifacts, artifact_problems) = match &schema {
             Some(schema) => cli_artifacts(schema, &apply.context_files),
@@ -5918,7 +6043,13 @@ apply:
             );
 
             let mut cache = HashMap::new();
-            let (schema, problems) = resolve_cli_schema(&fake, &repo, "spec-driven", &mut cache);
+            let (schema, problems) = resolve_cli_schema(
+                &fake,
+                &repo,
+                "spec-driven",
+                &mut cache,
+                &mut SchemaLocations::default(),
+            );
             let schema = schema.expect("should resolve");
             let ids: Vec<&str> = schema.artifacts.iter().map(|a| a.id.as_str()).collect();
             assert_eq!(ids, vec!["proposal", "tasks"]);
@@ -5936,7 +6067,13 @@ apply:
             // unregistered pair, so a passing test proves the call was
             // never made.
             let mut cache = HashMap::new();
-            let (schema, problems) = resolve_cli_schema(&fake, &repo, "tdd", &mut cache);
+            let (schema, problems) = resolve_cli_schema(
+                &fake,
+                &repo,
+                "tdd",
+                &mut cache,
+                &mut SchemaLocations::default(),
+            );
             assert!(schema.is_some());
             assert!(problems.is_empty());
         }
@@ -5949,7 +6086,13 @@ apply:
 
             let fake = FakeCli::new();
             let mut cache = HashMap::new();
-            let (schema, problems) = resolve_cli_schema(&fake, &repo, "odd", &mut cache);
+            let (schema, problems) = resolve_cli_schema(
+                &fake,
+                &repo,
+                "odd",
+                &mut cache,
+                &mut SchemaLocations::default(),
+            );
             assert!(schema.is_none());
             assert_eq!(problems.len(), 1);
             assert!(problems[0].contains("odd") || problems[0].contains("schema.yaml"));
@@ -5966,7 +6109,13 @@ apply:
 
             let fake = FakeCli::new();
             let mut cache = HashMap::new();
-            let (schema, problems) = resolve_cli_schema(&fake, &repo, "bad", &mut cache);
+            let (schema, problems) = resolve_cli_schema(
+                &fake,
+                &repo,
+                "bad",
+                &mut cache,
+                &mut SchemaLocations::default(),
+            );
             assert!(schema.is_none());
             assert_eq!(problems.len(), 1);
         }
@@ -6004,11 +6153,27 @@ apply:
             );
 
             let mut cache = HashMap::new();
-            let (tdd, tdd_problems) = resolve_cli_schema(&fake, &repo, "tdd", &mut cache);
-            let (unknown, unknown_problems) =
-                resolve_cli_schema(&fake, &repo, "outside-in-tdd", &mut cache);
-            let (spec_driven, spec_driven_problems) =
-                resolve_cli_schema(&fake, &repo, "spec-driven", &mut cache);
+            let (tdd, tdd_problems) = resolve_cli_schema(
+                &fake,
+                &repo,
+                "tdd",
+                &mut cache,
+                &mut SchemaLocations::default(),
+            );
+            let (unknown, unknown_problems) = resolve_cli_schema(
+                &fake,
+                &repo,
+                "outside-in-tdd",
+                &mut cache,
+                &mut SchemaLocations::default(),
+            );
+            let (spec_driven, spec_driven_problems) = resolve_cli_schema(
+                &fake,
+                &repo,
+                "spec-driven",
+                &mut cache,
+                &mut SchemaLocations::default(),
+            );
 
             assert!(tdd.is_some());
             assert!(tdd_problems.is_empty());
@@ -6034,7 +6199,13 @@ apply:
             );
 
             let mut cache = HashMap::new();
-            let (schema, problems) = resolve_cli_schema(&fake, &repo, "ghost", &mut cache);
+            let (schema, problems) = resolve_cli_schema(
+                &fake,
+                &repo,
+                "ghost",
+                &mut cache,
+                &mut SchemaLocations::default(),
+            );
             assert!(schema.is_none());
             assert_eq!(problems.len(), 1);
             assert!(problems[0].contains("schema.yaml"));
@@ -6067,7 +6238,13 @@ apply:
             );
 
             let mut cache = HashMap::new();
-            let (schema, problems) = resolve_cli_schema(&fake, &repo, "spec-driven", &mut cache);
+            let (schema, problems) = resolve_cli_schema(
+                &fake,
+                &repo,
+                "spec-driven",
+                &mut cache,
+                &mut SchemaLocations::default(),
+            );
             assert!(schema.is_none());
             assert_eq!(problems.len(), 1);
             assert!(problems[0].contains("spec-driven"));
@@ -6104,7 +6281,13 @@ apply:
                 failed("env: node: No such file or directory\n"),
             );
             let mut cache = HashMap::new();
-            let (schema, problems) = resolve_cli_schema(&fake, &repo, "spec-driven", &mut cache);
+            let (schema, problems) = resolve_cli_schema(
+                &fake,
+                &repo,
+                "spec-driven",
+                &mut cache,
+                &mut SchemaLocations::default(),
+            );
             assert!(schema.is_none());
             assert_eq!(problems.len(), 1);
             assert!(problems[0].contains("spec-driven"));
@@ -6114,8 +6297,13 @@ apply:
             let fake_empty = FakeCli::new();
             fake_empty.register_openspec(&["schema", "which", "spec-driven", "--json"], failed(""));
             let mut cache_empty = HashMap::new();
-            let (_, empty_problems) =
-                resolve_cli_schema(&fake_empty, &repo, "spec-driven", &mut cache_empty);
+            let (_, empty_problems) = resolve_cli_schema(
+                &fake_empty,
+                &repo,
+                "spec-driven",
+                &mut cache_empty,
+                &mut SchemaLocations::default(),
+            );
             assert_eq!(empty_problems.len(), 1);
 
             // Measured: `openspec schema which nosuchschema --json` from
@@ -6127,8 +6315,13 @@ apply:
                 failed("Note: Schema commands are experimental and may change.\n"),
             );
             let mut cache_banner = HashMap::new();
-            let (_, banner_problems) =
-                resolve_cli_schema(&fake_banner, &repo, "spec-driven", &mut cache_banner);
+            let (_, banner_problems) = resolve_cli_schema(
+                &fake_banner,
+                &repo,
+                "spec-driven",
+                &mut cache_banner,
+                &mut SchemaLocations::default(),
+            );
             assert_eq!(banner_problems, empty_problems);
         }
 
@@ -6160,14 +6353,24 @@ apply:
             };
 
             let mut cache = HashMap::new();
-            let (invalid_schema, invalid_problems) =
-                resolve_cli_schema(&fake, &repo, "invalid-one", &mut cache);
+            let (invalid_schema, invalid_problems) = resolve_cli_schema(
+                &fake,
+                &repo,
+                "invalid-one",
+                &mut cache,
+                &mut SchemaLocations::default(),
+            );
             assert!(invalid_schema.is_none());
             assert_eq!(invalid_problems.len(), 1);
             assert_eq!(schema_which_call_count(&fake), 1);
 
-            let (unreadable_schema, unreadable_problems) =
-                resolve_cli_schema(&fake, &repo, "unreadable-one", &mut cache);
+            let (unreadable_schema, unreadable_problems) = resolve_cli_schema(
+                &fake,
+                &repo,
+                "unreadable-one",
+                &mut cache,
+                &mut SchemaLocations::default(),
+            );
             assert!(unreadable_schema.is_none());
             assert_eq!(unreadable_problems.len(), 1);
             assert_eq!(schema_which_call_count(&fake), 2);
@@ -6190,7 +6393,13 @@ apply:
                     Ok(payload.to_string()),
                 );
                 let mut cache = HashMap::new();
-                let (schema, problems) = resolve_cli_schema(&fake, &repo, name, &mut cache);
+                let (schema, problems) = resolve_cli_schema(
+                    &fake,
+                    &repo,
+                    name,
+                    &mut cache,
+                    &mut SchemaLocations::default(),
+                );
                 assert!(schema.is_none(), "case {name}");
                 assert_eq!(problems.len(), 1, "case {name}");
             }
@@ -6209,7 +6418,13 @@ apply:
                 ),
             );
             let mut cache = HashMap::new();
-            let (schema, problems) = resolve_cli_schema(&fake, &repo, "noisy", &mut cache);
+            let (schema, problems) = resolve_cli_schema(
+                &fake,
+                &repo,
+                "noisy",
+                &mut cache,
+                &mut SchemaLocations::default(),
+            );
             assert!(schema.is_none());
             assert_eq!(problems.len(), 1);
         }
@@ -6234,10 +6449,20 @@ apply:
             );
 
             let mut cache = HashMap::new();
-            let (first_schema, first_problems) =
-                resolve_cli_schema(&fake, &repo, "spec-driven", &mut cache);
-            let (second_schema, second_problems) =
-                resolve_cli_schema(&fake, &repo, "spec-driven", &mut cache);
+            let (first_schema, first_problems) = resolve_cli_schema(
+                &fake,
+                &repo,
+                "spec-driven",
+                &mut cache,
+                &mut SchemaLocations::default(),
+            );
+            let (second_schema, second_problems) = resolve_cli_schema(
+                &fake,
+                &repo,
+                "spec-driven",
+                &mut cache,
+                &mut SchemaLocations::default(),
+            );
 
             assert!(first_schema.is_some());
             assert!(second_schema.is_some());
@@ -6281,12 +6506,7 @@ apply:
 
         /// Register `list --json` and one apply payload per name, every one
         /// reporting `schema`.
-        fn register_changes(
-            fake: &FakeCli,
-            repo: &std::path::Path,
-            names: &[&str],
-            schema: &str,
-        ) {
+        fn register_changes(fake: &FakeCli, repo: &std::path::Path, names: &[&str], schema: &str) {
             let entries: Vec<String> = names
                 .iter()
                 .map(|name| {
@@ -6308,7 +6528,10 @@ apply:
                     &["instructions", "apply", "--change", name, "--json"],
                     Ok(format!(
                         r#"{{"schemaName":{schema:?},"changeDir":{:?},"contextFiles":{{}}}}"#,
-                        repo.join("openspec/changes").join(name).display().to_string()
+                        repo.join("openspec/changes")
+                            .join(name)
+                            .display()
+                            .to_string()
                     )),
                 );
             }
@@ -6457,7 +6680,12 @@ apply:
                 &["schema", "which", "spec-driven", "--json"],
                 Err(which_failure("spec-driven")),
             );
-            let fresh = from_cli_cached(&fresh_fake, &repo, &Selection::All, &mut CliCache::default());
+            let fresh = from_cli_cached(
+                &fresh_fake,
+                &repo,
+                &Selection::All,
+                &mut CliCache::default(),
+            );
 
             assert_eq!(cycle.active[0].problems.len(), 1);
             assert!(cycle.active[0].problems[0].contains("schema which spec-driven --json"));
@@ -6551,7 +6779,6 @@ apply:
             assert_eq!(alpha.problems.len(), 1, "{:?}", alpha.problems);
         }
 
-
         #[test]
         fn three_changes_sharing_one_unvendored_schema_ask_the_cli_once() {
             let scratch = ScratchDir::new();
@@ -6600,8 +6827,13 @@ apply:
                 )
                 .unwrap();
                 let apply = parse_apply(&apply_text).unwrap();
-                let (schema, problems) =
-                    resolve_cli_schema(&fake, &repo, &apply.schema_name, &mut cache);
+                let (schema, problems) = resolve_cli_schema(
+                    &fake,
+                    &repo,
+                    &apply.schema_name,
+                    &mut cache,
+                    &mut SchemaLocations::default(),
+                );
                 let schema = schema.expect("should resolve");
                 let ids: Vec<&str> = schema.artifacts.iter().map(|a| a.id.as_str()).collect();
                 assert_eq!(ids, vec!["proposal", "tasks"]);
@@ -6640,8 +6872,13 @@ apply:
 
             let mut cache = HashMap::new();
             for _ in 0..3 {
-                let (schema, problems) =
-                    resolve_cli_schema(&fake, &repo, "outside-in-tdd", &mut cache);
+                let (schema, problems) = resolve_cli_schema(
+                    &fake,
+                    &repo,
+                    "outside-in-tdd",
+                    &mut cache,
+                    &mut SchemaLocations::default(),
+                );
                 assert!(schema.is_none());
                 assert_eq!(problems.len(), 1);
             }
@@ -6673,8 +6910,20 @@ apply:
             );
 
             let mut cache = HashMap::new();
-            let (a, _) = resolve_cli_schema(&fake, &repo, "spec-driven", &mut cache);
-            let (b, _) = resolve_cli_schema(&fake, &repo, "other-schema", &mut cache);
+            let (a, _) = resolve_cli_schema(
+                &fake,
+                &repo,
+                "spec-driven",
+                &mut cache,
+                &mut SchemaLocations::default(),
+            );
+            let (b, _) = resolve_cli_schema(
+                &fake,
+                &repo,
+                "other-schema",
+                &mut cache,
+                &mut SchemaLocations::default(),
+            );
             assert_eq!(
                 a.unwrap()
                     .artifacts
@@ -6719,7 +6968,13 @@ apply:
         // No "schema which" registration — the fake panics on an
         // unregistered pair, so a passing test proves no call was made.
         let mut cache = std::collections::HashMap::new();
-        let (schema, problems) = resolve_cli_schema(&fake, &repo, "../../../../etc", &mut cache);
+        let (schema, problems) = resolve_cli_schema(
+            &fake,
+            &repo,
+            "../../../../etc",
+            &mut cache,
+            &mut SchemaLocations::default(),
+        );
         assert!(schema.is_none());
         assert_eq!(problems.len(), 1);
         assert!(problems[0].contains("../../../../etc"));
