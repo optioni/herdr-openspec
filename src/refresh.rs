@@ -3397,4 +3397,605 @@ worktree {}\0HEAD eeee\0detached\0\0",
             other => panic!("expected Merged, got {other:?}"),
         }
     }
+
+    // --- `bundled-schema-resolution` group 3: the worker locates before it merges ---
+
+    const PACKAGE_IDS: [&str; 4] = ["proposal", "specs", "design", "tasks"];
+
+    /// A directory holding a real `schema.yaml` named `spec-driven` declaring the four
+    /// `PACKAGE_IDS` — the shape of the directory `openspec schema which` names for a
+    /// package-bundled schema the repository does not vendor.
+    fn package_schema_dir() -> (crate::testutil::ScratchDir, PathBuf) {
+        let scratch = crate::testutil::ScratchDir::new();
+        let dir = crate::testutil::canonical(scratch.path());
+        let yaml = "\
+name: spec-driven
+artifacts:
+  - id: proposal
+    generates: proposal.md
+  - id: specs
+    generates: specs/**/*.md
+  - id: design
+    generates: design.md
+  - id: tasks
+    generates: tasks.md
+apply:
+  tracks: tasks.md
+";
+        crate::testutil::write_with_mode(&dir.join("schema.yaml"), yaml.as_bytes(), 0o644);
+        (scratch, dir)
+    }
+
+    /// A scratch repository whose config declares `spec-driven` and which vendors nothing.
+    fn spec_driven_repo() -> (crate::testutil::ScratchDir, PathBuf) {
+        let scratch = crate::testutil::ScratchDir::new();
+        let root = crate::testutil::canonical(scratch.path());
+        crate::testutil::write_with_mode(
+            &root.join("openspec/config.yaml"),
+            b"schema: spec-driven\n",
+            0o644,
+        );
+        (scratch, root)
+    }
+
+    fn which_ok(dir: &std::path::Path) -> Result<String, crate::cli::CliError> {
+        Ok(format!(
+            r#"{{"name":"spec-driven","source":"package","path":{:?},"shadows":[]}}"#,
+            dir.display().to_string()
+        ))
+    }
+
+    fn which_failed() -> Result<String, crate::cli::CliError> {
+        Err(crate::cli::CliError::Failed {
+            program: "openspec".to_string(),
+            args: ["schema", "which", "spec-driven", "--json"]
+                .iter()
+                .map(|a| a.to_string())
+                .collect(),
+            code: Some(1),
+            stderr: "Schema 'spec-driven' not found".to_string(),
+        })
+    }
+
+    fn which_calls(fake: &crate::cli::FakeCli) -> usize {
+        fake.calls()
+            .iter()
+            .filter(|(_, args)| {
+                args.iter().take(2).map(String::as_str).collect::<Vec<_>>() == ["schema", "which"]
+            })
+            .count()
+    }
+
+    fn register_list(fake: &crate::cli::FakeCli, root: &std::path::Path, names: &[&str]) {
+        let changes: Vec<String> = names
+            .iter()
+            .map(|n| {
+                format!(
+                    r#"{{"name":"{n}","completedTasks":0,"totalTasks":0,"lastModified":"x","status":"y"}}"#
+                )
+            })
+            .collect();
+        fake.register_openspec(
+            &["list", "--json"],
+            Ok(format!(
+                r#"{{"changes":[{}],"root":{{"path":{:?},"source":"nearest"}}}}"#,
+                changes.join(","),
+                root.display().to_string()
+            )),
+        );
+        for n in names {
+            fake.register_openspec(
+                &["instructions", "apply", "--change", n, "--json"],
+                Ok(format!(
+                    r#"{{"schemaName":"spec-driven","changeDir":{:?},"contextFiles":{{}}}}"#,
+                    root.join("openspec/changes").join(n).display().to_string()
+                )),
+            );
+        }
+    }
+
+    fn no_family(root: &std::path::Path) -> Arc<dyn GitCli> {
+        let git = crate::cli::FakeCli::new();
+        git.register_git(
+            &git_args(
+                &root.display().to_string(),
+                &["worktree", "list", "--porcelain", "-z"],
+            ),
+            Err(crate::cli::CliError::NotStarted {
+                program: "git".to_string(),
+                args: vec!["worktree".to_string(), "list".to_string()],
+                reason: "not found".to_string(),
+            }),
+        );
+        Arc::new(git)
+    }
+
+    fn next_result(rx: &mpsc::Receiver<RefreshResult>) -> RefreshResult {
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("the worker did not send a result within 10s")
+    }
+
+    fn files_of(result: RefreshResult) -> ChangeSet {
+        match result {
+            RefreshResult::Files(set) => set,
+            other => panic!("expected Files, got {other:?}"),
+        }
+    }
+
+    fn merged_of(result: RefreshResult) -> ChangeSet {
+        match result {
+            RefreshResult::Merged(set) => set,
+            other => panic!("expected Merged, got {other:?}"),
+        }
+    }
+
+    fn artifact_ids(change: &crate::changes::Change) -> Vec<&str> {
+        change.artifacts.iter().map(|a| a.id.as_str()).collect()
+    }
+
+    fn active<'a>(set: &'a ChangeSet, name: &str) -> &'a crate::changes::Change {
+        set.active.iter().find(|c| c.name == name).unwrap()
+    }
+
+    fn assert_no_not_vendored(change: &crate::changes::Change) {
+        assert!(
+            change
+                .problems
+                .iter()
+                .all(|p| !p.contains("is not vendored")),
+            "{:?}",
+            change.problems
+        );
+    }
+
+    fn make_alpha(root: &std::path::Path) {
+        crate::testutil::write_with_mode(
+            &root.join("openspec/changes/alpha/tasks.md"),
+            b"- [ ] a\n",
+            0o644,
+        );
+    }
+
+    /// A `spec-driven` repository with one active `alpha`, an openspec fake that
+    /// reports it and answers `schema which`, and a worker over both.
+    struct Package {
+        _repo: crate::testutil::ScratchDir,
+        _pkg: crate::testutil::ScratchDir,
+        fake: Arc<crate::cli::FakeCli>,
+        refresher: Box<dyn Refresher>,
+        rx: mpsc::Receiver<RefreshResult>,
+        _exit: mpsc::Receiver<()>,
+    }
+
+    fn package_worker() -> Package {
+        let (repo_scratch, root) = spec_driven_repo();
+        make_alpha(&root);
+        let (pkg_scratch, pkg) = package_schema_dir();
+        let fake = Arc::new(crate::cli::FakeCli::new());
+        register_list(&fake, &root, &["alpha"]);
+        fake.register_openspec(
+            &["schema", "which", "spec-driven", "--json"],
+            which_ok(&pkg),
+        );
+        let cli: Arc<dyn OpenspecCli> = fake.clone();
+        let git = no_family(&root);
+        let (refresher, rx, exit) = worker_for_test(root, cli, git, WORKTREE_RECHECK);
+        Package {
+            _repo: repo_scratch,
+            _pkg: pkg_scratch,
+            fake,
+            refresher,
+            rx,
+            _exit: exit,
+        }
+    }
+
+    /// `refresh-worker` -> "An active change of a package-bundled schema loses its
+    /// problem row on the merged result".
+    #[test]
+    fn an_active_package_schema_change_loses_its_problem_on_merged() {
+        let mut w = package_worker();
+        w.refresher.request(Selection::All, ArchivedScope::Names);
+
+        let files = files_of(next_result(&w.rx));
+        let alpha = active(&files, "alpha");
+        assert!(alpha.artifacts.is_empty());
+        assert_eq!(alpha.problems.len(), 1, "{:?}", alpha.problems);
+        assert!(
+            alpha.problems[0].ends_with("is not vendored: no schema.yaml there"),
+            "{:?}",
+            alpha.problems
+        );
+
+        let merged = merged_of(next_result(&w.rx));
+        let alpha = active(&merged, "alpha");
+        assert_eq!(artifact_ids(alpha), PACKAGE_IDS);
+        assert_no_not_vendored(alpha);
+        assert_eq!(which_calls(&w.fake), 1);
+    }
+
+    /// `refresh-worker` -> "An archived change of a package-bundled schema gets its
+    /// artifacts".
+    #[test]
+    fn an_archived_package_schema_change_gets_its_artifacts() {
+        let (_repo, root) = spec_driven_repo();
+        crate::testutil::write_with_mode(
+            &root.join("openspec/changes/archive/2026-05-05-structured-player-actions/tasks.md"),
+            b"- [x] a\n- [ ] b\n",
+            0o644,
+        );
+        let (_pkg, pkg) = package_schema_dir();
+        let fake = Arc::new(crate::cli::FakeCli::new());
+        register_list(&fake, &root, &[]);
+        fake.register_openspec(
+            &["schema", "which", "spec-driven", "--json"],
+            which_ok(&pkg),
+        );
+        let cli: Arc<dyn OpenspecCli> = fake.clone();
+        let git = no_family(&root);
+        let (mut refresher, rx, _exit) = worker_for_test(root, cli, git, WORKTREE_RECHECK);
+        refresher.request(Selection::All, ArchivedScope::Full);
+
+        let _files = files_of(next_result(&rx));
+        let merged = merged_of(next_result(&rx));
+        let change = merged
+            .archived
+            .iter()
+            .find(|c| c.name == "structured-player-actions")
+            .expect("the archived change is listed");
+        assert_eq!(artifact_ids(change), PACKAGE_IDS);
+        assert_no_not_vendored(change);
+        assert_eq!(
+            (change.progress.completed, change.progress.total),
+            (1, 2),
+            "progress still comes from its own tasks.md"
+        );
+    }
+
+    /// `refresh-worker` -> "A remembered location serves the next cycle without a spawn".
+    #[test]
+    fn a_remembered_location_serves_the_next_cycle() {
+        let mut w = package_worker();
+        w.refresher.request(Selection::All, ArchivedScope::Names);
+        let _ = next_result(&w.rx);
+        let _ = next_result(&w.rx);
+        assert_eq!(which_calls(&w.fake), 1);
+
+        w.refresher.request(Selection::All, ArchivedScope::Names);
+        let files = files_of(next_result(&w.rx));
+        let alpha = active(&files, "alpha");
+        assert_eq!(artifact_ids(alpha), PACKAGE_IDS);
+        assert_no_not_vendored(alpha);
+        let _merged = merged_of(next_result(&w.rx));
+        assert_eq!(which_calls(&w.fake), 1, "the second cycle spawned nothing");
+    }
+
+    /// `refresh-worker` -> "A collapsed archive asks nothing about archived schemas".
+    /// A GUARD: green before the locate pass exists.
+    #[test]
+    fn a_collapsed_archive_asks_nothing() {
+        let (_repo, root) = scratch_root();
+        make_alpha(&root);
+        let archived = root.join("openspec/changes/archive/2026-05-05-old");
+        crate::testutil::write_with_mode(&archived.join("tasks.md"), b"- [x] a\n", 0o644);
+        crate::testutil::write_with_mode(
+            &archived.join(".openspec.yaml"),
+            b"schema: spec-driven\n",
+            0o644,
+        );
+        let (_pkg, pkg) = package_schema_dir();
+        let fake = Arc::new(crate::cli::FakeCli::new());
+        fake.register_openspec(
+            &["list", "--json"],
+            Ok(format!(
+                r#"{{"changes":[{{"name":"alpha","completedTasks":0,"totalTasks":1,"lastModified":"x","status":"y"}}],"root":{{"path":{:?},"source":"nearest"}}}}"#,
+                root.display().to_string()
+            )),
+        );
+        fake.register_openspec(
+            &["instructions", "apply", "--change", "alpha", "--json"],
+            Ok(format!(
+                r#"{{"schemaName":"tdd","changeDir":{:?},"contextFiles":{{}}}}"#,
+                root.join("openspec/changes/alpha").display().to_string()
+            )),
+        );
+        fake.register_openspec(
+            &["schema", "which", "spec-driven", "--json"],
+            which_ok(&pkg),
+        );
+        let cli: Arc<dyn OpenspecCli> = fake.clone();
+        let git = no_family(&root);
+        let (mut refresher, rx, _exit) = worker_for_test(root, cli, git, WORKTREE_RECHECK);
+
+        refresher.request(Selection::All, ArchivedScope::Names);
+        let _ = next_result(&rx);
+        let _ = next_result(&rx);
+        assert_eq!(which_calls(&fake), 0);
+
+        refresher.request(Selection::All, ArchivedScope::Full);
+        let _ = next_result(&rx);
+        let _ = next_result(&rx);
+        assert_eq!(which_calls(&fake), 1);
+    }
+
+    /// `refresh-worker` -> "A location that vanished is dropped and asked for again".
+    #[test]
+    fn a_vanished_location_is_asked_for_again() {
+        let (_repo, root) = spec_driven_repo();
+        make_alpha(&root);
+        let (_pkg_a, dir_a) = package_schema_dir();
+        let (_pkg_b, dir_b) = package_schema_dir();
+        let fake = Arc::new(crate::cli::FakeCli::new());
+        register_list(&fake, &root, &["alpha"]);
+        fake.register_openspec(
+            &["schema", "which", "spec-driven", "--json"],
+            which_ok(&dir_a),
+        );
+        fake.register_openspec(
+            &["schema", "which", "spec-driven", "--json"],
+            which_ok(&dir_b),
+        );
+        let cli: Arc<dyn OpenspecCli> = fake.clone();
+        let git = no_family(&root);
+        let (mut refresher, rx, _exit) = worker_for_test(root, cli, git, WORKTREE_RECHECK);
+
+        refresher.request(Selection::All, ArchivedScope::Names);
+        let _ = next_result(&rx);
+        let _ = next_result(&rx);
+        assert_eq!(which_calls(&fake), 1);
+
+        std::fs::remove_dir_all(&dir_a).expect("delete the first location");
+        refresher.request(Selection::All, ArchivedScope::Names);
+        let files = files_of(next_result(&rx));
+        let alpha = active(&files, "alpha");
+        assert!(alpha.artifacts.is_empty());
+        assert_eq!(alpha.problems.len(), 1, "{:?}", alpha.problems);
+        assert!(
+            alpha.problems[0].contains(&dir_a.display().to_string()),
+            "{:?}",
+            alpha.problems
+        );
+        let merged = merged_of(next_result(&rx));
+        let alpha = active(&merged, "alpha");
+        assert_eq!(artifact_ids(alpha), PACKAGE_IDS);
+        for dir in [&dir_a, &dir_b] {
+            assert!(
+                alpha
+                    .problems
+                    .iter()
+                    .all(|p| !p.contains(&dir.display().to_string())),
+                "{:?}",
+                alpha.problems
+            );
+        }
+        assert_eq!(which_calls(&fake), 2, "one more invocation for the cycle");
+    }
+
+    /// `refresh-worker` -> "A failed lookup is asked once per cycle and named once".
+    #[test]
+    fn a_failed_lookup_is_asked_once_per_cycle() {
+        let (_repo, root) = spec_driven_repo();
+        make_alpha(&root);
+        let fake = Arc::new(crate::cli::FakeCli::new());
+        register_list(&fake, &root, &["alpha"]);
+        fake.register_openspec(
+            &["schema", "which", "spec-driven", "--json"],
+            which_failed(),
+        );
+        let cli: Arc<dyn OpenspecCli> = fake.clone();
+        let git = no_family(&root);
+        let (mut refresher, rx, _exit) = worker_for_test(root, cli, git, WORKTREE_RECHECK);
+
+        for cycle in 1..=2 {
+            refresher.request(Selection::All, ArchivedScope::Names);
+            let _files = files_of(next_result(&rx));
+            let merged = merged_of(next_result(&rx));
+            let alpha = active(&merged, "alpha");
+            assert!(alpha.artifacts.is_empty());
+            assert_eq!(alpha.problems.len(), 2, "{:?}", alpha.problems);
+            assert!(
+                alpha.problems[0].ends_with("is not vendored: no schema.yaml there"),
+                "{:?}",
+                alpha.problems
+            );
+            assert!(
+                alpha.problems[1].contains("openspec schema which")
+                    && alpha.problems[1].contains("spec-driven --json")
+                    && alpha.problems[1].contains('1'),
+                "{:?}",
+                alpha.problems
+            );
+            assert_eq!(which_calls(&fake), cycle);
+        }
+    }
+
+    /// `refresh-worker` -> "A change cached while its lookup failed is re-asked once the
+    /// schema is located".
+    #[test]
+    fn a_cached_failure_is_re_asked_once_located() {
+        let (_repo, root) = spec_driven_repo();
+        make_alpha(&root);
+        crate::testutil::write_with_mode(
+            &root.join("openspec/changes/beta/tasks.md"),
+            b"- [ ] a\n",
+            0o644,
+        );
+        let (_pkg, pkg) = package_schema_dir();
+        let fake = Arc::new(crate::cli::FakeCli::new());
+        register_list(&fake, &root, &["alpha", "beta"]);
+        fake.register_openspec(
+            &["schema", "which", "spec-driven", "--json"],
+            which_failed(),
+        );
+        fake.register_openspec(
+            &["schema", "which", "spec-driven", "--json"],
+            which_ok(&pkg),
+        );
+        let cli: Arc<dyn OpenspecCli> = fake.clone();
+        let git = no_family(&root);
+        let (mut refresher, rx, _exit) = worker_for_test(root, cli, git, WORKTREE_RECHECK);
+
+        refresher.request(Selection::All, ArchivedScope::Names);
+        let _ = next_result(&rx);
+        let first = merged_of(next_result(&rx));
+        assert!(active(&first, "alpha").artifacts.is_empty());
+
+        let alpha_asks = |fake: &crate::cli::FakeCli| {
+            fake.calls()
+                .iter()
+                .filter(|(_, args)| {
+                    args.iter().map(String::as_str).collect::<Vec<_>>()
+                        == ["instructions", "apply", "--change", "alpha", "--json"]
+                })
+                .count()
+        };
+        let before = alpha_asks(&fake);
+        refresher.request(
+            Selection::Only(["beta".to_string()].into_iter().collect()),
+            ArchivedScope::Names,
+        );
+        let _ = next_result(&rx);
+        let second = merged_of(next_result(&rx));
+        assert_eq!(
+            alpha_asks(&fake),
+            before + 1,
+            "alpha is asked about though outside the selection"
+        );
+        let alpha = active(&second, "alpha");
+        assert_eq!(artifact_ids(alpha), PACKAGE_IDS);
+        assert!(alpha.problems.is_empty(), "{:?}", alpha.problems);
+    }
+
+    /// `refresh-worker` -> "A vendored schema is never located" (worker leg). A GUARD.
+    #[test]
+    fn a_vendored_schema_is_never_located() {
+        let (_repo, root) = scratch_root();
+        make_alpha(&root);
+        crate::testutil::write_with_mode(
+            &root.join("openspec/changes/archive/2026-05-05-old/tasks.md"),
+            b"- [x] a\n",
+            0o644,
+        );
+        let fake = Arc::new(crate::cli::FakeCli::new());
+        fake.register_openspec(
+            &["list", "--json"],
+            Ok(format!(
+                r#"{{"changes":[{{"name":"alpha","completedTasks":0,"totalTasks":1,"lastModified":"x","status":"y"}}],"root":{{"path":{:?},"source":"nearest"}}}}"#,
+                root.display().to_string()
+            )),
+        );
+        fake.register_openspec(
+            &["instructions", "apply", "--change", "alpha", "--json"],
+            Ok(format!(
+                r#"{{"schemaName":"tdd","changeDir":{:?},"contextFiles":{{}}}}"#,
+                root.join("openspec/changes/alpha").display().to_string()
+            )),
+        );
+        let cli: Arc<dyn OpenspecCli> = fake.clone();
+        let git = no_family(&root);
+        let (mut refresher, rx, _exit) = worker_for_test(root, cli, git, WORKTREE_RECHECK);
+
+        refresher.request(Selection::All, ArchivedScope::Names);
+        let _ = next_result(&rx);
+        let _ = next_result(&rx);
+        assert_eq!(which_calls(&fake), 0);
+        refresher.request(Selection::All, ArchivedScope::Full);
+        let _ = next_result(&rx);
+        let _ = next_result(&rx);
+        assert_eq!(which_calls(&fake), 0);
+    }
+
+    /// `refresh-worker` -> "A member's change of a located schema resolves in the merged
+    /// result and on re-check".
+    #[test]
+    fn a_members_package_schema_change_resolves_in_merged_and_recheck() {
+        let (_base, base_root) = spec_driven_repo();
+        make_alpha(&base_root);
+        let (_member, member_root) = spec_driven_repo();
+        crate::testutil::write_with_mode(
+            &member_root.join("openspec/changes/alpha/tasks.md"),
+            b"- [x] a\n- [ ] b\n",
+            0o644,
+        );
+        let (_pkg, pkg) = package_schema_dir();
+        let fake = Arc::new(crate::cli::FakeCli::new());
+        register_list(&fake, &base_root, &["alpha"]);
+        fake.register_openspec(
+            &["schema", "which", "spec-driven", "--json"],
+            which_ok(&pkg),
+        );
+        let cli: Arc<dyn OpenspecCli> = fake.clone();
+
+        let base_str = base_root.display().to_string();
+        let member_str = member_root.display().to_string();
+        let git_fake = Arc::new(crate::cli::FakeCli::new());
+        git_fake.register_git(
+            &git_args(&base_str, &["worktree", "list", "--porcelain", "-z"]),
+            Ok(format!(
+                "{}{}",
+                wt_record(&base_root, "aaaa", "main"),
+                wt_record(&member_root, "bbbb", "feat"),
+            )),
+        );
+        git_fake.register_git(
+            &git_args(&member_str, &["merge-base", "HEAD", "aaaa"]),
+            Ok("basecommit".to_string()),
+        );
+        git_fake.register_git(
+            &git_args(
+                &member_str,
+                &[
+                    "diff-tree",
+                    "-r",
+                    "--name-only",
+                    "-z",
+                    "--no-renames",
+                    "basecommit",
+                    "HEAD",
+                    "--",
+                    "openspec/changes",
+                ],
+            ),
+            Ok(String::new()),
+        );
+        git_fake.register_git(
+            &git_args(
+                &member_str,
+                &[
+                    "status",
+                    "--porcelain=v1",
+                    "-z",
+                    "--no-renames",
+                    "--untracked-files=all",
+                    "--",
+                    "openspec/changes",
+                ],
+            ),
+            Ok(" M openspec/changes/alpha/tasks.md\0".to_string()),
+        );
+        let git: Arc<dyn GitCli> = git_fake;
+
+        let (mut refresher, rx, _exit) =
+            worker_for_test(base_root, cli, git, Duration::from_millis(5));
+        refresher.request(Selection::All, ArchivedScope::Names);
+
+        let _files = files_of(next_result(&rx));
+        let merged = merged_of(next_result(&rx));
+        let alpha = active(&merged, "alpha");
+        assert!(alpha.dir.starts_with(&member_root), "{:?}", alpha.dir);
+        assert_eq!(artifact_ids(alpha), PACKAGE_IDS);
+        assert_no_not_vendored(alpha);
+
+        // Whatever the idle re-check sends next, and then the next request's `Files`.
+        refresher.request(Selection::All, ArchivedScope::Names);
+        let files = files_of(next_result(&rx));
+        let alpha = active(&files, "alpha");
+        assert_eq!(artifact_ids(alpha), PACKAGE_IDS);
+        assert_no_not_vendored(alpha);
+        assert_eq!(
+            which_calls(&fake),
+            1,
+            "the request and the re-check shared one lookup"
+        );
+    }
 }
