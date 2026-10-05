@@ -159,8 +159,12 @@ The join SHALL apply exactly these rules, in order:
    both-empty branch: a branch returning exactly what the next rule returns is not a
    distinct rule, and reads as one.
 2. The file list is **empty** and the CLI list is not — take the **CLI** list, record no
-   problem. This is the repaired case: the repository did not vendor the schema and
-   `schema-cli-fallback` found it.
+   problem. The repository did not vendor the schema and `schema-cli-fallback` found it,
+   but the file producer had no location for it. Once the refresh worker's locate pass has
+   run, the file producer resolves such a schema too. This rule is then reached only when
+   the two producers resolved different schema names for one change and the file
+   producer's name could not be loaded. One example is a `.openspec.yaml` edited between
+   the CLI's answer and the file walk.
 3. Both are non-empty and their **lengths differ** — take the **file** list and record one
    problem naming both lengths, because two different schemas were resolved and position is
    meaningless across them.
@@ -235,10 +239,14 @@ No entry SHALL be dropped on the grounds that the CLI superseded the field it de
 CLI cannot — a malformed `.openspec.yaml`, an unreadable `tasks.md` — which a reader stops
 learning about the moment the merge discards them.
 
-The consequence is accepted and stated: a change whose schema the repository does not
-vendor but `schema-cli-fallback` repaired keeps the file producer's "is not vendored"
-message alongside a fully populated artifact list. The message is still true — the
-repository does not vendor it — and losing an unrelated message is the worse failure.
+The consequence is accepted and stated: whatever the file change carries survives the merge,
+even beside an artifact list the CLI corrected. Dropping a stale message is therefore the
+**producer's** job, never the merge's. A schema the repository does not vendor but the CLI
+can locate no longer produces a file-side "is not vendored" message at all, because the
+refresh worker's locate pass gives the file producer that schema's directory before the merge
+runs (`change-artifacts` → "A schema the repository does not vendor is loaded from a supplied
+location"). The message reaches a merge only when no location could be learned, and there it
+is true and is kept. Losing an unrelated message would be the worse failure.
 
 #### Scenario: A file-side message survives beside a corrected artifact list
 

@@ -8,7 +8,8 @@ while always taking progress from the fresh `list --json`, and a `Refresher` tra
 `request`/`take_result` pair is non-blocking by contract. Its worker owns the crate's refresh
 thread, coalesces queued requests by union, and answers each request twice — the cheap
 file-sourced set first, then the CLI-merged one — so the render loop adopts whichever is
-ready. Deciding *when* to request a refresh from filesystem events is `watch-invalidation`'s
+ready. Before it merges, step 2 runs a **locate pass** that asks the CLI where each
+not-vendored schema lives, and rebuilds the file set when it learned a location. Deciding *when* to request a refresh from filesystem events is `watch-invalidation`'s
 job; adopting the results into the view is `live-updates`'.
 
 ## Requirements
@@ -310,20 +311,29 @@ remains the crate's only spawn site, checked tree-wide by `NOSPAWN-GREP`.
 
 For each request the worker SHALL, in this order:
 
-1. run `changes::from_files(repo, request.archived)`, overlay it with the **remembered** worktree family
-   and ownership — whatever the previous cycle or idle re-check last derived — reading each
-   member's owned changes afresh from its files, and send `RefreshResult::Files(overlaid)`; on the worker's first cycle there is
-   no previous family, and the file result is sent un-overlaid;
+1. build the file set under `request.archived` with the schema locations its `CliCache` already
+   remembers (`schema-cli-fallback` → "A located schema directory is remembered for the
+   worker's lifetime and shared with the file producer"), invoking no process; overlay it with
+   the **remembered** worktree family and ownership — whatever the previous cycle or idle
+   re-check last derived — reading each member's owned changes afresh from its files with the
+   same locations, and send `RefreshResult::Files(overlaid)`; on the worker's first cycle there
+   is no previous family, and the file result is sent un-overlaid;
 2. derive the family and every member's ownership afresh through `GitCli`, per
-   `worktree-overlay`; run `changes::from_cli_cached(cli, repo, &request.selection, &mut cache)`
-   against a `CliCache` it owns for its whole lifetime; and send
+   `worktree-overlay`; run the **locate pass** ("Step 2 locates every not-vendored schema
+   before it merges") against the `CliCache` it owns for its whole lifetime, and when that pass
+   learned at least one location, rebuild the file set from step 1's own enumeration, read
+   once and not re-walked, with the enlarged locations; run `changes::from_cli_cached(cli, repo, &request.selection, &mut cache)`
+   against the same `CliCache`; and send
    `RefreshResult::Merged(changes::overlay(changes::merge(files, cli_changes), …))`, where
-   `files` is step 1's **un-overlaid** set, so the CLI is layered over the pane's own changes
-   only and a worktree copy is never corrected by it.
+   `files` is the **un-overlaid** file set — step 1's own, or its rebuild when the locate pass
+   learned a location — so the CLI is layered over the pane's own changes only and a
+   worktree copy is never corrected by it.
 
 The worker SHALL remember step 2's un-overlaid merged set, the request's `ArchivedScope`, the
 base archive's directory names step 1's enumeration read, the family and ownership it derived,
 and the set it sent, for `worktree-overlay`'s idle re-check and for the next cycle's step 1.
+The idle re-check SHALL read its members' owned changes with the locations the `CliCache`
+holds at that moment, and SHALL itself invoke no `openspec` process.
 
 Sending the file result **before** the CLI call is what makes the dual-source model
 mechanical rather than described: the cheap, always-available answer is on the channel within
@@ -508,6 +518,20 @@ naming `thread::spawn`, and no file under `src/ui/` SHALL name `thread::spawn`, 
   `Full`, so the rule is "last wins" and not "widest wins"
 - **AND** `drain_and_fold` with an empty, dropped receiver returns its `first` argument
   unchanged, both fields included
+
+#### Scenario: A member's change of a located schema resolves in the merged result and on re-check
+
+- **WHEN** a real `Refresher` is constructed through `refresh::worker_for_test` over a base
+  that declares `schema: spec-driven`, vendors nothing, and holds its own `alpha`, with a fake
+  `GitCli` reporting one member that owns `alpha` and whose own `openspec/config.yaml` also declares `spec-driven`,
+  and a fake `OpenspecCli` answering `schema which spec-driven` with a directory holding a
+  real `schema.yaml` declaring four artifacts, and is given one request
+- **THEN** the `Merged` result's `alpha`, the member's copy, carries the four artifact ids
+  and no problem containing `is not vendored`
+- **AND** the next idle re-check's result, if one is sent, and the next request's `Files`
+  result both carry the member's `alpha` with the four artifact ids
+- **AND** exactly one `schema which` invocation is recorded across the request and the
+  re-check, because the idle re-check invokes no `openspec` process
 
 ### Requirement: The CLI-merge tier engages regardless of the pane process's own working directory
 
@@ -777,3 +801,129 @@ overlay onto.
 - **THEN** both pass unweakened: `recv_timeout` sits below `src/refresh.rs`'s single
   `thread::spawn`, in the worker body those gates already leave free to block, and no file under
   `src/ui/` names it
+
+### Requirement: Step 2 locates every not-vendored schema before it merges
+
+In step 2, before it calls `changes::from_cli_cached`, the worker SHALL run one **locate pass**
+over the file set step 1 built.
+
+The pass SHALL collect the distinct `Change::schema` names of every change in that set's
+`active` and `archived` lists. Only changes that were actually built count, so under
+`ArchivedScope::Names` no archived change contributes a name. It SHALL keep only the names
+for which `schema::load(repo, name)` reports `LoadError::NotVendored`. A vendored name, an
+unreadable or invalid vendored file, and an illegal name are never located, on exactly
+`schema-cli-fallback`'s terms for the CLI producer.
+
+When the pass learns a location for a name, it SHALL drop every `CliCache` per-change entry
+whose `schema` is that name. `from_cli_cached` then re-asks about those changes in the same
+cycle, whatever the request's `Selection`. Without this, an entry cached while the lookup
+failed would keep its failure problem and its empty artifact list. That stale problem
+would survive the merge, even though the schema now resolves.
+
+For each kept name, the pass SHALL invoke `["schema", "which", <name>, "--json"]` through the
+worker's `OpenspecCli` exactly when the `CliCache` holds no usable location for it. A location
+is **usable** when its directory holds a regular `schema.yaml`. A remembered location that is
+no longer usable SHALL be dropped and asked for again in the same pass. A name the pass
+already asked about in this cycle SHALL NOT be asked about a second time in this cycle, by
+the pass or by `from_cli_cached`.
+
+The pass SHALL record no problem of its own. A lookup that fails leaves the file producer's
+"not vendored" message where it already was, and on an active change `from_cli_cached`'s own
+fallback tier names the failure, exactly as it does today. Recording it here as well would
+add a second message for one fault.
+
+When the pass learns at least one location, step 2 SHALL rebuild the file set before
+merging, as the worker's file-then-merged requirement states. When it learns none, step 2
+SHALL merge step 1's set unchanged and SHALL NOT read the change tree a second time.
+
+The pass SHALL run only on the worker thread, after step 1's `Files` result has been sent. The
+first frame is therefore never delayed by a `schema which` spawn. The cost is that on a
+worker's first cycle, a change whose schema only the CLI can locate shows its "not vendored"
+message in the `Files` result until the `Merged` one replaces it.
+
+#### Scenario: An active change of a package-bundled schema loses its problem row on the merged result
+
+- **WHEN** a real `Refresher` is constructed through `refresh::worker_for_test` over a
+  `ScratchDir` repository whose `openspec/config.yaml` declares `schema: spec-driven`, which
+  it does not vendor, holding one active change `alpha`, with a fake `OpenspecCli` that
+  reports `alpha` in `list --json` and in `instructions apply` with `schemaName:
+  "spec-driven"`, and answers `["schema", "which", "spec-driven", "--json"]` with a second
+  scratch directory holding a real `schema.yaml` declaring four artifacts, and the refresher
+  is given one `request(Selection::All, ArchivedScope::Names)`
+- **THEN** the `Files` result's `alpha` has an empty `artifacts` list and exactly one problem
+  ending `is not vendored: no schema.yaml there`
+- **AND** the `Merged` result's `alpha` carries the four artifact ids in schema order and no
+  problem containing `is not vendored`
+- **AND** exactly one `["schema", "which", "spec-driven", "--json"]` invocation is recorded
+  for the cycle, even though both the locate pass and `from_cli_cached`'s fallback tier
+  needed the name
+
+#### Scenario: An archived change of a package-bundled schema gets its artifacts
+
+- **WHEN** the same repository and fake hold one archived change
+  `2026-05-05-structured-player-actions` with no `.openspec.yaml`, and the refresher is
+  given one `request(Selection::All, ArchivedScope::Full)`
+- **THEN** the `Merged` result's archived change carries the four artifact ids and no
+  problem containing `is not vendored`
+- **AND** its `progress` is the pair counted from its own `tasks.md`, so the archived change
+  is still file-sourced in everything but the schema's directory
+
+#### Scenario: A remembered location serves the next cycle without a spawn
+
+- **WHEN** the refresher of the first scenario has answered its first request and is given a
+  second `request(Selection::All, ArchivedScope::Names)`
+- **THEN** the second cycle's `Files` result's `alpha` already carries the four artifact ids
+  and no problem containing `is not vendored`
+- **AND** no `schema which` invocation is recorded for the second cycle
+
+#### Scenario: A collapsed archive asks nothing about archived schemas
+
+- **WHEN** the repository vendors `tdd`, which every active change declares, and its only
+  `spec-driven` changes are archived, and the refresher is given one
+  `request(Selection::All, ArchivedScope::Names)`
+- **THEN** no `schema which` invocation is recorded
+- **AND** once a later `request(Selection::All, ArchivedScope::Full)` has been answered,
+  exactly one `["schema", "which", "spec-driven", "--json"]` invocation is recorded
+
+#### Scenario: A location that vanished is dropped and asked for again
+
+- **WHEN** after the first scenario's cycle the directory the fake reported is deleted, the
+  fake now answers `schema which spec-driven` with a different scratch directory holding the
+  same `schema.yaml`, and the refresher is given a second request
+- **THEN** that cycle's `Files` result's `alpha` carries one problem naming the deleted
+  directory and an empty `artifacts` list
+- **AND** its `Merged` result's `alpha` carries the four artifact ids with no problem naming
+  either directory
+- **AND** exactly one `schema which` invocation is recorded for that cycle
+
+#### Scenario: A failed lookup is asked once per cycle and named once
+
+- **WHEN** the fake answers `schema which spec-driven` with `Err(CliError::Failed)` with exit
+  code 1, and the refresher is given two `request(Selection::All, ArchivedScope::Names)`
+  calls in turn
+- **THEN** each cycle's `Merged` result's `alpha` has an empty `artifacts` list and exactly
+  two problems: first the file producer's message ending `is not vendored: no schema.yaml
+  there`, then one naming `openspec schema which spec-driven --json` and exit code 1
+- **AND** exactly one `schema which` invocation is recorded per cycle, two in total, so a
+  schema installed between cycles is still found by the next one
+
+#### Scenario: A change cached while its lookup failed is re-asked once the schema is located
+
+- **WHEN** the first cycle's `schema which spec-driven` fails, so `alpha`'s `CliCache` entry
+  holds an empty artifact list and the failure problem, the fake then answers it with a
+  directory holding a real `schema.yaml` declaring four artifacts, and the refresher is given
+  a second request carrying `Selection::Only({"beta"})`
+- **THEN** that cycle records one `instructions apply --change alpha --json` invocation even
+  though `alpha` is outside the selection
+- **AND** its `Merged` result's `alpha` carries the four artifact ids and no problem
+
+#### Scenario: A vendored schema is never located
+
+- **WHEN** the repository vendors `openspec/schemas/tdd/schema.yaml`, every change declares
+  `tdd`, and the refresher answers two requests, the second under `ArchivedScope::Full`
+- **THEN** no `schema which` invocation is recorded in either cycle
+- **AND** the locate pass, called directly on the test's own thread over that repository's
+  `from_files(repo, ArchivedScope::Full)` set and an empty `CliCache`, reports that it
+  learned no location, which is the value step 2 decides the rebuild by; the decision is
+  proven there and not through the live worker, because `schema::read_file`'s path recorder
+  is thread-local and cannot see the worker thread's reads

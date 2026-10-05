@@ -9,8 +9,11 @@ that an unreadable or invalid vendored file is never re-asked of the CLI, that e
 tier can fail (unstartable binary, non-zero exit, unusable payload, a named directory with no
 or a broken `schema.yaml`) degrades that change alone with exactly one named problem, that the
 payload must be whole JSON with no tolerated leading noise, and that resolution is cached per
-name per call so twelve changes sharing a schema cost one invocation. Parsing the schema file
-itself remains `schema-artifacts`'.
+name per call so twelve changes sharing a schema cost one invocation. A directory the CLI names
+is also remembered in the worker's `CliCache` as a schema **location** for the worker's lifetime
+and shared with the file producer, and a failed lookup is a one-cycle **miss**, so a name costs at
+most one `schema which` per cycle and none once located. Parsing the schema file itself remains
+`schema-artifacts`'.
 
 ## Requirements
 
@@ -54,9 +57,11 @@ lower-priority locations, which this plugin does not consult.
 a `problems` list — one entry per artifact entry the parser skipped, plus a
 directory-name-versus-declared-`name:` mismatch. Those problems SHALL be recorded on every
 `Change` whose schema resolved through them, exactly as `from_files` records them through
-`CachedSchemaLoad`. They SHALL NOT be discarded: on a schema the repository does not vendor,
-the file producer never read the file at all, so this producer is the **only** one that can
-report them and `change-merge`'s duplicate collapsing has nothing to collapse against.
+`CachedSchemaLoad`. They SHALL NOT be discarded. When the refresh worker has located the
+schema, the file producer reads the same `schema.yaml` through the same `load_dir` and
+records byte-equal messages, and `change-merge`'s duplicate collapsing leaves one copy of
+each. When no location has been learned, the file producer never read the file at all, and
+this producer is the **only** one that can report them.
 
 Because the schema is resolved at most once per name per call, a per-name problem list
 SHALL be attached to **each** change using that name, not only the first — otherwise a
@@ -71,6 +76,13 @@ message appears on whichever change happened to be enumerated first.
 - **THEN** both changes carry two `ArtifactRef`s
 - **AND** both changes' `problems` hold that one parser message, so it is not attached to
   only the first change to use the cached entry
+
+#### Scenario: A parser problem read by both producers appears once after the merge
+
+- **WHEN** the schema of the previous scenario has been located, so the file producer's
+  `alpha` and the CLI producer's `alpha` each carry that one parser message, and the two are
+  merged
+- **THEN** the merged `alpha`'s `problems` hold that parser message exactly once
 
 #### Scenario: A schema absent from the repository is loaded from the directory the CLI names
 
@@ -271,3 +283,106 @@ failed is not retried once per change.
   directories holding real, distinct `schema.yaml` files
 - **THEN** each change carries its own schema's artifact ids
 - **AND** exactly two `schema which` invocations are recorded, one per name
+
+### Requirement: A located schema directory is remembered for the worker's lifetime and shared with the file producer
+
+`changes::CliCache` SHALL hold, beside its per-change entries, a map from schema name to
+the **directory** a successful `["schema", "which", <name>, "--json"]` reported. That map is
+the schema **locations**. The cache SHALL also hold a record of the names whose lookup left no
+usable location in the current cycle, each with the one problem that outcome rendered. That
+record is the **misses**. Both are owned by the `CliCache` value, never a `static`, for
+`resolve::BinCache`'s reason. The refresh worker owns one `CliCache` for its whole lifetime,
+so a location learned once is kept for as long as the pane runs.
+
+Only a directory SHALL be remembered, never a parsed schema. Every load reads
+`<dir>/schema.yaml` afresh through `schema::load_dir`, so an edit to a user-tier schema is
+seen on the next cycle exactly as an edit to a vendored one is.
+
+A location SHALL be remembered only when it is **usable**: its directory holds a regular
+`schema.yaml`. A `schema which` payload naming an unusable directory SHALL still produce the
+problem this capability already requires for it, and SHALL leave no location behind, so the
+next cycle asks again.
+
+When `from_cli_cached`'s fallback tier reaches a name the repository does not vendor, it
+SHALL, in order:
+
+1. load from the remembered location when one is usable, invoking no process;
+2. otherwise, when the misses hold the name, record that miss's problem, invoking no
+   process;
+3. otherwise invoke `schema which` as this capability already requires. It remembers the
+   location on a usable success. On **every** other outcome it records a miss holding the one
+   problem that outcome renders. That covers a `CliError`, an unusable payload, and a payload
+   naming a directory with no regular `schema.yaml`.
+
+The misses SHALL be cleared at exactly two points: when a locate pass (`refresh-worker` →
+"Step 2 locates every not-vendored schema before it merges") begins, and when
+`from_cli_cached` returns. A worker cycle runs the locate pass and then `from_cli_cached`, so
+a name whose lookup failed is asked about at most once per cycle and asked again on the next
+one. A schema installed while the pane runs is therefore found without a restart. Two
+`from_cli_cached` calls with no locate pass between them never share a miss, so
+`refresh-worker`'s "A change whose schema the CLI rejects is cached like any other" holds
+unchanged: a third, `Selection::All` call still re-asks.
+
+The repository tier SHALL still win. `schema::load(repo, name)` is called first, and a
+remembered location is consulted only when that call reports `LoadError::NotVendored`, so
+vendoring a schema while the pane runs takes effect on the next cycle with no eviction step.
+
+`changes::from_cli(cli, repo)` SHALL keep starting from an empty `CliCache`. Every scenario
+this capability already states about one `from_cli` call therefore holds unchanged.
+
+The file producer SHALL read the locations and SHALL NOT write them. Only `from_cli_cached`
+and the locate pass fill the map, and both run on the worker thread.
+
+#### Scenario: A remembered location is loaded without a spawn
+
+- **WHEN** a `CliCache` already maps `spec-driven` to a scratch directory holding a real
+  `schema.yaml` declaring four artifacts, the repository vendors no `spec-driven`, and
+  `from_cli_cached` is called over `list --json` reporting `alpha`, `mike`, and `zulu`, each of
+  whose apply payloads reports `schemaName: "spec-driven"`
+- **THEN** all three changes carry the four artifact ids and no problem
+- **AND** no `schema which` invocation is recorded
+
+#### Scenario: A successful lookup fills the cache for the next call
+
+- **WHEN** `from_cli_cached` is called twice with the same, initially empty, `CliCache`, over
+  one change whose apply payload reports `schemaName: "spec-driven"`, and the fake answers
+  `schema which spec-driven` with a directory holding a real `schema.yaml`
+- **THEN** both calls' changes carry that schema's artifact ids
+- **AND** exactly one `schema which` invocation is recorded across both calls
+
+#### Scenario: An unusable directory is named and not remembered
+
+- **WHEN** the fake answers `schema which spec-driven` with a directory that exists and holds
+  no `schema.yaml`, and `from_cli_cached` is called twice with the same `CliCache`
+- **THEN** each call's change has an empty `artifacts` list and one problem naming that
+  directory and ending `is not vendored: no schema.yaml there`
+- **AND** two `schema which` invocations are recorded, one per call, because nothing was
+  remembered
+
+#### Scenario: A miss does not outlive the call that consumed it
+
+- **WHEN** a locate pass has recorded a miss for `spec-driven`, `from_cli_cached` has then run
+  once with the same `CliCache`, and `from_cli_cached` is called a second time with no locate
+  pass in between, with the fake still failing `schema which spec-driven`
+- **THEN** the second call invokes `schema which spec-driven` once more
+- **AND** two `schema which` invocations are recorded in total, the locate pass's and the
+  second call's
+
+#### Scenario: A miss recorded earlier in the cycle is named without a second spawn
+
+- **WHEN** a locate pass has run over one change declaring `spec-driven`, the fake answered
+  its `schema which spec-driven` with `Err(CliError::Failed)` with exit code 1, and
+  `from_cli_cached` is then called with the same `CliCache` over that change
+- **THEN** the change carries exactly one problem naming `openspec schema which spec-driven
+  --json` and exit code 1, byte-equal to the problem a fresh `from_cli` would render for the
+  same failure
+- **AND** exactly one `schema which` invocation is recorded in total
+
+#### Scenario: A schema vendored after it was located wins over the location
+
+- **WHEN** a `CliCache` maps `spec-driven` to a scratch directory declaring four artifacts,
+  and the repository then vendors its own `openspec/schemas/spec-driven/schema.yaml`
+  declaring two
+- **THEN** `from_cli_cached` gives each `spec-driven` change the repository's two artifact
+  ids
+- **AND** no `schema which` invocation is recorded
