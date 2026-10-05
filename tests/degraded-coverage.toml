@@ -30,10 +30,10 @@ covers = ["src/changes.rs:1557-1584", "src/changes.rs:1605-1643"]
 [[row]]
 condition = "Schema not vendored (no `openspec/schemas/<name>/schema.yaml` locally)"
 tier = "unit"
-proof = ["an_unusable_schema_renders_no_artifacts"]
+proof = ["an_unusable_schema_renders_no_artifacts", "a_package_schema_draws_no_not_vendored_row"]
 verdict = "unproven"
-why = "a real not-vendored schema, read through changes::from_files, empties tab_bar"
-covers = ["src/changes.rs:1060-1062"]
+why = "a real not-vendored schema, read through changes::from_files, empties tab_bar; a located package schema recovers it"
+covers = ["src/changes.rs:1060-1062", "src/changes.rs:1148-1149"]
 
 [[row]]
 condition = "Schema unreadable or invalid (I/O error, or bytes that are not a usable schema)"
