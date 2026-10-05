@@ -1146,15 +1146,7 @@ fn load_schema_cached<'a>(
         .or_insert_with(|| match crate::schema::load(repo, name) {
             Err(crate::schema::LoadError::NotVendored { path }) => {
                 if let Some(dir) = locations.dirs.get(name) {
-                    if dir.join("schema.yaml").is_file() {
-                        parsed_load(crate::schema::load_dir(dir, name))
-                    } else {
-                        failed_load(schema_load_problem(
-                            &crate::schema::LoadError::NotVendored {
-                                path: dir.join("schema.yaml"),
-                            },
-                        ))
-                    }
+                    parsed_load(crate::schema::load_dir(dir, name))
                 } else {
                     failed_load(schema_load_problem(
                         &crate::schema::LoadError::NotVendored { path },

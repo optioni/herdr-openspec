@@ -25,7 +25,7 @@ tier = "unit"
 proof = ["a_cli_rejected_schema_names_its_reason_per_change"]
 verdict = "unproven"
 why = "a real FakeCli-driven from_cli merge falls back per change and content_lines renders the reason"
-covers = ["src/changes.rs:1565-1592", "src/changes.rs:1613-1651"]
+covers = ["src/changes.rs:1557-1584", "src/changes.rs:1605-1643"]
 
 [[row]]
 condition = "Schema not vendored (no `openspec/schemas/<name>/schema.yaml` locally)"
@@ -273,7 +273,7 @@ tier = "outer"
 proof = ["a_failed_cli_cycle_keeps_the_file_numbers"]
 verdict = "unproven"
 why = "a real run_wired run against a scratch openspec reporting a disagreeing root keeps the file-sourced numbers"
-covers = ["src/changes.rs:1886-1903"]
+covers = ["src/changes.rs:1878-1895"]
 
 [[row]]
 condition = "An `openspec` command exits non-zero"
@@ -281,7 +281,7 @@ tier = "unit"
 proof = ["a_failed_cli_cycle_keeps_the_file_numbers", "an_exec_failure_of_the_openspec_shim_reports_its_own_stderr", "a_shim_whose_interpreter_is_unreachable_exits_127_and_renders_a_problem_row"]
 verdict = "confirmed"
 why = "three proofs for the row's two halves, plus the S10 shim shape folded in rather than given a third row of its own: a_failed_cli_cycle_keeps_the_file_numbers (outer) runs a real run_wired cycle against a scratch openspec exiting non-zero and shows the file-sourced numbers survive; an_exec_failure_of_the_openspec_shim_reports_its_own_stderr (unit) feeds cli_error_problem the measured Failed{code:127} shape and shows the stderr line is carried; a_shim_whose_interpreter_is_unreachable_exits_127_and_renders_a_problem_row (unit, real worker thread) drives the same worker::worker_for_test seam group 9 already exercises with a Failed{code:127} openspec answer, and shows the file-sourced set survives with the problem recorded — group 9 deliberately folded the shim's unreachable-interpreter case into this existing row rather than adding a third, since a 127 exit is a 127 exit regardless of why the child never execed. The outer proof is the strongest of the three, since it exercises the real cycle rather than calling cli_error_problem or the worker directly. tier is \"unit\" because tests/degraded_coverage.rs applies its view/outer rendering check per proof entry, and neither unit proof's own body renders anything through a TestBackend"
-covers = ["src/changes.rs:1864-1871", "src/changes.rs:1523-1538"]
+covers = ["src/changes.rs:1856-1863", "src/changes.rs:1515-1530"]
 
 [[row]]
 condition = "A `herdr agent list` call exits non-zero, or the program cannot be started at all"
@@ -336,7 +336,7 @@ tier = "outer"
 proof = ["a_failed_cli_cycle_keeps_the_file_numbers"]
 verdict = "unproven"
 why = "a real run_wired run keeps the file-sourced result after a later failing CLI cycle"
-covers = ["src/changes.rs:1866-1871", "src/changes.rs:2081-2081"]
+covers = ["src/changes.rs:1858-1863", "src/changes.rs:2073-2073"]
 
 [[row]]
 condition = "A touched path is classified to the wrong change, or conservatively to every change"
@@ -424,7 +424,7 @@ tier = "unit"
 proof = ["a_change_archived_mid_cycle_appears_in_both_lists_for_one_cycle"]
 verdict = "confirmed"
 why = "changes::merge's own unit proof: two merges, the second with an empty CLI list, showing add-auth appears in both active and archived for one cycle and then self-corrects rather than sticking (design.md -> Decision D6)"
-covers = ["src/changes.rs:2179-2195", "src/changes.rs:2085-2086", "src/changes.rs:2093-2099"]
+covers = ["src/changes.rs:2171-2187", "src/changes.rs:2077-2078", "src/changes.rs:2085-2091"]
 
 # --- agent-client-choice ----------------------------------------------------
 
@@ -516,7 +516,7 @@ tier = "unit"
 proof = ["two_owners_show_the_first_and_name_both"]
 verdict = "confirmed"
 why = "changes::overlay's own unit proof: two members both touching change x, the first member's progress wins the merged row and one problem names the change and both worktrees, showing the first"
-covers = ["src/changes.rs:2410-2417"]
+covers = ["src/changes.rs:2402-2409"]
 
 [[row]]
 condition = "`git` too old for `worktree list -z`"
