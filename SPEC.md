@@ -166,10 +166,15 @@ naming the directory searched.
 `openspec/schemas/` — graft places a vendored schema there — then
 `$XDG_DATA_HOME`, then the CLI package's own built-ins; the third tier is why a CLI
 fallback exists at all, since `spec-driven` is not vendored in any repository. When
-the first tier misses, ask `openspec schema which <name> --json`, which returns
+the first tier misses and an `openspec` binary is present, the refresh worker asks
+`openspec schema which <name> --json` once per name, which returns
 `{"name","source","path","shadows"}` where `path` is the schema's *directory*
-(stdout is clean JSON; an "experimental" note goes to stderr) — read the same
-`schema.yaml` from that directory. The `artifacts` list becomes the tab order. The
+(stdout is clean JSON; an "experimental" note goes to stderr), and remembers that
+directory for its whole lifetime in `CliCache`'s schema locations. Both producers —
+the file walk and the CLI merge, archived changes and worktree members included —
+read the same `schema.yaml` from that directory, re-read on every build; the
+project's own tier still wins whenever it holds the name. File mode has no binary
+and so no third tier. The `artifacts` list becomes the tab order. The
 tasks artifact is the one whose `generates` equals the schema's top-level
 `apply.tracks`, falling back to the artifact with id `tasks` when no `apply` block
 declares what it tracks; a *present* `tracks` value matching nothing — a wrong-typed
@@ -1199,7 +1204,7 @@ Every condition renders usable content rather than an error screen:
 | No `openspec/` found while walking up | Empty state naming the directory searched |
 | `openspec` binary not found | File mode, with a dim, yellow `file mode` badge right-aligned in the list region's own heading row; dropped whole (never truncated) whenever the row cannot hold the repository name, a separating blank, and the badge together |
 | Schema unknown to the CLI | Per-change fall back to file mode. This is real: `learning-tool` declares schema `outside-in-tdd`, which the installed CLI rejects |
-| Schema not vendored (no `openspec/schemas/<name>/schema.yaml` locally) | Artifact list empty until the CLI tier supplies it; distinct from the row above, which is the CLI rejecting a schema the plugin already read — both can be true at once for a schema like `outside-in-tdd`. The detail region's tab bar renders `no artifacts` for such a change (`detail-view`) |
+| Schema not vendored (no `openspec/schemas/<name>/schema.yaml` locally) | Artifact list empty and a `! … is not vendored` problem row drawn. With an `openspec` binary this lasts only until the refresh worker's first locate pass — one cycle — after which every change of a schema the CLI can locate, archived ones included, loads it from the remembered directory; in file mode it is permanent. Distinct from the row above, which is the CLI rejecting a schema the plugin already read — both can be true at once for a schema like `outside-in-tdd`. The detail region's tab bar renders `no artifacts` for such a change (`detail-view`) |
 | Schema unreadable or invalid (I/O error, or bytes that are not a usable schema) | Artifact list empty, and the reason is named. The detail region's tab bar renders `no artifacts` for such a change (`detail-view`) |
 | Schema loads with no tasks artifact (`apply.tracks` matches nothing and no artifact has id `tasks`, or `apply.tracks` is present but wrong-typed even when an artifact has id `tasks`) | No artifact is marked, so every tab renders as markdown and none renders the checklist; no tab is added, removed, or hidden. The task **count** is not deferred: it falls back to counting `<change dir>/tasks.md` directly, matching `openspec list --json`'s own behaviour for such a change, so the pane never shows a pair the CLI would immediately correct |
 | No active changes | Empty state; archived changes remain browsable |

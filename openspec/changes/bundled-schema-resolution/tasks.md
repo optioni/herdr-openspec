@@ -180,36 +180,41 @@ group's new filters must then print `1`.
 ## 5. Acceptance Test — Outer Loop GREEN
 <!-- kind: behavior -->
 
-- [ ] 5.1 VERIFY: `cargo test --all-features --lib ui::tests::wiring::a_package_schema_draws`
+- [x] 5.1 VERIFY: `cargo test --all-features --lib ui::tests::wiring::a_package_schema_draws`
       passes with 1 test selected and `completed == true`.
-- [ ] 5.2 VERIFY: Run `make build`, then re-run the tmux repro against
+- [x] 5.2 VERIFY: Run `make build`, then re-run the tmux repro against
       `~/Code/dungeons-and-dragons`. After the first refresh, neither the active
       `ssh-tui-server` nor an expanded archived change may show a `! … is not vendored`
       row, and the archived change lists `proposal specs design tasks`.
-- [ ] 5.3 REFACTOR: Remove any harness duplication that 0.1 introduced, or record "none".
-- [ ] 5.4 Commit if anything changed: `test(ui): tidy the package-schema acceptance harness`.
+      Done at e45b4d3: `ssh-tui-server` and archived `structured-player-actions` both draw
+      `proposal specs design tasks` with no `! ` row after the first refresh.
+- [x] 5.3 REFACTOR: Remove any harness duplication that 0.1 introduced, or record "none".
+      None: `openspec_script_schema_which` shares only the `list --json` payload literal with
+      `openspec_script`, which each stand-in states for its own semantics.
+- [x] 5.4 Commit if anything changed: `test(ui): tidy the package-schema acceptance harness`.
+      Nothing changed; no commit.
 
 ## 6. Documentation
 <!-- kind: operational -->
 
-- [ ] 6.1 CHECK: Two greps must each print 1 match, as they did at planning time:
+- [x] 6.1 CHECK: Two greps must each print 1 match, as they did at planning time:
       - ``grep -c 'ask `openspec schema which' SPEC.md``, for the Schema paragraph's fallback
         sentence at line 169;
       - `grep -c "^| Schema not vendored" SPEC.md`, for the degraded row.
-- [ ] 6.2 Rewrite `SPEC.md` → Schema paragraph (audience: implementers). Replace the "When
+- [x] 6.2 Rewrite `SPEC.md` → Schema paragraph (audience: implementers). Replace the "When
       the first tier misses, ask `openspec schema which`" sentence with the shared-location
       rule: the worker remembers the location, both producers load from it, and file mode
       has no third tier. Net change: about +2 lines.
-- [ ] 6.3 Rewrite the **Behaviour** cell of `SPEC.md` → Degraded states → "Schema not
+- [x] 6.3 Rewrite the **Behaviour** cell of `SPEC.md` → Degraded states → "Schema not
       vendored" only. With a binary, the row and the empty tab bar show until the worker's
       first locate pass, which is one cycle. In file mode they show permanently. Leave the
       **Condition** cell byte-identical.
-- [ ] 6.4 Add a row to `openspec/IMPLEMENTATION-ORDER.md` for `bundled-schema-resolution`,
+- [x] 6.4 Add a row to `openspec/IMPLEMENTATION-ORDER.md` for `bundled-schema-resolution`,
       marked as unplanned post-roadmap work, in the existing rows' format, depending on
       `homebrew-probe`.
-- [ ] 6.5 VERIFY: `cargo test --all-features --test degraded_coverage --test doc_contract`
+- [x] 6.5 VERIFY: `cargo test --all-features --test degraded_coverage --test doc_contract`
       passes.
-- [ ] 6.6 Commit: `docs: record shared schema locations and the narrowed not-vendored row`.
+- [x] 6.6 Commit: `docs: record shared schema locations and the narrowed not-vendored row`.
 
 ## 7. Change Review
 <!-- kind: operational -->
