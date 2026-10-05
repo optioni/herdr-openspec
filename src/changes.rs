@@ -4056,6 +4056,28 @@ apply:
     }
 
     #[test]
+    fn a_location_whose_schema_file_is_a_directory_renders_load_dirs_error() {
+        let (_r, _l, repo, _locations) = located_fixture();
+        let bad = ScratchDir::new();
+        let bad_dir = canonical(bad.path());
+        std::fs::create_dir(bad_dir.join("schema.yaml")).expect("make schema.yaml a directory");
+        let mut locations = SchemaLocations::default();
+        locations
+            .dirs
+            .insert("spec-driven".to_string(), bad_dir.clone());
+        let set = build_with_listing(&repo, ArchivedScope::Names, &locations);
+        let alpha = &set.active[0];
+        let want =
+            schema_load_problem(&crate::schema::load_dir(&bad_dir, "spec-driven").unwrap_err());
+        assert_eq!(alpha.problems, vec![want]);
+        assert!(
+            !alpha.problems[0].contains("no schema.yaml there"),
+            "{:?}",
+            alpha.problems
+        );
+    }
+
+    #[test]
     fn a_miss_does_not_reach_the_file_producer() {
         let (_r, _l, repo, _locations) = located_fixture();
         let mut locations = SchemaLocations::default();
