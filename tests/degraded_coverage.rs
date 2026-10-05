@@ -1188,9 +1188,9 @@ fn dropping_covers_ranges_fails_the_range_floor() {
 #[test]
 fn each_declaration_branch_has_a_range_only_it_rejects() {
     // `is_attribute`: two attribute lines and nothing else.
-    let (condition, err) = covers_error(("src/changes.rs", 2345, 2346));
+    let (condition, err) = covers_error(("src/changes.rs", 2534, 2535));
     assert!(err.contains(&condition), "{err:?}");
-    assert!(err.contains("src/changes.rs:2345-2346"), "{err:?}");
+    assert!(err.contains("src/changes.rs:2534-2535"), "{err:?}");
     assert!(err.contains("holds no statement"), "{err:?}");
 
     // `is_lone_delimiter`: three closing braces and nothing else.

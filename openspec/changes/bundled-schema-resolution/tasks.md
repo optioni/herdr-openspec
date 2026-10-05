@@ -157,17 +157,25 @@ group's new filters must then print `1`.
 ## 4. Re-point the coverage map
 <!-- kind: operational -->
 
-- [ ] 4.1 CHECK: For every `covers` entry in `tests/degraded-coverage.toml` naming
+- [x] 4.1 CHECK: For every `covers` entry in `tests/degraded-coverage.toml` naming
       `src/changes.rs` or `src/refresh.rs`, write the range's text at the planning commit to
       `$T/covers-before.txt`, using `git show e77dac3:<file> | sed -n '<a>,<b>p'`.
       At planning time, `grep -o '"src/\(changes\|refresh\).rs:[0-9-]*"' tests/degraded-coverage.toml | wc -l`
       → 24. Then run `make covers-check` and record its result.
-- [ ] 4.2 CHANGE: Re-point every moved range so that its text at HEAD holds the same
+- [x] 4.2 CHANGE: Re-point every moved range so that its text at HEAD holds the same
       statements as `$T/covers-before.txt`. Only a range whose code this change rewrote may
       differ, and each such range must cover its replacement.
-- [ ] 4.3 VERIFY: `make covers-check` exits 0. A side-by-side diff of before and after range
+      Done: 13 ranges moved unchanged; 9 unchanged in place. Two were rewritten:
+      - `changes.rs:1497-1541` ("Schema unknown to the CLI") became
+        `ask_schema_location` + `resolve_cli_schema_uncached`;
+      - `changes.rs:1991-2007` became `2179-2195`, differing only in
+        `schema_cache` → `schema_loads`.
+      Also re-pointed `tests/degraded_coverage.rs`'s hard-coded `is_attribute` fixture
+      (`src/changes.rs:2345-2346` → `2534-2535`, the same `#[test]` + `#[should_panic]`
+      pair), as `homebrew-probe` did in `0e2d056`.
+- [x] 4.3 VERIFY: `make covers-check` exits 0. A side-by-side diff of before and after range
       texts shows only the rewritten ranges changed.
-- [ ] 4.4 Commit: `test(covers): re-point line ranges moved by schema location sharing`.
+- [x] 4.4 Commit: `test(covers): re-point line ranges moved by schema location sharing`.
 
 ## 5. Acceptance Test — Outer Loop GREEN
 <!-- kind: behavior -->
