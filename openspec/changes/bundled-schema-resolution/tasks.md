@@ -219,16 +219,39 @@ group's new filters must then print `1`.
 ## 7. Change Review
 <!-- kind: operational -->
 
-- [ ] 7.1 CHECK: Dispatch `outside-in-tdd-reviewer` with only this change's artifacts and
+- [x] 7.1 CHECK: Dispatch `outside-in-tdd-reviewer` with only this change's artifacts and
       `git diff e77dac3..HEAD`. Point it first at:
       - the spawn counts per cycle;
       - the invalidation of cached entries on a learned location;
       - the first-cycle flash being the only remaining "not vendored" row;
       - file mode being unchanged.
-- [ ] 7.2 CHANGE: Fix every CRITICAL. Resolve or accept each WARNING, with a one-line reason
+- [x] 7.2 CHANGE: Fix every CRITICAL. Resolve or accept each WARNING, with a one-line reason
       recorded here. Re-run the affected tests.
-- [ ] 7.3 VERIFY: No blocking or unowned finding remains.
-- [ ] 7.4 Commit: `chore(bundled-schema-resolution): record the Change Review`.
+      No CRITICAL. Dispositions:
+      - W1 (idle re-check leg untested; `cache.locations()` there revertible with all tests
+        green): fixed in fc70898. The member's second `status` answer makes the re-check send;
+        the default-locations plant now fails the test.
+      - W2 (docs overclaimed "only a first-cycle flash"): fixed in 3930b4c. SPEC's row and the
+        roadmap row name the first pass that *sees* the name, the member-only limitation
+        (Decision 8), and a failing lookup.
+      - S1 (an evicted location whose re-ask fails triggers no rebuild, so that cycle's
+        `Merged` names the old directory): accepted. It is transient (the next step 1 has no
+        such dir and names the repository path), needs a broken CLI, and fixing it would
+        change `locate_schemas`' return contract.
+      - S2 (`Found`/`Row` aliases): accepted as a false-positive workaround. The comment now
+        forbids literals through them (fc70898).
+      - S3 (the binary-present half of the "Schema not vendored" row was unbound): fixed in
+        c8cac0b. Second proof `a_package_schema_draws_no_not_vendored_row`, covers over
+        `load_schema_cached`'s location arm.
+      - S4 (`is_file` pre-check hid `load_dir`'s own error): fixed in c73c120/cedd5de. Every
+        covers range re-verified byte-identical after the -8 shift.
+      - S5 (3.1 bookkeeping): `a_failed_lookup_is_asked_once_per_cycle` went green before
+        GREEN because no locate pass existed. The "CLI tier ignores `misses`" plant falsifies
+        it. `a_collapsed_archive_asks_nothing`'s `Full` leg was a genuine RED.
+      - OCR (step 1 clones the listing every cycle): accepted, as 3.5 recorded. The clone
+        buys the "no second walk" guarantee.
+- [x] 7.3 VERIFY: No blocking or unowned finding remains.
+- [x] 7.4 Commit: `chore(bundled-schema-resolution): record the Change Review`.
 
 ## 8. Lint & Verify
 <!-- kind: operational -->
