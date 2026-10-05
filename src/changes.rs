@@ -1155,8 +1155,6 @@ fn load_schema_cached<'a>(
                             },
                         ))
                     }
-                } else if let Some(miss) = locations.misses.get(name) {
-                    failed_load(miss.clone())
                 } else {
                     failed_load(schema_load_problem(
                         &crate::schema::LoadError::NotVendored { path },
@@ -3934,6 +3932,23 @@ apply:
         assert!(!alpha.problems[0].contains("openspec/schemas/spec-driven"));
         assert_eq!(alpha.progress.total, 2);
         assert_eq!(alpha.progress.completed, 1);
+    }
+
+    #[test]
+    fn a_miss_does_not_reach_the_file_producer() {
+        let (_r, _l, repo, _locations) = located_fixture();
+        let mut locations = SchemaLocations::default();
+        locations.misses.insert(
+            "spec-driven".to_string(),
+            "the CLI could not find it".to_string(),
+        );
+        let set = build_with_listing(&repo, ArchivedScope::Names, &locations);
+        let want = format!(
+            "{} is not vendored: no schema.yaml there",
+            repo.join("openspec/schemas/spec-driven/schema.yaml")
+                .display()
+        );
+        assert_eq!(set.active[0].problems, vec![want]);
     }
 
     #[test]
