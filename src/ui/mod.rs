@@ -3564,6 +3564,34 @@ apply:
             write_script(dir, "openspec", &body)
         }
 
+        /// `bundled-schema-resolution`'s stand-in: like `openspec_script`, answers
+        /// `list --json` with an empty change list rooted at `root`, and additionally
+        /// answers `schema which spec-driven --json` with a `package`-sourced record whose
+        /// `path` is `schema_dir`. Logs its argv as its **last** act, on
+        /// `openspec_script_failing`'s terms, so a predicate watching the log cannot fire
+        /// while the child is still running.
+        fn openspec_script_schema_which(
+            dir: &Path,
+            log: &Path,
+            root: &Path,
+            schema_dir: &Path,
+        ) -> PathBuf {
+            write_script(
+                dir,
+                "openspec",
+                &format!(
+                    "case \"$1\" in\n\
+                     schema) printf '%s' '{{\"name\":\"spec-driven\",\"source\":\"package\",\"path\":\"{schema_dir}\",\"shadows\":[]}}' ;;\n\
+                     *) printf '%s' '{{\"changes\":[],\"root\":{{\"path\":\"{root}\",\"source\":\"nearest\"}}}}' ;;\n\
+                     esac\n\
+                     printf '%s\\n' \"$*\" >> \"{log}\"\n",
+                    schema_dir = schema_dir.display(),
+                    root = root.display(),
+                    log = log.display(),
+                ),
+            )
+        }
+
         /// The number of lines a scratch program's log currently holds — `0`
         /// when the log does not exist yet, so a predicate can poll a log no
         /// invocation has produced.
@@ -5615,6 +5643,98 @@ esac
             let (result2, _buf2) = run_wired_at(120, root, &config, &herdr, None, &predicate);
             let dashboard2 = result2.expect("a configured usable binary is a supported state");
             assert!(!dashboard2.file_mode);
+        }
+
+        /// `refresh-worker` :: "An active change of a package-bundled schema loses its
+        /// problem row on the merged result". The project declares `schema: spec-driven`,
+        /// which is not vendored under `openspec/schemas/`; the stand-in CLI reports it as
+        /// a package schema, so only the locate pass can resolve it. Asserting on the
+        /// `is not vendored` text would be vacuous (a scratch path truncates it off-screen),
+        /// so the discriminators are the tab ids, the `│ ! ` marker, and `alpha`'s own
+        /// `problems`.
+        #[test]
+        fn a_package_schema_draws_no_not_vendored_row() {
+            for width in [120u16, 60u16] {
+                let scratch = ScratchDir::new();
+                let root = scratch.path();
+                write_with_mode(
+                    &root.join("openspec/config.yaml"),
+                    b"schema: spec-driven\n",
+                    0o644,
+                );
+                write_with_mode(
+                    &root.join("openspec/changes/alpha/proposal.md"),
+                    b"# alpha\n",
+                    0o644,
+                );
+                let schema_dir = root.join("package-schemas/spec-driven");
+                write_with_mode(
+                    &schema_dir.join("schema.yaml"),
+                    b"name: spec-driven\nartifacts:\n  - id: proposal\n    generates: proposal.md\n  - id: specs\n    generates: specs/**/*.md\n  - id: design\n    generates: design.md\n  - id: tasks\n    generates: tasks.md\napply:\n  tracks: tasks.md\n",
+                    0o644,
+                );
+                let herdr = root.join("does-not-exist-herdr");
+                let log = root.join("openspec-package.log");
+                let openspec = openspec_script_schema_which(root, &log, root, &schema_dir);
+                let config = Config {
+                    openspec_bin: Some(openspec),
+                    ..Config::default()
+                };
+
+                let listed = || {
+                    std::fs::read_to_string(&log)
+                        .map(|s| s.lines().any(|l| l.starts_with("list")))
+                        .unwrap_or(false)
+                };
+                let always = || true;
+                let stages: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> =
+                    vec![(&listed, key('j')), (&always, key('q'))];
+                let (result, rows, completed) =
+                    run_wired_staged(width, root, &config, &herdr, None, stages);
+                let dashboard = result.expect("a configured usable binary is a supported state");
+
+                assert!(
+                    completed,
+                    "width {width}: every stage must fire on its own predicate, not the deadline"
+                );
+                let alpha = dashboard
+                    .changes
+                    .active
+                    .iter()
+                    .find(|c| c.name == "alpha")
+                    .expect("alpha is an active change");
+                assert!(
+                    alpha.problems.is_empty(),
+                    "width {width}: a package schema is resolved by the locate pass: {:?}",
+                    alpha.problems
+                );
+                let text = rows.join("\n");
+                assert!(
+                    text.contains("alpha"),
+                    "width {width}: the alpha row: {text}"
+                );
+                if width == 120 {
+                    for tab in ["proposal", "specs", "design", "tasks"] {
+                        assert!(
+                            text.contains(tab),
+                            "width {width}: the detail region shows the {tab} tab: {text}"
+                        );
+                    }
+                    assert!(
+                        !rows.iter().any(|r| r.contains("│ ! ")),
+                        "width {width}: no problem row may draw: {text}"
+                    );
+                }
+                let which = std::fs::read_to_string(&log)
+                    .unwrap_or_default()
+                    .lines()
+                    .filter(|l| l.starts_with("schema which"))
+                    .count();
+                assert_eq!(
+                    which, 1,
+                    "width {width}: exactly one `schema which` call per cycle"
+                );
+            }
         }
 
         /// `agent-launch` :: "File mode answers both additions inertly" — the run-time + view
