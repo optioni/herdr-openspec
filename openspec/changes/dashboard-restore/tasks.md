@@ -43,10 +43,10 @@ Planning-time evidence at HEAD `e678de5` (code identical to `49e3fc7`), run 2026
 ## 4. The session-wide sweep
 <!-- kind: behavior -->
 
-- [ ] 4.1 RED: write `two_stale_dashboards_in_two_workspaces_are_both_replaced`, `a_live_dashboard_is_left_alone`, `no_dashboard_pane_at_all`, `one_failed_replacement_does_not_stop_the_sweep`, `an_unreadable_candidate_is_left_alone_and_warned_about`, and `herdr_unreachable_makes_no_further_call` against `FakeCli`.
-- [ ] 4.2 GREEN: implement `restore(cli, plugin_id) -> Report` and replace the group 1 stub with `restore_from_env()` (reads `plugin_id(&config::env_lookup())`, requires no workspace), per specs/dashboard-restore → "`restore` replaces every stale dashboard pane in the session" and design.md → Decisions 8 and 10.
-- [ ] 4.3 REFACTOR: fold any warning-formatting duplicated between `restore` and `open::run` into one helper naming the pane id; otherwise record that none was needed.
-- [ ] 4.4 Run `cargo test -q --lib open::` and `cargo test -q --test cli restore_` — unit green and both acceptance tests green; counts recorded.
+- [x] 4.1 RED: write `two_stale_dashboards_in_two_workspaces_are_both_replaced`, `a_live_dashboard_is_left_alone`, `no_dashboard_pane_at_all`, `one_failed_replacement_does_not_stop_the_sweep`, `an_unreadable_candidate_is_left_alone_and_warned_about`, and `herdr_unreachable_makes_no_further_call` against `FakeCli`.
+- [x] 4.2 GREEN: implement `restore(cli, plugin_id) -> Report` and replace the group 1 stub with `restore_from_env()` (reads `plugin_id(&config::env_lookup())`, requires no workspace), per specs/dashboard-restore → "`restore` replaces every stale dashboard pane in the session" and design.md → Decisions 8 and 10.
+- [x] 4.3 REFACTOR: fold any warning-formatting duplicated between `restore` and `open::run` into one helper naming the pane id; otherwise record that none was needed.
+- [x] 4.4 Run `cargo test -q --lib open::` and `cargo test -q --test cli restore_` — unit green and both acceptance tests green; counts recorded.
 
 ## 5. `open`/`open-tab` replace a stale match
 <!-- kind: behavior -->
