@@ -70,14 +70,15 @@ session restore.
 
 - **Code:** `src/open.rs` (the stale-pane classifier, the replace operation, the `restore`
   entry point; it stays the crate's one-shot `HerdrCli` consumer and starts no thread),
-  `src/main.rs` (subcommand dispatch and usage text). No change under `src/ui/`, and no new
+  `src/lib.rs` (`Invocation::Restore`, `parse`, `usage`), `src/main.rs` (dispatch). No change under `src/ui/`, and no new
   `HerdrCli` consumer file, so the `LAUNCHSEAM` five-file list does not move.
 - **Manifest:** `herdr-plugin.toml` (`[[startup]]`, `min_herdr_version`).
-- **Contract tier:** `tests/manifest.rs` (manifest transcription), `tests/doc_contract.rs`
-  where it transcribes the manifest or the subcommand list.
-- **Docs:** `SPEC.md` → Herdr integration (Manifest, subcommands, restore), `README.md`
-  (subcommands, minimum Herdr version, restore behaviour), `AGENTS.md`/`CLAUDE.md` current
-  repo state.
+- **Contract tier:** `tests/manifest.rs`, `tests/doc_contract.rs` (SPEC.md's manifest
+  transcription), `tests/degraded-coverage.toml` (new rows and re-pointed `src/open.rs`
+  ranges), `tests/cli.rs` (usage text, scrubbed-spawn guard).
+- **Docs:** `SPEC.md` (Overview, module map, Manifest, Opening the pane, Degraded states,
+  unit-tested modules), `README.md` → Install (minimum Herdr version, restore behaviour),
+  `PRD.md` (Herdr floor), `AGENTS.md` (`CLAUDE.md` is a symlink to it).
 - **External:** Herdr's `herdr pane list`, `herdr pane process-info`, `herdr plugin pane
   open`, and `herdr pane close` CLI surfaces, all reached through the existing `HerdrCli`
   seam. Users on Herdr 0.7.0–0.7.4 must upgrade.

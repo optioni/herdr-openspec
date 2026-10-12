@@ -9,15 +9,22 @@ label alone therefore cannot tell a live dashboard from a dead one, and neither 
 as `shell_pid` too (M5).
 
 A **candidate** SHALL be a `herdr pane list` entry carrying a non-empty string `pane_id` and
-a `label` equal to `open::DASHBOARD_LABEL`, in any workspace. A candidate SHALL be **stale**
-exactly when `herdr pane process-info --pane <pane_id>` answers with JSON whose
-`result.process_info` carries an integer `shell_pid` and a `foreground_processes` array of
-exactly one element, and that element's integer `pid` equals `shell_pid` and it carries a
-string `name` other than `herdr-openspec` (the binary name `tests/manifest.rs` already binds to the manifest).
-Every other answer — more than one foreground process, a different pid, the dashboard's own
-name, a missing or mistyped field, unparseable JSON, or a failed call — SHALL classify the
-candidate as **not stale**. Classification is a pure function of the `process-info` stdout;
-it performs no I/O of its own.
+a `label` equal to `open::DASHBOARD_LABEL`, in any workspace. Classifying a candidate from
+`herdr pane process-info --pane <pane_id>` SHALL yield exactly one of three answers:
+
+- **Unreadable** — the call failed, or its stdout is not JSON, or `result.process_info` lacks
+  an integer `shell_pid` or a non-empty `foreground_processes` array, or the array's sole
+  element lacks an integer `pid` or a string `name`.
+- **Stale** — readable, `foreground_processes` has exactly one element, its `pid` equals
+  `shell_pid`, and its `name` is not `herdr-openspec` (the binary name `tests/manifest.rs`
+  already binds to the manifest). Measured on real data in `notes/measurements.md` M6: six
+  restored shells, all stale; four live dashboards, none stale.
+- **Live** — every other readable answer: more than one foreground process, a different pid,
+  or the dashboard's own name.
+
+Only a stale candidate is ever replaced. An unreadable candidate is treated as live and the
+reason is reported as a warning naming its pane id; a live one is left alone silently.
+Classifying stdout is a pure function; it performs no I/O of its own.
 
 #### Scenario: A restored shell is stale
 
@@ -29,22 +36,23 @@ it performs no I/O of its own.
 
 - **WHEN** `process-info` answers with `"shell_pid":38099` and one foreground process
   `{"name":"herdr-openspec","argv":["/plugins/herdr-openspec/target/release/herdr-openspec","ui"],"pid":38099}`
-- **THEN** the candidate is not stale
+- **THEN** the candidate is live
 
 #### Scenario: A command the user started in the restored shell is not stale
 
 - **WHEN** `process-info` answers with `"shell_pid":49095` and one foreground process
   `{"name":"vim","pid":49210}`
-- **THEN** the candidate is not stale
+- **THEN** the candidate is live
 - **AND** the same holds when `foreground_processes` holds two elements, one of which has
   `pid` `49095`
 
-#### Scenario: An unreadable answer is never stale
+#### Scenario: An unreadable answer is never stale, and says why
 
 - **WHEN** the `process-info` stdout is not JSON, and again when it is JSON with no
   `shell_pid`, with a string `shell_pid`, with no `foreground_processes`, with an empty
   `foreground_processes` array, or with a sole foreground process carrying no `name`
-- **THEN** in every case the candidate is not stale
+- **THEN** in every case the candidate is unreadable, with a reason naming what was missing
+  or malformed
 
 #### Scenario: An unlabelled pane is never a candidate
 
@@ -102,8 +110,8 @@ that is not stale SHALL be left untouched, so a live dashboard surviving a live 
 Herdr runs startup hooks again — is never replaced. One candidate's failure SHALL NOT stop the
 sweep.
 
-`restore` SHALL NOT require a workspace id: Herdr's startup environment names no workspace,
-and the sweep is session-wide. It starts no thread, never renders, and needs no terminal.
+`restore` SHALL NOT require a workspace id: Herdr's startup environment may name no
+workspace, and the sweep is session-wide. It starts no thread, never renders, and needs no terminal.
 
 It SHALL write every warning and failure to stderr, one line each, naming the pane id it
 concerns, and SHALL exit 0 whenever the listing succeeded — Herdr records a startup hook's
@@ -138,6 +146,12 @@ itself fails or its stdout carries no `result.panes` array, making no further ca
 - **THEN** `w1:p3` is still classified and replaced
 - **AND** stderr carries one line naming `w1:p2` and Herdr's stderr, and the process exits 0
 
+#### Scenario: An unreadable candidate is left alone and warned about
+
+- **WHEN** `process-info` for `w1:p2` exits non-zero, and again when it answers `not json`
+- **THEN** no `plugin pane open` and no `pane close` call names `w1:p2`
+- **AND** stderr carries one line naming `w1:p2` and the reason, and the process exits 0
+
 #### Scenario: Herdr unreachable
 
 - **WHEN** `herdr pane list` cannot be started, exits non-zero, or answers with JSON lacking
@@ -150,3 +164,12 @@ itself fails or its stdout carries no `result.panes` array, making no further ca
 - **WHEN** `restore` runs with neither `HERDR_WORKSPACE_ID` nor `HERDR_PLUGIN_CONTEXT_JSON`
   set
 - **THEN** the sweep runs exactly as it does with them set
+- **AND** with stdin, stdout, and stderr all piped rather than a terminal, the process never
+  exits 3
+
+#### Scenario: The plugin id comes from `HERDR_PLUGIN_ID`, falling back to `herdr-openspec`
+
+- **WHEN** `restore` replaces a stale pane with `HERDR_PLUGIN_ID=other-id`, and again with
+  `HERDR_PLUGIN_ID` blank or unset
+- **THEN** the open call carries `--plugin other-id` in the first case and
+  `--plugin herdr-openspec` in the other two

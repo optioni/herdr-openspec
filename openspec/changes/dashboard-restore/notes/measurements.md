@@ -56,6 +56,31 @@ shell above it, so "the only foreground process is the pane's own `shell_pid`" h
 live dashboard **and** for a restored shell (M2). The classifier must therefore also exclude
 a foreground process named `herdr-openspec`.
 
+## M6 — verbatim `process-info` for every `OpenSpec` pane in a real restored session
+
+`herdr pane process-info --pane <id>` (Herdr 0.9.1, the default session, after a real server
+restart on 2026-10-10), for every pane `herdr pane list` labels `OpenSpec`. Ten panes: four live
+dashboards, six restored shells. `result.process_info` for one of each, verbatim:
+
+Live dashboard (`w8:p1B`):
+
+```json
+{"foreground_processes":[{"argv":["/Users/juusopiikkila/.config/herdr/plugins/github/herdr-openspec-80dd366f7f1a/target/release/herdr-openspec","ui"],"argv0":"herdr-openspec","cmdline":"/Users/juusopiikkila/.config/herdr/plugins/github/herdr-openspec-80dd366f7f1a/target/release/herdr-openspec ui","cwd":"/Users/juusopiikkila/.config/herdr/plugins/github/herdr-openspec-80dd366f7f1a","name":"herdr-openspec","pid":38099}],"pane_id":"w8:p1B","shell_pid":38099}
+```
+
+Restored shell (`wW:pB`):
+
+```json
+{"foreground_processes":[{"argv":["-zsh"],"argv0":"zsh","cmdline":"-zsh","cwd":"/Users/juusopiikkila/.config/herdr/plugins/github/herdr-openspec-80dd366f7f1a","name":"zsh","pid":9304}],"pane_id":"wW:pB","shell_pid":9304}
+```
+
+All six restored shells carry `"name":"zsh"` and a `pid` equal to `shell_pid`; all four live
+dashboards carry `"name":"herdr-openspec"` and a `pid` equal to `shell_pid`. So the rule in
+specs/dashboard-restore holds on real data: 6 of 6 stale, 0 of 4 live misclassified.
+`name` is not always the binary's name for other programs (a `claude` process was seen
+reporting `name "2.1.296"`), which is why the rule excludes one name rather than requiring a
+list of shell names.
+
 ## Not yet measured
 
 - When `[[startup]]` runs relative to client attach, and which `HERDR_PLUGIN_*` variables it
