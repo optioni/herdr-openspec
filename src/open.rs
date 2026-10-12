@@ -1391,6 +1391,22 @@ mod tests {
         )
     }
 
+    /// A live `process-info` answer for `pane` (a foreground process that is not the shell).
+    fn live_info() -> String {
+        info("4100", r#"[{"name":"herdr-openspec","pid":4100}]"#)
+    }
+
+    fn stale_info() -> String {
+        info("4100", r#"[{"name":"zsh","pid":4100}]"#)
+    }
+
+    fn info_argv(pane: &str) -> Vec<String> {
+        ["pane", "process-info", "--pane", pane]
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    }
+
     fn open_refs(placement: Placement, ctx: &Context) -> Vec<String> {
         open_args(placement, ctx)
     }
@@ -1401,6 +1417,7 @@ mod tests {
 
         let fake_tab = FakeCli::new();
         fake_tab.register_herdr(&["pane", "list"], Ok(labelled_listing()));
+        register_info(&fake_tab, "w8:pG", Ok(live_info()));
         fake_tab.register_herdr(&["plugin", "pane", "focus", "w8:pG"], Ok(String::new()));
         let report = run(&fake_tab, &ctx, Placement::Tab);
         assert_eq!(
@@ -1414,6 +1431,7 @@ mod tests {
             fake_tab.calls(),
             vec![
                 (Program::Herdr, vec!["pane".to_string(), "list".to_string()]),
+                (Program::Herdr, info_argv("w8:pG")),
                 (
                     Program::Herdr,
                     vec![
@@ -1428,10 +1446,11 @@ mod tests {
 
         let fake_split = FakeCli::new();
         fake_split.register_herdr(&["pane", "list"], Ok(labelled_listing()));
+        register_info(&fake_split, "w8:pG", Ok(live_info()));
         fake_split.register_herdr(&["plugin", "pane", "focus", "w8:pG"], Ok(String::new()));
         let report2 = run(&fake_split, &ctx, Placement::Split);
         assert_eq!(report2.outcome, Ok(()));
-        assert_eq!(fake_split.calls().len(), 2);
+        assert_eq!(fake_split.calls().len(), 3);
     }
 
     #[test]
@@ -1544,6 +1563,7 @@ mod tests {
         let ctx = full_context();
         let fake = FakeCli::new();
         fake.register_herdr(&["pane", "list"], Ok(labelled_listing()));
+        register_info(&fake, "w8:pG", Ok(live_info()));
         fake.register_herdr(
             &["plugin", "pane", "focus", "w8:pG"],
             Err(CliError::Failed {
@@ -1560,7 +1580,7 @@ mod tests {
         );
         let report = run(&fake, &ctx, Placement::Split);
         assert!(report.outcome.is_err());
-        assert_eq!(fake.calls().len(), 2);
+        assert_eq!(fake.calls().len(), 3);
         assert!(
             !fake
                 .calls()
@@ -1574,6 +1594,7 @@ mod tests {
         let ctx = full_context();
         let fake = FakeCli::new();
         fake.register_herdr(&["pane", "list"], Ok(labelled_listing()));
+        register_info(&fake, "w8:pG", Ok(live_info()));
         fake.register_herdr(
             &["plugin", "pane", "focus", "w8:pG"],
             Err(CliError::Failed {
@@ -1601,8 +1622,9 @@ mod tests {
         // repeats the same registered usage-error response.
         let calls = fake.calls();
         assert_eq!(calls[0].1, vec!["pane".to_string(), "list".to_string()]);
+        assert_eq!(calls[1].1, info_argv("w8:pG"));
         assert_eq!(
-            calls[1].1,
+            calls[2].1,
             vec![
                 "plugin".to_string(),
                 "pane".to_string(),
@@ -1610,14 +1632,14 @@ mod tests {
                 "w8:pG".to_string()
             ]
         );
-        assert_eq!(calls[2].1, argv);
+        assert_eq!(calls[3].1, argv);
         // ...and the post-open pair really does follow them: without this the test stays
         // green with the whole post-open block deleted, even though the scenario it is
         // named for mandates that pair.
-        assert_eq!(calls.len(), 5, "{calls:?}");
-        assert_eq!(calls[3].1, vec!["pane".to_string(), "list".to_string()]);
+        assert_eq!(calls.len(), 6, "{calls:?}");
+        assert_eq!(calls[4].1, vec!["pane".to_string(), "list".to_string()]);
         assert_eq!(
-            calls[4].1,
+            calls[5].1,
             vec![
                 "plugin".to_string(),
                 "pane".to_string(),
@@ -2011,6 +2033,7 @@ mod tests {
         let ctx = full_context();
         let fake = FakeCli::new();
         fake.register_herdr(&["pane", "list"], Ok(dashboard_listing("w8:pG")));
+        register_info(&fake, "w8:pG", Ok(live_info()));
         fake.register_herdr(
             &["plugin", "pane", "focus", "w8:pG"],
             Err(CliError::Failed {
@@ -2034,20 +2057,20 @@ mod tests {
         let report = run(&fake, &ctx, Placement::Tab);
         assert_eq!(report.outcome, Ok(()));
         let calls = fake.calls();
-        assert_eq!(calls.len(), 5, "{calls:?}");
+        assert_eq!(calls.len(), 6, "{calls:?}");
         assert_eq!(
-            calls[4].1,
+            calls[5].1,
             vec![
                 "plugin".to_string(),
                 "pane".to_string(),
                 "focus".to_string(),
                 "w8:pH".to_string()
             ],
-            "the fifth call must focus the newly opened pane, not the one already known \
+            "the sixth call must focus the newly opened pane, not the one already known \
              not to be focusable: {calls:?}"
         );
         assert_ne!(
-            calls[4].1,
+            calls[5].1,
             vec![
                 "plugin".to_string(),
                 "pane".to_string(),
@@ -2084,6 +2107,7 @@ mod tests {
         let ctx = full_context();
         let fake = FakeCli::new();
         fake.register_herdr(&["pane", "list"], Ok(dashboard_listing("w8:pG")));
+        register_info(&fake, "w8:pG", Ok(live_info()));
         fake.register_herdr(&["plugin", "pane", "focus", "w8:pG"], Ok(String::new()));
 
         let report = run(&fake, &ctx, Placement::Split);
@@ -2094,7 +2118,7 @@ mod tests {
                 outcome: Ok(())
             }
         );
-        assert_eq!(fake.calls().len(), 2, "{:?}", fake.calls());
+        assert_eq!(fake.calls().len(), 3, "{:?}", fake.calls());
         assert!(
             !fake
                 .calls()
@@ -2103,6 +2127,154 @@ mod tests {
             "no open call should follow: {:?}",
             fake.calls()
         );
+    }
+
+    // --- group 5: `open`/`open-tab` replace a stale match ---------------------------------
+
+    fn strs(a: &[&str]) -> Vec<String> {
+        a.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn stale_open(flag: &str) -> Vec<String> {
+        open_for("w8:pG", flag)
+    }
+
+    #[test]
+    fn a_stale_match_is_replaced_in_place_and_the_replacement_focused() {
+        let ctx = full_context();
+        let fake = FakeCli::new();
+        fake.register_herdr(&["pane", "list"], Ok(dashboard_listing("w8:pG")));
+        register_info(&fake, "w8:pG", Ok(stale_info()));
+        let open = stale_open("--focus");
+        let open_refs_: Vec<&str> = open.iter().map(String::as_str).collect();
+        fake.register_herdr(&open_refs_, Ok(String::new()));
+        fake.register_herdr(&["pane", "close", "w8:pG"], Ok(String::new()));
+        fake.register_herdr(&["pane", "list"], Ok(dashboard_listing("w8:pK")));
+        fake.register_herdr(&["plugin", "pane", "focus", "w8:pK"], Ok(String::new()));
+
+        let report = run(&fake, &ctx, Placement::Split);
+        assert_eq!(
+            report,
+            Report {
+                warnings: Vec::new(),
+                outcome: Ok(())
+            }
+        );
+        let calls: Vec<Vec<String>> = fake.calls().into_iter().map(|(_, a)| a).collect();
+        assert_eq!(
+            calls,
+            vec![
+                strs(&["pane", "list"]),
+                info_argv("w8:pG"),
+                open,
+                strs(&["pane", "close", "w8:pG"]),
+                strs(&["pane", "list"]),
+                strs(&["plugin", "pane", "focus", "w8:pK"]),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_failed_replacement_open_stops_and_closes_nothing() {
+        let ctx = full_context();
+        let fake = FakeCli::new();
+        fake.register_herdr(&["pane", "list"], Ok(dashboard_listing("w8:pG")));
+        register_info(&fake, "w8:pG", Ok(stale_info()));
+        let open = stale_open("--focus");
+        let open_refs_: Vec<&str> = open_refs_of(&open);
+        fake.register_herdr(
+            &open_refs_,
+            Err(failed(&open_refs_, "plugin_pane_open_failed")),
+        );
+
+        let report = run(&fake, &ctx, Placement::Split);
+        let reason = report.outcome.expect_err("a failed open is exit 1");
+        assert!(reason.contains("plugin_pane_open_failed"), "{reason}");
+        let calls = fake.calls();
+        assert_eq!(calls.len(), 3, "{calls:?}");
+        assert!(
+            calls.iter().all(|(_, a)| a.get(1).map(String::as_str) != Some("close")
+                && a.get(2).map(String::as_str) != Some("focus")),
+            "{calls:?}"
+        );
+    }
+
+    fn open_refs_of(argv: &[String]) -> Vec<&str> {
+        argv.iter().map(String::as_str).collect()
+    }
+
+    #[test]
+    fn a_failed_close_after_a_successful_replacement_warns_and_still_focuses() {
+        let ctx = full_context();
+        let fake = FakeCli::new();
+        fake.register_herdr(&["pane", "list"], Ok(dashboard_listing("w8:pG")));
+        register_info(&fake, "w8:pG", Ok(stale_info()));
+        let open = stale_open("--focus");
+        fake.register_herdr(&open_refs_of(&open), Ok(String::new()));
+        let close = ["pane", "close", "w8:pG"];
+        fake.register_herdr(&close, Err(failed(&close, "pane_not_found")));
+        fake.register_herdr(&["pane", "list"], Ok(dashboard_listing("w8:pK")));
+        fake.register_herdr(&["plugin", "pane", "focus", "w8:pK"], Ok(String::new()));
+
+        let report = run(&fake, &ctx, Placement::Split);
+        assert_eq!(report.outcome, Ok(()));
+        assert_eq!(report.warnings.len(), 1, "{:?}", report.warnings);
+        assert!(
+            report.warnings[0].contains("pane_not_found"),
+            "{:?}",
+            report.warnings
+        );
+        let calls = fake.calls();
+        assert_eq!(calls.len(), 6, "{calls:?}");
+        assert_eq!(calls[5].1, strs(&["plugin", "pane", "focus", "w8:pK"]));
+    }
+
+    #[test]
+    fn an_unclassifiable_match_is_focused_never_replaced() {
+        let ctx = full_context();
+        let process_info = ["pane", "process-info", "--pane", "w8:pG"];
+        let cases: Vec<(&str, Result<String, CliError>, bool)> = vec![
+            (
+                "failing call",
+                Err(failed(&process_info, "pane_not_found")),
+                true,
+            ),
+            (
+                "no foreground_processes",
+                Ok(r#"{"result":{"process_info":{"shell_pid":4100}}}"#.to_string()),
+                true,
+            ),
+            ("live answer", Ok(live_info()), false),
+        ];
+        for (label, answer, warns) in cases {
+            let fake = FakeCli::new();
+            fake.register_herdr(&["pane", "list"], Ok(dashboard_listing("w8:pG")));
+            register_info(&fake, "w8:pG", answer);
+            fake.register_herdr(&["plugin", "pane", "focus", "w8:pG"], Ok(String::new()));
+
+            let report = run(&fake, &ctx, Placement::Split);
+            assert_eq!(report.outcome, Ok(()), "case {label}");
+            let calls = fake.calls();
+            assert_eq!(calls.len(), 3, "case {label}: {calls:?}");
+            assert_eq!(
+                calls[2].1,
+                strs(&["plugin", "pane", "focus", "w8:pG"]),
+                "case {label}"
+            );
+            assert!(
+                calls
+                    .iter()
+                    .all(|(_, a)| a.get(2).map(String::as_str) != Some("open")
+                        && a.get(1).map(String::as_str) != Some("close")),
+                "case {label}: {calls:?}"
+            );
+            if warns {
+                assert_eq!(report.warnings.len(), 1, "case {label}");
+                assert!(report.warnings[0].contains("w8:pG"), "case {label}");
+            } else {
+                assert!(report.warnings.is_empty(), "case {label}");
+            }
+        }
     }
 
     // --- group 4: the session-wide sweep ---------------------------------------------------
