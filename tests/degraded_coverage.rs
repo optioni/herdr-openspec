@@ -23,7 +23,7 @@ const MIN_ROWS: usize = 46;
 /// so 79 ranges could fall to 59 without either check firing, and `coverage-prod.py` runs
 /// only behind a green suite. A lower bound on the same terms as `MIN_ROWS`: whichever of two
 /// changes in flight lands second adopts the higher count, and neither lowers it.
-const MIN_RANGES: usize = 70;
+const MIN_RANGES: usize = 76;
 
 /// Parse the table between `## Degraded states` and `### No terminal is not a degraded
 /// state`, skipping the header and separator rows, taking each remaining line's first
