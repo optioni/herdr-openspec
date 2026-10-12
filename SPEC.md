@@ -1052,24 +1052,21 @@ launch of its own.
 
 ### Manifest
 
-`min_herdr_version` stays `0.7.0`: Herdr's own changelog records manifest-declared
-actions, managed plugin panes, plugin pane placement, and plugin invocation-context and
-environment injection as 0.7.0 additions. `herdr plugin pane focus`, which `open`/
-`open-tab` use to avoid duplicating an already-open dashboard, is confirmed working on the
-installed 0.8.2 but appears **nowhere** in Herdr's changelog, so its true first version is
-unknown; `herdr-file-viewer` (also `min_herdr_version = 0.7.0`, installed locally) still
-works around focus with a `pane zoom --on`/`--off` cycle rather than `plugin pane focus`,
-suggesting the subcommand may postdate 0.7.0. This plugin does not raise its floor on that
-suspicion alone — see "Focus can fail two ways" above for how a Herdr without the
-subcommand degrades, which is bounded to one extra dashboard rather than a refusal. A
-floor bump, if one is ever measured necessary, belongs to whichever change first measures
-a real failure on an older Herdr.
+`min_herdr_version` is `0.7.5`: that is the first Herdr release carrying the `[[startup]]`
+manifest table, which `dashboard-restore` uses to run `herdr-openspec restore` once per
+Herdr start and re-place a dashboard pane a restored session left stale. Earlier floors
+(0.7.0) covered manifest-declared actions, managed plugin panes, pane placement, and
+plugin invocation-context and environment injection. `herdr plugin pane focus`, which
+`open`/`open-tab` use to avoid duplicating an already-open dashboard, appears nowhere in
+Herdr's changelog, so its true first version is unknown; see "Focus can fail two ways"
+above for how a Herdr without the subcommand degrades, which is bounded to one extra
+dashboard rather than a refusal.
 
 ```toml
 id = "herdr-openspec"
 name = "OpenSpec"
 version = "0.1.0"
-min_herdr_version = "0.7.0"
+min_herdr_version = "0.7.5"
 platforms = ["macos", "linux"]
 
 [[build]]
@@ -1098,6 +1095,9 @@ id = "open-tab"
 title = "OpenSpec: dashboard (tab)"
 contexts = ["workspace"]
 command = ["./target/release/herdr-openspec", "open-tab"]
+
+[[startup]]
+command = ["./target/release/herdr-openspec", "restore"]
 ```
 
 The tab action's command is the flat `open-tab` subcommand, not `["open", "--tab"]`: `parse`
