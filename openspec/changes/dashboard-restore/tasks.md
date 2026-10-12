@@ -59,10 +59,10 @@ Planning-time evidence at HEAD `e678de5` (code identical to `49e3fc7`), run 2026
 ## 6. Manifest
 <!-- kind: operational -->
 
-- [ ] 6.1 CHECK: in `tests/manifest.rs`, add `startup` to the required keys and add `the_startup_hook_runs_the_restore_subcommand` (exactly one `[[startup]]`, whose only key is `command`, of exactly two elements: the panes' path, then a token `parse` classifies as `Invocation::Restore`); run `cargo test -q --test manifest` — RED, 2 failing.
-- [ ] 6.2 CHANGE: add `[[startup]] command = ["./target/release/herdr-openspec", "restore"]` and set `min_herdr_version = "0.7.5"` in `herdr-plugin.toml`; mirror both in `SPEC.md` → Herdr integration → Manifest's transcription, with `[[startup]]` at the same table position (`spec_manifest_block_order_matches`), and rewrite that section's min-version paragraph.
-- [ ] 6.3 CHECK: contract gate — re-read `SPEC.md` → Manifest against `herdr-plugin.toml` for every key and table.
-- [ ] 6.4 VERIFY: `cargo test -q --test manifest` (6) and `cargo test -q --test doc_contract` — green, counts recorded.
+- [x] 6.1 CHECK: in `tests/manifest.rs`, add `startup` to the required keys and add `the_startup_hook_runs_the_restore_subcommand` (exactly one `[[startup]]`, whose only key is `command`, of exactly two elements: the panes' path, then a token `parse` classifies as `Invocation::Restore`); run `cargo test -q --test manifest` — RED, 2 failing.
+- [x] 6.2 CHANGE: add `[[startup]] command = ["./target/release/herdr-openspec", "restore"]` and set `min_herdr_version = "0.7.5"` in `herdr-plugin.toml`; mirror both in `SPEC.md` → Herdr integration → Manifest's transcription, with `[[startup]]` at the same table position (`spec_manifest_block_order_matches`), and rewrite that section's min-version paragraph.
+- [x] 6.3 CHECK: contract gate — re-read `SPEC.md` → Manifest against `herdr-plugin.toml` for every key and table.
+- [x] 6.4 VERIFY: `cargo test -q --test manifest` (6) and `cargo test -q --test doc_contract` — green, counts recorded.
 
 ## 7. Degraded-states rows
 <!-- kind: operational -->
