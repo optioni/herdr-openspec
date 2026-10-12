@@ -216,7 +216,7 @@ fn failing_statuses_are_distinct() {
         // specs/pane-open/spec.md -> "Usage names all three commands".
         assert!(stderr.contains("open-tab"), "{name} stderr: {stderr}");
         assert!(
-            stderr.contains("usage: herdr-openspec <ui|open|open-tab>"),
+            stderr.contains("usage: herdr-openspec <ui|open|open-tab|restore>"),
             "{name} stderr: {stderr}"
         );
     }

@@ -1153,7 +1153,16 @@ mod tests {
     }
 
     #[test]
+    fn restore_alone_classifies_as_the_restore_invocation() {
+        assert_eq!(parse(&["restore"]), Invocation::Restore);
+    }
+
+    #[test]
     fn a_flag_after_a_subcommand_is_rejected() {
+        assert_eq!(
+            parse(&["restore", "--all"]),
+            Invocation::Reject(Some("--all".to_string()))
+        );
         assert_eq!(
             parse(&["open", "--tab"]),
             Invocation::Reject(Some("--tab".to_string()))
@@ -1168,14 +1177,14 @@ mod tests {
         );
     }
 
-    /// Split `usage()`'s `Commands:` block into lines and assert exactly three, whose
-    /// first whitespace-delimited tokens are `ui`, `open`, and `open-tab` — asserted as
+    /// Split `usage()`'s `Commands:` block into lines and assert exactly four, whose
+    /// first whitespace-delimited tokens are `ui`, `open`, `open-tab`, and `restore` — asserted as
     /// whole tokens, since `open` is a substring of `open-tab` and `.contains("open")`
     /// would be satisfied by either alone.
     #[test]
-    fn usage_lists_ui() {
+    fn usage_names_all_four_commands() {
         let text = usage();
-        assert!(text.starts_with("usage: herdr-openspec <ui|open|open-tab>"));
+        assert!(text.starts_with("usage: herdr-openspec <ui|open|open-tab|restore>"));
         let commands_block = text
             .split("Commands:\n")
             .nth(1)
@@ -1184,11 +1193,11 @@ mod tests {
             .lines()
             .filter(|l| !l.trim().is_empty())
             .collect();
-        assert_eq!(lines.len(), 3, "commands block: {commands_block:?}");
+        assert_eq!(lines.len(), 4, "commands block: {commands_block:?}");
         let first_tokens: Vec<&str> = lines
             .iter()
             .map(|l| l.split_whitespace().next().expect("non-empty line"))
             .collect();
-        assert_eq!(first_tokens, vec!["ui", "open", "open-tab"]);
+        assert_eq!(first_tokens, vec!["ui", "open", "open-tab", "restore"]);
     }
 }
