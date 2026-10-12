@@ -489,6 +489,13 @@ pub fn run() -> Result<(), StartError> {
     let config = crate::config::load_from_env();
     let env = crate::config::env_lookup();
     let cwd = startup_dir(&env, &|| std::env::current_dir())?;
+    // Herdr starts this pane in the plugin root and reports the pane process's *live* cwd as
+    // the pane's own — measured against Herdr 0.8.2, it follows a later chdir — so without
+    // this the pane, and a workspace whose first tab it is, is labelled with the plugin's
+    // install directory. Best effort: the relative manifest `command` has already resolved,
+    // nothing below reads the process cwd (every subprocess is given its directory
+    // explicitly), and a failure only leaves the label as it was.
+    let _ = std::env::set_current_dir(&cwd);
     let mut term = Terminal::new(ratatui::backend::CrosstermBackend::new(std::io::stdout()))?;
     let state_dir = crate::state::state_dir(&env);
     let startup = Startup {
