@@ -66,8 +66,7 @@ pub fn context(env: &dyn Fn(&str) -> Option<String>) -> Result<Context, String> 
             .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
             .and_then(|v| v.as_object().cloned());
 
-    let plugin_id = crate::config::non_blank(env("HERDR_PLUGIN_ID"))
-        .unwrap_or_else(|| "herdr-openspec".to_string());
+    let plugin_id = plugin_id(env);
 
     let workspace_id = json_field(&json_obj, "workspace_id")
         .or_else(|| crate::config::non_blank(env("HERDR_WORKSPACE_ID")))
@@ -328,18 +327,77 @@ pub enum Classification {
 }
 
 /// Classify a `process-info` stdout. Pure.
-pub fn classify(_stdout: &str) -> Classification {
-    Classification::Live
+pub fn classify(stdout: &str) -> Classification {
+    let unreadable = |why: &str| Classification::Unreadable(why.to_string());
+    let value: serde_json::Value = match serde_json::from_str(stdout) {
+        Ok(v) => v,
+        Err(e) => {
+            return Classification::Unreadable(format!("process-info is not valid JSON: {e}"));
+        }
+    };
+    let Some(info) = value.get("result").and_then(|r| r.get("process_info")) else {
+        return unreadable("process-info has no \"result\".\"process_info\" object");
+    };
+    let Some(shell_pid) = info.get("shell_pid").and_then(|v| v.as_i64()) else {
+        return unreadable("process-info has no integer shell_pid");
+    };
+    let Some(fg) = info
+        .get("foreground_processes")
+        .and_then(|v| v.as_array())
+        .filter(|a| !a.is_empty())
+    else {
+        return unreadable("process-info has no non-empty foreground_processes array");
+    };
+    if fg.len() > 1 {
+        return Classification::Live;
+    }
+    let only = &fg[0];
+    let Some(pid) = only.get("pid").and_then(|v| v.as_i64()) else {
+        return unreadable("the foreground process has no integer pid");
+    };
+    let Some(name) = only.get("name").and_then(|v| v.as_str()) else {
+        return unreadable("the foreground process has no string name");
+    };
+    if pid == shell_pid && name != "herdr-openspec" {
+        Classification::Stale
+    } else {
+        Classification::Live
+    }
 }
 
 /// Every candidate in a `herdr pane list` payload: `(pane_id, focused)`, any workspace.
-pub fn restore_candidates(_listing: &str) -> Result<Vec<(String, bool)>, String> {
-    Ok(Vec::new())
+pub fn restore_candidates(listing: &str) -> Result<Vec<(String, bool)>, String> {
+    let value: serde_json::Value = serde_json::from_str(listing)
+        .map_err(|e| format!("pane list payload is not valid JSON: {e}"))?;
+    let panes = value
+        .get("result")
+        .and_then(|r| r.get("panes"))
+        .and_then(|p| p.as_array())
+        .ok_or_else(|| "pane list payload has no \"result\".\"panes\" array".to_string())?;
+    let mut out = Vec::new();
+    for pane in panes {
+        let Some(obj) = pane.as_object() else {
+            continue;
+        };
+        let Some(pane_id) = obj.get("pane_id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if pane_id.is_empty() || obj.get("label").and_then(|v| v.as_str()) != Some(DASHBOARD_LABEL)
+        {
+            continue;
+        }
+        let focused = obj
+            .get("focused")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        out.push((pane_id.to_string(), focused));
+    }
+    Ok(out)
 }
 
 /// The plugin id: `HERDR_PLUGIN_ID`, blank-filtered, falling back to `herdr-openspec`.
-pub fn plugin_id(_env: &dyn Fn(&str) -> Option<String>) -> String {
-    String::new()
+pub fn plugin_id(env: &dyn Fn(&str) -> Option<String>) -> String {
+    crate::config::non_blank(env("HERDR_PLUGIN_ID")).unwrap_or_else(|| "herdr-openspec".to_string())
 }
 
 /// `restore`'s entry point. Stub until the restore group lands: no warnings, success.
