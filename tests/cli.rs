@@ -620,11 +620,13 @@ fn every_run_pipes_and_scrubs_herdr() {
              stdout) nor sets .stdout(Stdio::piped()/null()) before .spawn(): {chain}"
         );
 
-        let names_open = chain.contains("\"open\"") || chain.contains("\"open-tab\"");
+        let names_open = chain.contains("\"open\"")
+            || chain.contains("\"open-tab\"")
+            || chain.contains("\"restore\"");
         if names_open {
             assert!(
                 is_scrubbed,
-                "spawn site at byte {start} names open/open-tab but was built from bin() \
+                "spawn site at byte {start} names open/open-tab/restore but was built from bin() \
                  rather than scrubbed(), so it does not remove HERDR_* from the child's \
                  environment: {chain}"
             );
@@ -636,6 +638,117 @@ fn every_run_pipes_and_scrubs_herdr() {
         "found only {spawn_sites} spawn sites (expected >= {MIN_SPAWN_SITES}) - the scan \
          is vacuous"
     );
+}
+
+/// `M6`'s verbatim `result.process_info` for a **restored shell** — one foreground process
+/// named `zsh` whose `pid` equals `shell_pid` (openspec/changes/dashboard-restore/notes/
+/// measurements.md -> M6).
+const M6_STALE: &str = r#"{"foreground_processes":[{"argv":["-zsh"],"argv0":"zsh","cmdline":"-zsh","cwd":"/Users/juusopiikkila/.config/herdr/plugins/github/herdr-openspec-80dd366f7f1a","name":"zsh","pid":9304}],"pane_id":"wW:pB","shell_pid":9304}"#;
+
+/// `M6`'s verbatim `result.process_info` for a **live dashboard** — one foreground process
+/// named `herdr-openspec` whose `pid` also equals `shell_pid` (M5, M6).
+const M6_LIVE: &str = r#"{"foreground_processes":[{"argv":["/Users/juusopiikkila/.config/herdr/plugins/github/herdr-openspec-80dd366f7f1a/target/release/herdr-openspec","ui"],"argv0":"herdr-openspec","cmdline":"/Users/juusopiikkila/.config/herdr/plugins/github/herdr-openspec-80dd366f7f1a/target/release/herdr-openspec ui","cwd":"/Users/juusopiikkila/.config/herdr/plugins/github/herdr-openspec-80dd366f7f1a","name":"herdr-openspec","pid":38099}],"pane_id":"w8:p1B","shell_pid":38099}"#;
+
+/// `PATH` with `bin_dir` (holding a stub `herdr`) prepended.
+fn path_with(bin_dir: &std::path::Path) -> String {
+    format!(
+        "{}:{}",
+        bin_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    )
+}
+
+/// `specs/dashboard-restore/spec.md` -> "`restore` replaces every stale dashboard pane in
+/// the session": the real built binary, run as Herdr's `[[startup]]` hook would run it,
+/// lists the session once, classifies every `OpenSpec` pane in listing order from M6's
+/// verbatim `process-info` shapes, replaces the two stale ones in their own slots (focus
+/// only for the one the listing reports focused) and leaves the live one alone.
+#[test]
+fn restore_replaces_stale_dashboards_and_leaves_a_live_one() {
+    let script = format!(
+        r#"#!/bin/sh
+echo "$@" >> "$(dirname "$0")/../argv.log"
+case "$*" in
+  "pane list")
+    printf '%s' '{{"result":{{"panes":[{{"pane_id":"w1:p2","label":"OpenSpec","workspace_id":"w1","focused":true}},{{"pane_id":"w1:p3","label":"OpenSpec","workspace_id":"w1","focused":false}},{{"pane_id":"w2:p5","label":"OpenSpec","workspace_id":"w2","focused":false}}]}}}}'
+    ;;
+  "pane process-info --pane w1:p3")
+    printf '%s' '{{"result":{{"process_info":{live}}}}}'
+    ;;
+  "pane process-info --pane "*)
+    printf '%s' '{{"result":{{"process_info":{stale}}}}}'
+    ;;
+  "plugin pane open "*|"pane close "*) printf '' ;;
+  *) echo "stub herdr: unexpected call: $*" >&2; exit 64 ;;
+esac
+exit 0
+"#,
+        live = M6_LIVE,
+        stale = M6_STALE,
+    );
+    let (scratch, bin_dir) = write_stub_herdr(&script);
+
+    let output = scrubbed()
+        .arg("restore")
+        .env("PATH", path_with(&bin_dir))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("failed to run binary");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+    assert!(stderr.is_empty(), "stderr: {stderr}");
+
+    let argv_log = std::fs::read_to_string(scratch.path().join("argv.log")).unwrap_or_default();
+    let lines: Vec<&str> = argv_log.lines().collect();
+    assert_eq!(
+        lines,
+        [
+            "pane list",
+            "pane process-info --pane w1:p2",
+            "plugin pane open --plugin herdr-openspec --entrypoint dashboard --placement split --target-pane w1:p2 --direction right --focus",
+            "pane close w1:p2",
+            "pane process-info --pane w1:p3",
+            "pane process-info --pane w2:p5",
+            "plugin pane open --plugin herdr-openspec --entrypoint dashboard --placement split --target-pane w2:p5 --direction right --no-focus",
+            "pane close w2:p5",
+        ],
+        "argv.log:\n{argv_log}"
+    );
+}
+
+/// `specs/dashboard-restore/spec.md` -> "Herdr unreachable": when `herdr pane list` itself
+/// fails, `restore` makes no further Herdr call, puts the reason on stderr, and exits 1.
+#[test]
+fn restore_exits_one_when_herdr_is_unreachable() {
+    let (scratch, bin_dir) = write_stub_herdr(
+        r#"#!/bin/sh
+echo "$@" >> "$(dirname "$0")/../argv.log"
+case "$*" in
+  "pane list") echo "herdr: server unreachable" >&2; exit 1 ;;
+  *) exit 0 ;;
+esac
+"#,
+    );
+
+    let output = scrubbed()
+        .arg("restore")
+        .env("PATH", path_with(&bin_dir))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("failed to run binary");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "stderr: {stderr}");
+    assert!(!stderr.trim().is_empty(), "the reason must be on stderr");
+
+    let argv_log = std::fs::read_to_string(scratch.path().join("argv.log")).unwrap_or_default();
+    let lines: Vec<&str> = argv_log.lines().collect();
+    assert_eq!(lines, ["pane list"], "argv.log:\n{argv_log}");
 }
 
 #[test]
