@@ -27,10 +27,10 @@ Planning-time evidence at HEAD `e678de5` (code identical to `49e3fc7`), run 2026
 ## 2. Stale-pane classification
 <!-- kind: behavior -->
 
-- [ ] 2.1 RED: in `src/open.rs` tests, write `a_restored_shell_is_stale`, `a_live_dashboard_is_not_stale`, `a_command_the_user_started_is_not_stale`, `an_unreadable_answer_is_never_stale_and_says_why` (table-driven over every shape the spec lists), `an_unlabelled_pane_is_never_a_candidate`, and `plugin_id_reads_the_variable_and_falls_back` (set, blank, unset), using M6's verbatim JSON.
-- [ ] 2.2 GREEN: implement `classify(&str) -> Classification` (`Stale` / `Live` / `Unreadable(String)`), `restore_candidates(listing) -> Result<Vec<(String, bool)>, String>` (pane id, focused), and `plugin_id(env)`, and make `open::context` call `plugin_id`; all pure, per specs/dashboard-restore → "A stale dashboard pane is recognised from its process, not its label".
-- [ ] 2.3 REFACTOR: if `restore_candidates` and `dashboard_panes` repeat the label/pane-id walk, extract it once without changing `dashboard_panes`' tests; otherwise record that none was needed.
-- [ ] 2.4 Run `cargo test -q --lib open::` — green, count recorded (53 + new).
+- [x] 2.1 RED: in `src/open.rs` tests, write `a_restored_shell_is_stale`, `a_live_dashboard_is_not_stale`, `a_command_the_user_started_is_not_stale`, `an_unreadable_answer_is_never_stale_and_says_why` (table-driven over every shape the spec lists), `an_unlabelled_pane_is_never_a_candidate`, and `plugin_id_reads_the_variable_and_falls_back` (set, blank, unset), using M6's verbatim JSON.
+- [x] 2.2 GREEN: implement `classify(&str) -> Classification` (`Stale` / `Live` / `Unreadable(String)`), `restore_candidates(listing) -> Result<Vec<(String, bool)>, String>` (pane id, focused), and `plugin_id(env)`, and make `open::context` call `plugin_id`; all pure, per specs/dashboard-restore → "A stale dashboard pane is recognised from its process, not its label".
+- [x] 2.3 REFACTOR: if `restore_candidates` and `dashboard_panes` repeat the label/pane-id walk, extract it once without changing `dashboard_panes`' tests; otherwise record that none was needed.
+- [x] 2.4 Run `cargo test -q --lib open::` — green, count recorded (53 + new).
 
 ## 3. Replacing a stale pane in its slot
 <!-- kind: behavior -->
