@@ -74,8 +74,8 @@ Planning-time evidence at HEAD `e678de5` (code identical to `49e3fc7`), run 2026
 ## 8. Acceptance Test — Outer Loop GREEN
 <!-- kind: behavior -->
 
-- [ ] 8.1 VERIFY: `cargo test -q --test cli restore_` — 2 selected, 2 passed.
-- [ ] 8.2 REFACTOR: fold any stub-script duplication in `tests/cli.rs` into its existing helpers, or record that none was needed.
+- [x] 8.1 VERIFY: `cargo test -q --test cli restore_` — 2 selected, 2 passed.
+- [x] 8.2 REFACTOR: fold any stub-script duplication in `tests/cli.rs` into its existing helpers, or record that none was needed.
 
 ## 9. Live check (isolated Herdr)
 <!-- kind: operational -->
