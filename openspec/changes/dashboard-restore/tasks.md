@@ -19,10 +19,10 @@ Planning-time evidence at HEAD `e678de5` (code identical to `49e3fc7`), run 2026
 ## 1. The `restore` subcommand
 <!-- kind: behavior -->
 
-- [ ] 1.1 RED: in `src/lib.rs` tests, add `restore_alone_classifies_as_the_restore_invocation`, extend `a_flag_after_a_subcommand_is_rejected` with `parse(&["restore", "--all"])`, and replace the three-command usage test with `usage_names_all_four_commands` (whole-token command lines; summary `<ui|open|open-tab|restore>`); update `tests/cli.rs`'s usage substring assertion (around line 219) to the new summary. Confirm they fail.
-- [ ] 1.2 GREEN: add `Invocation::Restore`, its `parse` arms, the `usage` line, and `open::placement_for`'s `Restore => None` arm; add the `main` arm calling `open::restore_from_env()` through the same reporter `run_open` uses. Stub `restore_from_env` to return an empty `Report` with `Ok(())` until group 4.
-- [ ] 1.3 REFACTOR: if `run_open` and the restore arm repeat the stderr/exit loop, share one reporter; otherwise record that none was needed.
-- [ ] 1.4 Run `cargo test -q --lib classifies_as` (4), `--lib a_flag_after_a_subcommand` (1), `--lib usage_`, and `--test cli` — green except the two group 0 tests, which now fail on the call sequence; counts recorded.
+- [x] 1.1 RED: in `src/lib.rs` tests, add `restore_alone_classifies_as_the_restore_invocation`, extend `a_flag_after_a_subcommand_is_rejected` with `parse(&["restore", "--all"])`, and replace the three-command usage test with `usage_names_all_four_commands` (whole-token command lines; summary `<ui|open|open-tab|restore>`); update `tests/cli.rs`'s usage substring assertion (around line 219) to the new summary. Confirm they fail.
+- [x] 1.2 GREEN: add `Invocation::Restore`, its `parse` arms, the `usage` line, and `open::placement_for`'s `Restore => None` arm; add the `main` arm calling `open::restore_from_env()` through the same reporter `run_open` uses. Stub `restore_from_env` to return an empty `Report` with `Ok(())` until group 4.
+- [x] 1.3 REFACTOR: if `run_open` and the restore arm repeat the stderr/exit loop, share one reporter; otherwise record that none was needed.
+- [x] 1.4 Run `cargo test -q --lib classifies_as` (4), `--lib a_flag_after_a_subcommand` (1), `--lib usage_`, and `--test cli` — green except the two group 0 tests, which now fail on the call sequence; counts recorded.
 
 ## 2. Stale-pane classification
 <!-- kind: behavior -->
