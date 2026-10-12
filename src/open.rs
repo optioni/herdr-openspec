@@ -124,6 +124,21 @@ pub fn existing_pane(listing: &str, workspace_id: &str) -> Result<Option<String>
 /// post-open listings cannot drift apart. `Err` carries a reason when `listing` is not
 /// JSON or carries no `result.panes` array.
 pub fn dashboard_panes(listing: &str, workspace_id: &str) -> Result<Vec<String>, String> {
+    Ok(labelled_panes(listing)?
+        .into_iter()
+        .filter(|(_, obj)| obj.get("workspace_id").and_then(|v| v.as_str()) == Some(workspace_id))
+        .map(|(id, _)| id)
+        .collect())
+}
+
+/// A labelled pane: its id and its whole JSON object.
+type LabelledPane = (String, serde_json::Map<String, serde_json::Value>);
+
+/// The one walk both [`dashboard_panes`] and [`restore_candidates`] share: every listed
+/// pane with a non-empty string `pane_id` and a `label` equal to [`DASHBOARD_LABEL`], in
+/// the listing's order, with its object for the caller's own further tests. `Err` when
+/// `listing` is not JSON or carries no `result.panes` array.
+fn labelled_panes(listing: &str) -> Result<Vec<LabelledPane>, String> {
     let value: serde_json::Value = serde_json::from_str(listing)
         .map_err(|e| format!("pane list payload is not valid JSON: {e}"))?;
     let panes = value
@@ -131,33 +146,15 @@ pub fn dashboard_panes(listing: &str, workspace_id: &str) -> Result<Vec<String>,
         .and_then(|r| r.get("panes"))
         .and_then(|p| p.as_array())
         .ok_or_else(|| "pane list payload has no \"result\".\"panes\" array".to_string())?;
-
-    let mut ids = Vec::new();
-    for pane in panes {
-        let Some(obj) = pane.as_object() else {
-            continue;
-        };
-        let Some(pane_id) = obj.get("pane_id").and_then(|v| v.as_str()) else {
-            continue;
-        };
-        if pane_id.is_empty() {
-            continue;
-        }
-        let Some(label) = obj.get("label").and_then(|v| v.as_str()) else {
-            continue;
-        };
-        if label != DASHBOARD_LABEL {
-            continue;
-        }
-        let Some(pane_workspace) = obj.get("workspace_id").and_then(|v| v.as_str()) else {
-            continue;
-        };
-        if pane_workspace != workspace_id {
-            continue;
-        }
-        ids.push(pane_id.to_string());
-    }
-    Ok(ids)
+    Ok(panes
+        .iter()
+        .filter_map(|pane| pane.as_object())
+        .filter(|obj| obj.get("label").and_then(|v| v.as_str()) == Some(DASHBOARD_LABEL))
+        .filter_map(|obj| {
+            let id = obj.get("pane_id").and_then(|v| v.as_str())?;
+            (!id.is_empty()).then(|| (id.to_string(), obj.clone()))
+        })
+        .collect())
 }
 
 /// Which post-open pane to focus: the first `after` id absent from `before`, else
@@ -367,32 +364,16 @@ pub fn classify(stdout: &str) -> Classification {
 
 /// Every candidate in a `herdr pane list` payload: `(pane_id, focused)`, any workspace.
 pub fn restore_candidates(listing: &str) -> Result<Vec<(String, bool)>, String> {
-    let value: serde_json::Value = serde_json::from_str(listing)
-        .map_err(|e| format!("pane list payload is not valid JSON: {e}"))?;
-    let panes = value
-        .get("result")
-        .and_then(|r| r.get("panes"))
-        .and_then(|p| p.as_array())
-        .ok_or_else(|| "pane list payload has no \"result\".\"panes\" array".to_string())?;
-    let mut out = Vec::new();
-    for pane in panes {
-        let Some(obj) = pane.as_object() else {
-            continue;
-        };
-        let Some(pane_id) = obj.get("pane_id").and_then(|v| v.as_str()) else {
-            continue;
-        };
-        if pane_id.is_empty() || obj.get("label").and_then(|v| v.as_str()) != Some(DASHBOARD_LABEL)
-        {
-            continue;
-        }
-        let focused = obj
-            .get("focused")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        out.push((pane_id.to_string(), focused));
-    }
-    Ok(out)
+    Ok(labelled_panes(listing)?
+        .into_iter()
+        .map(|(id, obj)| {
+            let focused = obj
+                .get("focused")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            (id, focused)
+        })
+        .collect())
 }
 
 /// The plugin id: `HERDR_PLUGIN_ID`, blank-filtered, falling back to `herdr-openspec`.
