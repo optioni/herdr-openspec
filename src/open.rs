@@ -1189,6 +1189,94 @@ mod tests {
         assert_eq!(report_output(&empty), (Vec::new(), 0));
     }
 
+    // --- dashboard-restore group 3: replacing a stale pane in its slot ------------------
+
+    fn failed(args: &[&str], stderr: &str) -> CliError {
+        CliError::Failed {
+            program: "herdr".to_string(),
+            args: args.iter().map(|s| s.to_string()).collect(),
+            code: Some(1),
+            stderr: stderr.to_string(),
+        }
+    }
+
+    const REPLACE_OPEN: [&str; 13] = [
+        "plugin",
+        "pane",
+        "open",
+        "--plugin",
+        "herdr-openspec",
+        "--entrypoint",
+        "dashboard",
+        "--placement",
+        "split",
+        "--target-pane",
+        "w1:p3",
+        "--direction",
+        "right",
+    ];
+
+    fn replace_open_with(flag: &'static str) -> Vec<&'static str> {
+        let mut v = REPLACE_OPEN.to_vec();
+        v.push(flag);
+        v
+    }
+
+    #[test]
+    fn the_full_call_sequence_for_one_stale_pane() {
+        let fake = FakeCli::new();
+        fake.register_herdr(&replace_open_with("--no-focus"), Ok(String::new()));
+        fake.register_herdr(&["pane", "close", "w1:p3"], Ok(String::new()));
+        let warnings = replace(&fake, "herdr-openspec", "w1:p3", false);
+        assert_eq!(warnings, Ok(Vec::new()));
+        let calls: Vec<Vec<String>> = fake.calls().into_iter().map(|(_, a)| a).collect();
+        let expect_open: Vec<String> = replace_open_with("--no-focus")
+            .into_iter()
+            .map(String::from)
+            .collect();
+        assert_eq!(
+            calls,
+            vec![
+                expect_open,
+                vec!["pane".to_string(), "close".to_string(), "w1:p3".to_string()]
+            ]
+        );
+        assert!(calls.iter().all(|c| !c.iter().any(|a| a == "--cwd")));
+    }
+
+    #[test]
+    fn replace_asks_for_focus_when_told_to() {
+        let fake = FakeCli::new();
+        fake.register_herdr(&replace_open_with("--focus"), Ok(String::new()));
+        fake.register_herdr(&["pane", "close", "w1:p3"], Ok(String::new()));
+        assert_eq!(replace(&fake, "herdr-openspec", "w1:p3", true), Ok(Vec::new()));
+        assert_eq!(fake.calls().len(), 2);
+    }
+
+    #[test]
+    fn a_failed_open_closes_nothing() {
+        let fake = FakeCli::new();
+        let open = replace_open_with("--no-focus");
+        fake.register_herdr(&open, Err(failed(&open, "plugin_pane_open_failed")));
+        let result = replace(&fake, "herdr-openspec", "w1:p3", false);
+        let reason = result.expect_err("open failure is the error");
+        assert!(reason.contains("plugin_pane_open_failed"), "{reason}");
+        let calls = fake.calls();
+        assert_eq!(calls.len(), 1);
+        assert!(calls.iter().all(|(_, a)| a.get(1).map(String::as_str) != Some("close")));
+    }
+
+    #[test]
+    fn a_failed_close_keeps_the_replacement_and_warns() {
+        let fake = FakeCli::new();
+        fake.register_herdr(&replace_open_with("--no-focus"), Ok(String::new()));
+        let close = ["pane", "close", "w1:p3"];
+        fake.register_herdr(&close, Err(failed(&close, "pane_not_found")));
+        let warnings = replace(&fake, "herdr-openspec", "w1:p3", false).expect("still Ok");
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("pane_not_found"), "{warnings:?}");
+    }
+
     // --- group 6: the driver -------------------------------------------------------------
 
     use crate::cli::{CliError, FakeCli, Program};
