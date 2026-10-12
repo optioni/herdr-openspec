@@ -415,6 +415,14 @@ pub fn replace(
     }
 }
 
+/// The sweep. Stub until GREEN.
+pub fn restore(_cli: &dyn crate::cli::HerdrCli, _plugin_id: &str) -> Report {
+    Report {
+        warnings: Vec::new(),
+        outcome: Ok(()),
+    }
+}
+
 /// `restore`'s entry point. Stub until the restore group lands: no warnings, success.
 pub fn restore_from_env() -> Report {
     Report {
@@ -2058,5 +2066,199 @@ mod tests {
             "no open call should follow: {:?}",
             fake.calls()
         );
+    }
+
+    // --- group 4: the session-wide sweep ---------------------------------------------------
+
+    fn listing_of(panes: &[(&str, bool)]) -> String {
+        let items: Vec<String> = panes
+            .iter()
+            .map(|(id, focused)| {
+                format!(
+                    r#"{{"pane_id":"{id}","label":"OpenSpec","workspace_id":"{}","focused":{focused}}}"#,
+                    id.split(':').next().unwrap_or("w1")
+                )
+            })
+            .collect();
+        format!(r#"{{"result":{{"panes":[{}]}}}}"#, items.join(","))
+    }
+
+    fn open_for(pane: &str, flag: &str) -> Vec<String> {
+        [
+            "plugin",
+            "pane",
+            "open",
+            "--plugin",
+            "herdr-openspec",
+            "--entrypoint",
+            "dashboard",
+            "--placement",
+            "split",
+            "--target-pane",
+            pane,
+            "--direction",
+            "right",
+            flag,
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+    }
+
+    fn register_open(fake: &FakeCli, pane: &str, flag: &str, resp: Result<String, CliError>) {
+        let args = open_for(pane, flag);
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        fake.register_herdr(&refs, resp);
+    }
+
+    fn register_info(fake: &FakeCli, pane: &str, resp: Result<String, CliError>) {
+        fake.register_herdr(&["pane", "process-info", "--pane", pane], resp);
+    }
+
+    fn call_lines(fake: &FakeCli) -> Vec<String> {
+        fake.calls().into_iter().map(|(_, a)| a.join(" ")).collect()
+    }
+
+    #[test]
+    fn two_stale_dashboards_in_two_workspaces_are_both_replaced() {
+        let fake = FakeCli::new();
+        fake.register_herdr(
+            &["pane", "list"],
+            Ok(listing_of(&[("w1:p2", true), ("w2:p5", false)])),
+        );
+        register_info(&fake, "w1:p2", Ok(M6_SHELL.to_string()));
+        register_info(&fake, "w2:p5", Ok(M6_SHELL.to_string()));
+        register_open(&fake, "w1:p2", "--focus", Ok(String::new()));
+        register_open(&fake, "w2:p5", "--no-focus", Ok(String::new()));
+        fake.register_herdr(&["pane", "close", "w1:p2"], Ok(String::new()));
+        fake.register_herdr(&["pane", "close", "w2:p5"], Ok(String::new()));
+        let report = restore(&fake, "herdr-openspec");
+        assert_eq!(
+            report,
+            Report {
+                warnings: Vec::new(),
+                outcome: Ok(())
+            }
+        );
+        let lines = call_lines(&fake);
+        assert_eq!(lines.len(), 6, "{lines:?}");
+        assert!(lines[2].ends_with("--target-pane w1:p2 --direction right --focus"));
+        assert_eq!(lines[3], "pane close w1:p2");
+        assert!(lines[4].ends_with("--target-pane w2:p5 --direction right --no-focus"));
+        assert_eq!(lines[5], "pane close w2:p5");
+    }
+
+    #[test]
+    fn a_live_dashboard_is_left_alone() {
+        let fake = FakeCli::new();
+        fake.register_herdr(&["pane", "list"], Ok(listing_of(&[("w8:p1B", true)])));
+        register_info(&fake, "w8:p1B", Ok(M6_LIVE.to_string()));
+        let report = restore(&fake, "herdr-openspec");
+        assert_eq!(
+            report,
+            Report {
+                warnings: Vec::new(),
+                outcome: Ok(())
+            }
+        );
+        assert_eq!(
+            call_lines(&fake),
+            vec!["pane list", "pane process-info --pane w8:p1B"]
+        );
+    }
+
+    #[test]
+    fn no_dashboard_pane_at_all() {
+        for listing in [
+            r#"{"result":{"panes":[]}}"#.to_string(),
+            r#"{"result":{"panes":[{"pane_id":"w1:p1","label":"zsh","workspace_id":"w1","focused":true}]}}"#
+                .to_string(),
+        ] {
+            let fake = FakeCli::new();
+            fake.register_herdr(&["pane", "list"], Ok(listing));
+            let report = restore(&fake, "herdr-openspec");
+            assert_eq!(
+                report,
+                Report {
+                    warnings: Vec::new(),
+                    outcome: Ok(())
+                }
+            );
+            assert_eq!(call_lines(&fake), vec!["pane list"]);
+        }
+    }
+
+    #[test]
+    fn one_failed_replacement_does_not_stop_the_sweep() {
+        let fake = FakeCli::new();
+        fake.register_herdr(
+            &["pane", "list"],
+            Ok(listing_of(&[("w1:p2", false), ("w1:p3", false)])),
+        );
+        register_info(&fake, "w1:p2", Ok(M6_SHELL.to_string()));
+        register_info(&fake, "w1:p3", Ok(M6_SHELL.to_string()));
+        let open = open_for("w1:p2", "--no-focus");
+        let refs: Vec<&str> = open.iter().map(String::as_str).collect();
+        register_open(
+            &fake,
+            "w1:p2",
+            "--no-focus",
+            Err(failed(&refs, "plugin_pane_open_failed")),
+        );
+        register_open(&fake, "w1:p3", "--no-focus", Ok(String::new()));
+        fake.register_herdr(&["pane", "close", "w1:p3"], Ok(String::new()));
+        let report = restore(&fake, "herdr-openspec");
+        assert_eq!(report.outcome, Ok(()));
+        assert_eq!(report.warnings.len(), 1, "{:?}", report.warnings);
+        assert!(
+            report.warnings[0].contains("w1:p2"),
+            "{:?}",
+            report.warnings
+        );
+        assert!(
+            report.warnings[0].contains("plugin_pane_open_failed"),
+            "{:?}",
+            report.warnings
+        );
+        let lines = call_lines(&fake);
+        assert!(lines.iter().any(|l| l == "pane close w1:p3"), "{lines:?}");
+        assert!(!lines.iter().any(|l| l == "pane close w1:p2"), "{lines:?}");
+    }
+
+    #[test]
+    fn an_unreadable_candidate_is_left_alone_and_warned_about() {
+        let probe = ["pane", "process-info", "--pane", "w1:p2"];
+        for response in [Err(failed(&probe, "pane_gone")), Ok("not json".to_string())] {
+            let fake = FakeCli::new();
+            fake.register_herdr(&["pane", "list"], Ok(listing_of(&[("w1:p2", true)])));
+            register_info(&fake, "w1:p2", response);
+            let report = restore(&fake, "herdr-openspec");
+            assert_eq!(report.outcome, Ok(()));
+            assert_eq!(report.warnings.len(), 1, "{:?}", report.warnings);
+            assert!(
+                report.warnings[0].contains("w1:p2"),
+                "{:?}",
+                report.warnings
+            );
+            let lines = call_lines(&fake);
+            assert_eq!(lines.len(), 2, "{lines:?}");
+            assert!(!lines.iter().any(|l| l.contains("plugin pane open")));
+            assert!(!lines.iter().any(|l| l.contains("pane close")));
+        }
+    }
+
+    #[test]
+    fn herdr_unreachable_makes_no_further_call() {
+        let list = ["pane", "list"];
+        for response in [
+            Err(failed(&list, "server unreachable")),
+            Ok(r#"{"result":{}}"#.to_string()),
+        ] {
+            let fake = FakeCli::new();
+            fake.register_herdr(&list, response);
+            let report = restore(&fake, "herdr-openspec");
+            assert!(report.outcome.is_err(), "{report:?}");
+            assert_eq!(call_lines(&fake), vec!["pane list"]);
+        }
     }
 }
