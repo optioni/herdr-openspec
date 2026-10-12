@@ -556,47 +556,75 @@ pub fn run(cli: &dyn crate::cli::HerdrCli, ctx: &Context, placement: Placement) 
         }
     };
 
+    // A stale match is replaced in place and joins the post-open path below; any other match
+    // (live, or unclassifiable and warned about) is focused as before.
+    let mut replaced = false;
     if let Some(pane_id) = existing {
-        let focus = focus_args(&pane_id);
-        let refs: Vec<&str> = focus.iter().map(String::as_str).collect();
-        match cli.run(&refs) {
-            Ok(_) => {
-                return Report {
-                    warnings,
-                    outcome: Ok(()),
-                };
-            }
-            Err(err) => {
-                let is_usage_error =
-                    matches!(&err, crate::cli::CliError::Failed { code: Some(2), .. });
-                if is_usage_error {
-                    warnings.push(herdr_reason(&err));
-                    // Fall through to opening once: refusing here would fail closed on a
-                    // Herdr this manifest's min_herdr_version still declares supported.
-                } else {
+        let class = match cli.run(&["pane", "process-info", "--pane", &pane_id]) {
+            Ok(stdout) => classify(&stdout),
+            Err(err) => Classification::Unreadable(herdr_reason(&err)),
+        };
+        match class {
+            Classification::Stale => match replace(cli, &ctx.plugin_id, &pane_id, true) {
+                Ok(more) => {
+                    warnings.extend(more.iter().map(|w| pane_warning(&pane_id, w)));
+                    replaced = true;
+                }
+                Err(reason) => {
                     return Report {
                         warnings,
-                        outcome: Err(herdr_reason(&err)),
+                        outcome: Err(reason),
                     };
+                }
+            },
+            Classification::Live | Classification::Unreadable(_) => {
+                if let Classification::Unreadable(why) = &class {
+                    warnings.push(pane_warning(&pane_id, why));
+                }
+                let focus = focus_args(&pane_id);
+                let refs: Vec<&str> = focus.iter().map(String::as_str).collect();
+                match cli.run(&refs) {
+                    Ok(_) => {
+                        return Report {
+                            warnings,
+                            outcome: Ok(()),
+                        };
+                    }
+                    Err(err) => {
+                        let is_usage_error =
+                            matches!(&err, crate::cli::CliError::Failed { code: Some(2), .. });
+                        if is_usage_error {
+                            warnings.push(herdr_reason(&err));
+                            // Fall through to opening once: refusing here would fail closed on a
+                            // Herdr this manifest's min_herdr_version still declares supported.
+                        } else {
+                            return Report {
+                                warnings,
+                                outcome: Err(herdr_reason(&err)),
+                            };
+                        }
+                    }
                 }
             }
         }
     }
 
-    // The one field a live listing may correct. Every field is named: no `..` rest.
-    let open_ctx = Context {
-        plugin_id: ctx.plugin_id.clone(),
-        workspace_id: ctx.workspace_id.clone(),
-        workspace_cwd: ctx.workspace_cwd.clone(),
-        focused_pane_id: split_pane,
-    };
-    let open = open_args(placement, &open_ctx);
-    let refs: Vec<&str> = open.iter().map(String::as_str).collect();
-    if let Err(err) = cli.run(&refs) {
-        return Report {
-            warnings,
-            outcome: Err(herdr_reason(&err)),
+    if !replaced {
+        // The one field a live listing may correct. Every field is named: no `..` rest.
+        let open_ctx = Context {
+            plugin_id: ctx.plugin_id.clone(),
+            workspace_id: ctx.workspace_id.clone(),
+            workspace_cwd: ctx.workspace_cwd.clone(),
+            focused_pane_id: split_pane,
         };
+        let open = open_args(placement, &open_ctx);
+        let refs: Vec<&str> = open.iter().map(String::as_str).collect();
+        if let Err(err) = cli.run(&refs) {
+            return Report {
+                warnings,
+                outcome: Err(herdr_reason(&err)),
+            };
+        }
     }
 
     // The open succeeded. Every failure from here is a warning, never an `Err`: no
@@ -2193,8 +2221,10 @@ mod tests {
         let calls = fake.calls();
         assert_eq!(calls.len(), 3, "{calls:?}");
         assert!(
-            calls.iter().all(|(_, a)| a.get(1).map(String::as_str) != Some("close")
-                && a.get(2).map(String::as_str) != Some("focus")),
+            calls
+                .iter()
+                .all(|(_, a)| a.get(1).map(String::as_str) != Some("close")
+                    && a.get(2).map(String::as_str) != Some("focus")),
             "{calls:?}"
         );
     }
