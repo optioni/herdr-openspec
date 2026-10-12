@@ -218,20 +218,23 @@ new test selects it by its exact name.
 ## Risks / Trade-offs
 
 - [The hook may run before a client attaches, and `plugin pane open` may fail without a
-  terminal size] → observed in the isolated live check; if it fails, the stale pane is left
-  in place (Decision 5's failure rule) and `open`'s replace path recovers it on the user's
-  first "OpenSpec: dashboard" action. Recorded either way.
+  terminal size] → **Resolved (notes/measurements.md M9):** the hook starts ~19 ms before an
+  attaching client connects and its opens land after; with no client at all (headless server) it
+  still runs and both opens and closes succeed, in Herdr's default 120x40 area, re-laid out
+  with ids and split intact when a client attaches. The failure rule (Decision 5) remains the
+  fallback for other Herdr versions.
 - [A restored login shell may still be running its profile when the hook fires, so its
   foreground set is not the lone shell] → it classifies `Live` and is left alone; `open`
   recovers it later. The live check records whether this happens in practice.
 - [The hook's environment might not carry the named session's `HERDR_SOCKET_PATH`, sending
-  the sweep to the default session] → Herdr documents injecting `HERDR_SOCKET_PATH` into
-  every runtime command; the live check records the hook's environment from `herdr plugin
-  log`. If it is missing, `restore` must refuse rather than sweep another session — a
-  follow-up, not silently accepted.
+  the sweep to the default session] → **Resolved (M8):** a startup command's environment carries
+  `HERDR_SOCKET_PATH` naming the instance's own socket, plus `HERDR_PLUGIN_ID`,
+  `HERDR_PLUGIN_EVENT=startup`, `HERDR_WORKSPACE_ID`, `HERDR_TAB_ID`, `HERDR_PANE_ID` and
+  `HERDR_PLUGIN_CONTEXT_JSON` with `workspace_cwd`; no follow-up is needed.
 - [A replacement opened from the hook may receive a context without `workspace_cwd`] →
-  observed in the live check; `ui::startup_cwd` already falls back to `focused_pane_cwd`,
-  and the replacement targets the stale pane, whose cwd is the repo after `49e3fc7`.
+  **Resolved (M7, M8, M11):** the replacement reported the repo as `cwd`, `foreground_cwd` and
+  process `cwd`, whether opened by the hook or by the `open` action; the hook's context JSON
+  carries `workspace_cwd`, and `ui::startup_cwd`'s `focused_pane_cwd` fallback was not needed.
 - [Herdr runs the hook again after a live handoff] → live dashboards classify `Live` (M5, M6)
   and are left alone.
 - [An `open` action racing the startup hook on the same stale pane could produce two
@@ -250,8 +253,8 @@ running the hook.
 
 ## Open Questions
 
-None blocking. The unmeasured items in `notes/measurements.md` (hook timing, hook
-environment, the replacement's context) are observed by the isolated live check in tasks
-group 9, after the manifest is wired, because only a manifest carrying `[[startup]]` lets
-Herdr run the real hook. No decision waits on them: each has a stated fallback in Risks, and
-the one outcome that would demand new behaviour (a missing socket path) is named there.
+None. The items `notes/measurements.md` once listed as unmeasured (hook timing, hook
+environment, the replacement's context) were observed by the isolated live check in tasks
+group 9 and are recorded as M7-M11; they confirm the design and demand no new behaviour. One
+residual: a restored login shell still running its profile when the hook fires was not
+exercised (Risks, second entry), and its fallback is unchanged.
