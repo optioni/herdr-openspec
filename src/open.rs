@@ -318,6 +318,30 @@ pub fn placement_for(invocation: &crate::Invocation) -> Option<Placement> {
     }
 }
 
+/// What `herdr pane process-info` says about a candidate dashboard pane
+/// (specs/dashboard-restore -> "A stale dashboard pane is recognised from its process").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Classification {
+    Stale,
+    Live,
+    Unreadable(String),
+}
+
+/// Classify a `process-info` stdout. Pure.
+pub fn classify(_stdout: &str) -> Classification {
+    Classification::Live
+}
+
+/// Every candidate in a `herdr pane list` payload: `(pane_id, focused)`, any workspace.
+pub fn restore_candidates(_listing: &str) -> Result<Vec<(String, bool)>, String> {
+    Ok(Vec::new())
+}
+
+/// The plugin id: `HERDR_PLUGIN_ID`, blank-filtered, falling back to `herdr-openspec`.
+pub fn plugin_id(_env: &dyn Fn(&str) -> Option<String>) -> String {
+    String::new()
+}
+
 /// `restore`'s entry point. Stub until the restore group lands: no warnings, success.
 pub fn restore_from_env() -> Report {
     Report {
@@ -519,6 +543,110 @@ mod tests {
     fn env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
         let map: std::collections::BTreeMap<&str, &str> = pairs.iter().copied().collect();
         move |name| map.get(name).map(|s| s.to_string())
+    }
+
+    // ---- dashboard-restore: stale-pane classification (M6 verbatim) ----
+
+    const M6_LIVE: &str = r#"{"id":"1","result":{"process_info":{"foreground_processes":[{"argv":["/Users/juusopiikkila/.config/herdr/plugins/github/herdr-openspec-80dd366f7f1a/target/release/herdr-openspec","ui"],"argv0":"herdr-openspec","cmdline":"/Users/juusopiikkila/.config/herdr/plugins/github/herdr-openspec-80dd366f7f1a/target/release/herdr-openspec ui","cwd":"/Users/juusopiikkila/.config/herdr/plugins/github/herdr-openspec-80dd366f7f1a","name":"herdr-openspec","pid":38099}],"pane_id":"w8:p1B","shell_pid":38099}}}"#;
+    const M6_SHELL: &str = r#"{"id":"1","result":{"process_info":{"foreground_processes":[{"argv":["-zsh"],"argv0":"zsh","cmdline":"-zsh","cwd":"/Users/juusopiikkila/.config/herdr/plugins/github/herdr-openspec-80dd366f7f1a","name":"zsh","pid":9304}],"pane_id":"wW:pB","shell_pid":9304}}}"#;
+
+    fn info(shell_pid: &str, fg: &str) -> String {
+        format!(
+            r#"{{"result":{{"process_info":{{"shell_pid":{shell_pid},"foreground_processes":{fg}}}}}}}"#
+        )
+    }
+
+    #[test]
+    fn a_restored_shell_is_stale() {
+        assert_eq!(classify(M6_SHELL), Classification::Stale);
+        let spec = info("49095", r#"[{"name":"zsh","argv":["-zsh"],"pid":49095}]"#);
+        assert_eq!(classify(&spec), Classification::Stale);
+    }
+
+    #[test]
+    fn a_live_dashboard_is_not_stale() {
+        assert_eq!(classify(M6_LIVE), Classification::Live);
+        let spec = info(
+            "38099",
+            r#"[{"name":"herdr-openspec","argv":["/p/herdr-openspec","ui"],"pid":38099}]"#,
+        );
+        assert_eq!(classify(&spec), Classification::Live);
+    }
+
+    #[test]
+    fn a_command_the_user_started_is_not_stale() {
+        let vim = info("49095", r#"[{"name":"vim","pid":49210}]"#);
+        assert_eq!(classify(&vim), Classification::Live);
+        let two = info(
+            "49095",
+            r#"[{"name":"zsh","pid":49095},{"name":"vim","pid":49210}]"#,
+        );
+        assert_eq!(classify(&two), Classification::Live);
+    }
+
+    #[test]
+    fn an_unreadable_answer_is_never_stale_and_says_why() {
+        let cases: Vec<(String, &str)> = vec![
+            ("not json".to_string(), "JSON"),
+            (
+                r#"{"result":{"process_info":{"foreground_processes":[{"name":"zsh","pid":1}]}}}"#
+                    .to_string(),
+                "shell_pid",
+            ),
+            (
+                info(r#""49095""#, r#"[{"name":"zsh","pid":49095}]"#),
+                "shell_pid",
+            ),
+            (
+                r#"{"result":{"process_info":{"shell_pid":1}}}"#.to_string(),
+                "foreground_processes",
+            ),
+            (info("1", "[]"), "foreground_processes"),
+            (info("1", r#"[{"pid":1}]"#), "name"),
+            (info("1", r#"[{"name":"zsh"}]"#), "pid"),
+        ];
+        for (stdout, needle) in cases {
+            match classify(&stdout) {
+                Classification::Unreadable(reason) => {
+                    assert!(reason.contains(needle), "{reason:?} should name {needle}")
+                }
+                other => panic!("{stdout}: expected Unreadable, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn an_unlabelled_pane_is_never_a_candidate() {
+        let listing = r#"{"result":{"panes":[
+            {"pane_id":"w1:p1","workspace_id":"w1"},
+            {"pane_id":"w1:p2","workspace_id":"w1","label":"Files"},
+            {"pane_id":"","workspace_id":"w1","label":"OpenSpec"}]}}"#;
+        assert_eq!(restore_candidates(listing), Ok(Vec::new()));
+        let two = r#"{"result":{"panes":[
+            {"pane_id":"w1:p2","workspace_id":"w1","label":"OpenSpec","focused":true},
+            {"pane_id":"w2:p5","workspace_id":"w2","label":"OpenSpec"}]}}"#;
+        assert_eq!(
+            restore_candidates(two),
+            Ok(vec![
+                ("w1:p2".to_string(), true),
+                ("w2:p5".to_string(), false)
+            ])
+        );
+        assert!(restore_candidates("nope").is_err());
+        assert!(restore_candidates(r#"{"result":{}}"#).is_err());
+    }
+
+    #[test]
+    fn plugin_id_reads_the_variable_and_falls_back() {
+        assert_eq!(
+            plugin_id(&env(&[("HERDR_PLUGIN_ID", "custom-id")])),
+            "custom-id"
+        );
+        assert_eq!(
+            plugin_id(&env(&[("HERDR_PLUGIN_ID", "  ")])),
+            "herdr-openspec"
+        );
+        assert_eq!(plugin_id(&env(&[])), "herdr-openspec");
     }
 
     #[test]
