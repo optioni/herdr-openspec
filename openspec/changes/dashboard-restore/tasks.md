@@ -51,10 +51,10 @@ Planning-time evidence at HEAD `e678de5` (code identical to `49e3fc7`), run 2026
 ## 5. `open`/`open-tab` replace a stale match
 <!-- kind: behavior -->
 
-- [ ] 5.1 RED: give the four existing `open::run` tests that list a matching pane a live `process-info` answer and the new call indices and counts — `cross_placement_focus`, `focus_domain_error_stops_and_opens_nothing` (3 calls), `focus_usage_error_warns_and_opens_once`, `the_already_open_path_is_untouched` (3 calls) — and `the_post_open_focus_names_the_newly_opened_pane` (6 calls). Add `a_stale_match_is_replaced_in_place_and_the_replacement_focused`, `a_failed_replacement_open_stops_and_closes_nothing`, `a_failed_close_after_a_successful_replacement_warns_and_still_focuses`, and `an_unclassifiable_match_is_focused_never_replaced` (failing call; JSON without `foreground_processes`; a live answer recording no warning).
-- [ ] 5.2 GREEN: in `open::run`, classify the first match before focusing; on `Stale`, `replace(…, focus = true)` and continue into the existing post-open re-list and focus; on `Live` focus silently; on `Unreadable` push the reason and focus, per specs/pane-open and design.md → Decisions 6 and 9.
-- [ ] 5.3 REFACTOR: if the replacement branch duplicates the post-open block, route both through one function; otherwise record that none was needed.
-- [ ] 5.4 Run `cargo test -q --lib open::` — green, count recorded; the only pre-existing tests changed are the five 5.1 names.
+- [x] 5.1 RED: give the four existing `open::run` tests that list a matching pane a live `process-info` answer and the new call indices and counts — `cross_placement_focus`, `focus_domain_error_stops_and_opens_nothing` (3 calls), `focus_usage_error_warns_and_opens_once`, `the_already_open_path_is_untouched` (3 calls) — and `the_post_open_focus_names_the_newly_opened_pane` (6 calls). Add `a_stale_match_is_replaced_in_place_and_the_replacement_focused`, `a_failed_replacement_open_stops_and_closes_nothing`, `a_failed_close_after_a_successful_replacement_warns_and_still_focuses`, and `an_unclassifiable_match_is_focused_never_replaced` (failing call; JSON without `foreground_processes`; a live answer recording no warning).
+- [x] 5.2 GREEN: in `open::run`, classify the first match before focusing; on `Stale`, `replace(…, focus = true)` and continue into the existing post-open re-list and focus; on `Live` focus silently; on `Unreadable` push the reason and focus, per specs/pane-open and design.md → Decisions 6 and 9.
+- [x] 5.3 REFACTOR: if the replacement branch duplicates the post-open block, route both through one function; otherwise record that none was needed.
+- [x] 5.4 Run `cargo test -q --lib open::` — green, count recorded; the only pre-existing tests changed are the five 5.1 names.
 
 ## 6. Manifest
 <!-- kind: operational -->
