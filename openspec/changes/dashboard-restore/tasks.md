@@ -35,10 +35,10 @@ Planning-time evidence at HEAD `e678de5` (code identical to `49e3fc7`), run 2026
 ## 3. Replacing a stale pane in its slot
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: write `the_full_call_sequence_for_one_stale_pane`, `a_failed_open_closes_nothing`, and `a_failed_close_keeps_the_replacement_and_warns` against `cli::FakeCli`, asserting the recorded argv exactly, including the absence of `--cwd`.
-- [ ] 3.2 GREEN: implement `replace(cli, plugin_id, pane_id, focus) -> Result<Vec<String>, String>` (warnings on success, the open failure as `Err`), per specs/dashboard-restore → "A stale dashboard pane is replaced in its own slot".
-- [ ] 3.3 REFACTOR: none expected — `replace` is two calls; record so, or extract an argv builder shared with `open_args` if one emerges.
-- [ ] 3.4 Run `cargo test -q --lib open::` — green, count recorded.
+- [x] 3.1 RED: write `the_full_call_sequence_for_one_stale_pane`, `a_failed_open_closes_nothing`, and `a_failed_close_keeps_the_replacement_and_warns` against `cli::FakeCli`, asserting the recorded argv exactly, including the absence of `--cwd`.
+- [x] 3.2 GREEN: implement `replace(cli, plugin_id, pane_id, focus) -> Result<Vec<String>, String>` (warnings on success, the open failure as `Err`), per specs/dashboard-restore → "A stale dashboard pane is replaced in its own slot".
+- [x] 3.3 REFACTOR: none expected — `replace` is two calls; record so, or extract an argv builder shared with `open_args` if one emerges.
+- [x] 3.4 Run `cargo test -q --lib open::` — green, count recorded.
 
 ## 4. The session-wide sweep
 <!-- kind: behavior -->
