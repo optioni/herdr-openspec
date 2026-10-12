@@ -94,10 +94,10 @@ Planning-time evidence at HEAD `e678de5` (code identical to `49e3fc7`), run 2026
 ## 11. Documentation
 <!-- kind: operational -->
 
-- [ ] 11.1 Add in `README.md` → Install (audience: users installing the plugin): the Herdr 0.7.5 minimum, and two lines saying dashboards come back after a Herdr restart and that an idle shell labelled `OpenSpec` is treated as a dead dashboard. README states neither today, so nothing is replaced.
-- [ ] 11.2 Rewrite in `SPEC.md` (audience: future implementers): Overview's "invoked two ways by the manifest" (now three), the module-map row for `open` (adds `restore`), the Unit-tested modules entry for `open::` (adds the new pure functions), and Opening the pane's existing-pane paragraph (the stale rule); add a short "Restoring after a restart" subsection, which has no other home.
-- [ ] 11.3 Rewrite in `PRD.md` line ~107: "Herdr 0.7.0 or later" → 0.7.5 (audience: product readers).
-- [ ] 11.4 Rewrite in `AGENTS.md` (`CLAUDE.md` is a symlink to it; audience: every future session): Environment's "Herdr 0.7.0 or later" → 0.7.5; the "Two more binary subcommands, `open` and `open-tab`" sentence and the `herdr-plugin.toml` declares… sentence to name `restore` and `[[startup]]`; and `dashboard-restore` in the landed-changes list. Net growth stays under ten lines.
+- [x] 11.1 Add in `README.md` → Install (audience: users installing the plugin): the Herdr 0.7.5 minimum, and two lines saying dashboards come back after a Herdr restart and that an idle shell labelled `OpenSpec` is treated as a dead dashboard. README states neither today, so nothing is replaced.
+- [x] 11.2 Rewrite in `SPEC.md` (audience: future implementers): Overview's "invoked two ways by the manifest" (now three), the module-map row for `open` (adds `restore`), the Unit-tested modules entry for `open::` (adds the new pure functions), and Opening the pane's existing-pane paragraph (the stale rule); add a short "Restoring after a restart" subsection, which has no other home.
+- [x] 11.3 Rewrite in `PRD.md` line ~107: "Herdr 0.7.0 or later" → 0.7.5 (audience: product readers).
+- [x] 11.4 Rewrite in `AGENTS.md` (`CLAUDE.md` is a symlink to it; audience: every future session): Environment's "Herdr 0.7.0 or later" → 0.7.5; the "Two more binary subcommands, `open` and `open-tab`" sentence and the `herdr-plugin.toml` declares… sentence to name `restore` and `[[startup]]`; and `dashboard-restore` in the landed-changes list. Net growth stays under ten lines.
 
 ## 12. Lint & Verify
 <!-- kind: operational -->
