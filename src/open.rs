@@ -381,6 +381,40 @@ pub fn plugin_id(env: &dyn Fn(&str) -> Option<String>) -> String {
     crate::config::non_blank(env("HERDR_PLUGIN_ID")).unwrap_or_else(|| "herdr-openspec".to_string())
 }
 
+/// Replace stale pane `pane_id` in its own slot: split it with a fresh dashboard, then
+/// close it. A failed open closes nothing (`Err`, Herdr's reason verbatim); a failed
+/// close after a good open keeps the replacement and comes back as a warning.
+// TODO(dashboard-restore group 4/5): remove once `restore_from_env` calls this.
+#[allow(dead_code)]
+pub fn replace(
+    cli: &dyn crate::cli::HerdrCli,
+    plugin_id: &str,
+    pane_id: &str,
+    focus: bool,
+) -> Result<Vec<String>, String> {
+    let open = [
+        "plugin",
+        "pane",
+        "open",
+        "--plugin",
+        plugin_id,
+        "--entrypoint",
+        DASHBOARD_ENTRYPOINT,
+        "--placement",
+        "split",
+        "--target-pane",
+        pane_id,
+        "--direction",
+        "right",
+        if focus { "--focus" } else { "--no-focus" },
+    ];
+    cli.run(&open).map_err(|err| herdr_reason(&err))?;
+    match cli.run(&["pane", "close", pane_id]) {
+        Ok(_) => Ok(Vec::new()),
+        Err(err) => Ok(vec![herdr_reason(&err)]),
+    }
+}
+
 /// `restore`'s entry point. Stub until the restore group lands: no warnings, success.
 pub fn restore_from_env() -> Report {
     Report {
@@ -1249,7 +1283,10 @@ mod tests {
         let fake = FakeCli::new();
         fake.register_herdr(&replace_open_with("--focus"), Ok(String::new()));
         fake.register_herdr(&["pane", "close", "w1:p3"], Ok(String::new()));
-        assert_eq!(replace(&fake, "herdr-openspec", "w1:p3", true), Ok(Vec::new()));
+        assert_eq!(
+            replace(&fake, "herdr-openspec", "w1:p3", true),
+            Ok(Vec::new())
+        );
         assert_eq!(fake.calls().len(), 2);
     }
 
@@ -1263,7 +1300,11 @@ mod tests {
         assert!(reason.contains("plugin_pane_open_failed"), "{reason}");
         let calls = fake.calls();
         assert_eq!(calls.len(), 1);
-        assert!(calls.iter().all(|(_, a)| a.get(1).map(String::as_str) != Some("close")));
+        assert!(
+            calls
+                .iter()
+                .all(|(_, a)| a.get(1).map(String::as_str) != Some("close"))
+        );
     }
 
     #[test]
