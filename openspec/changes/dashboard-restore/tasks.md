@@ -102,11 +102,11 @@ Planning-time evidence at HEAD `e678de5` (code identical to `49e3fc7`), run 2026
 ## 12. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 12.1 CHECK: the affected tiers are unit (`--lib`), contract (`--test manifest`, `--test doc_contract`, `--test degraded_coverage`), and acceptance (`--test cli`); `make check` runs all of them.
-- [ ] 12.2 VERIFY: `make lint` — 0 warnings.
-- [ ] 12.3 VERIFY: `make fmt-check` — clean.
-- [ ] 12.4 VERIFY: `make gates` — every gate OK (no seam list moved, per design.md → Boundaries).
-- [ ] 12.5 VERIFY: `make test` — green.
-- [ ] 12.6 VERIFY: `make coverage` — total ≥ 80% and the production floor holds.
-- [ ] 12.7 VERIFY: `make check` as the single gate, naming the failing sub-command if it fails; then `openspec validate dashboard-restore --strict`.
+- [x] 12.1 CHECK: the affected tiers are unit (`--lib`), contract (`--test manifest`, `--test doc_contract`, `--test degraded_coverage`), and acceptance (`--test cli`); `make check` runs all of them.
+- [x] 12.2 VERIFY: `make lint` — 0 warnings.
+- [x] 12.3 VERIFY: `make fmt-check` — clean.
+- [x] 12.4 VERIFY: `make gates` — every gate OK (no seam list moved, per design.md → Boundaries).
+- [x] 12.5 VERIFY: `make test` — green.
+- [x] 12.6 VERIFY: `make coverage` — total ≥ 80% and the production floor holds.
+- [x] 12.7 VERIFY: `make check` as the single gate, naming the failing sub-command if it fails; then `openspec validate dashboard-restore --strict`.
 - [ ] 12.8 After `openspec archive`, replace the generated `## Purpose` placeholder in `openspec/specs/dashboard-restore/spec.md` with a real one-paragraph purpose and re-run `cargo test -q --test spec_purposes`.
