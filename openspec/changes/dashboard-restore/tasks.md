@@ -87,9 +87,9 @@ Planning-time evidence at HEAD `e678de5` (code identical to `49e3fc7`), run 2026
 ## 10. Change Review
 <!-- kind: operational -->
 
-- [ ] 10.1 CHECK: dispatch the `outside-in-tdd-reviewer` agent with the change artifacts and the diff from the planning-review commit to `HEAD` only.
-- [ ] 10.2 CHANGE: fix every CRITICAL, resolve or accept each WARNING with a one-line reason, re-run affected tests.
-- [ ] 10.3 VERIFY: confirm no blocking or unowned finding remains.
+- [x] 10.1 CHECK: dispatch the `outside-in-tdd-reviewer` agent with the change artifacts and the diff from the planning-review commit to `HEAD` only.
+- [x] 10.2 CHANGE: fix every CRITICAL, resolve or accept each WARNING with a one-line reason, re-run affected tests.
+- [x] 10.3 VERIFY: confirm no blocking or unowned finding remains.
 
 ## 11. Documentation
 <!-- kind: operational -->
