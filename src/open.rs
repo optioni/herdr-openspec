@@ -384,8 +384,6 @@ pub fn plugin_id(env: &dyn Fn(&str) -> Option<String>) -> String {
 /// Replace stale pane `pane_id` in its own slot: split it with a fresh dashboard, then
 /// close it. A failed open closes nothing (`Err`, Herdr's reason verbatim); a failed
 /// close after a good open keeps the replacement and comes back as a warning.
-// TODO(dashboard-restore group 4/5): remove once `restore_from_env` calls this.
-#[allow(dead_code)]
 pub fn replace(
     cli: &dyn crate::cli::HerdrCli,
     plugin_id: &str,
@@ -415,20 +413,59 @@ pub fn replace(
     }
 }
 
-/// The sweep. Stub until GREEN.
-pub fn restore(_cli: &dyn crate::cli::HerdrCli, _plugin_id: &str) -> Report {
+/// One warning line naming the pane it concerns (specs/dashboard-restore -> "It SHALL write
+/// every warning and failure to stderr, one line each, naming the pane id it concerns").
+fn pane_warning(pane_id: &str, reason: &str) -> String {
+    format!("{pane_id}: {reason}")
+}
+
+/// The session-wide sweep: one `pane list`, then every candidate in listing order is
+/// classified and, if stale, replaced in its own slot with focus mirroring the listing's
+/// own `focused` flag. A candidate that is live is left silently; an unreadable one is left
+/// with a warning; a failed replacement is a warning and the sweep goes on. `Err` only when
+/// the listing itself fails or is unparseable, and then no further call is made
+/// (design.md -> Decisions 8 and 10).
+pub fn restore(cli: &dyn crate::cli::HerdrCli, plugin_id: &str) -> Report {
+    let mut warnings = Vec::new();
+    let candidates = match cli
+        .run(&["pane", "list"])
+        .map_err(|err| herdr_reason(&err))
+        .and_then(|listing| restore_candidates(&listing))
+    {
+        Ok(candidates) => candidates,
+        Err(reason) => {
+            return Report {
+                warnings,
+                outcome: Err(reason),
+            };
+        }
+    };
+    for (pane_id, focused) in candidates {
+        let class = match cli.run(&["pane", "process-info", "--pane", &pane_id]) {
+            Ok(stdout) => classify(&stdout),
+            Err(err) => Classification::Unreadable(herdr_reason(&err)),
+        };
+        match class {
+            Classification::Live => {}
+            Classification::Unreadable(why) => warnings.push(pane_warning(&pane_id, &why)),
+            Classification::Stale => match replace(cli, plugin_id, &pane_id, focused) {
+                Ok(more) => warnings.extend(more.iter().map(|w| pane_warning(&pane_id, w))),
+                Err(reason) => warnings.push(pane_warning(&pane_id, &reason)),
+            },
+        }
+    }
     Report {
-        warnings: Vec::new(),
+        warnings,
         outcome: Ok(()),
     }
 }
 
-/// `restore`'s entry point. Stub until the restore group lands: no warnings, success.
+/// `restore`'s production binding: the plugin id from the real environment, the real
+/// `HerdrCli`, and no workspace required.
 pub fn restore_from_env() -> Report {
-    Report {
-        warnings: Vec::new(),
-        outcome: Ok(()),
-    }
+    let id = plugin_id(&crate::config::env_lookup());
+    let cli = crate::cli::agent_cli_via(Path::new(crate::cli::HERDR_PROGRAM));
+    restore(cli.as_ref(), &id)
 }
 
 /// `open::run`'s answer: every warning gathered along the way (a degraded step that did
@@ -2141,11 +2178,11 @@ mod tests {
             }
         );
         let lines = call_lines(&fake);
-        assert_eq!(lines.len(), 6, "{lines:?}");
+        assert_eq!(lines.len(), 7, "{lines:?}");
         assert!(lines[2].ends_with("--target-pane w1:p2 --direction right --focus"));
         assert_eq!(lines[3], "pane close w1:p2");
-        assert!(lines[4].ends_with("--target-pane w2:p5 --direction right --no-focus"));
-        assert_eq!(lines[5], "pane close w2:p5");
+        assert!(lines[5].ends_with("--target-pane w2:p5 --direction right --no-focus"));
+        assert_eq!(lines[6], "pane close w2:p5");
     }
 
     #[test]
