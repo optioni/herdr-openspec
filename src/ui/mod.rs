@@ -3552,6 +3552,23 @@ apply:
             )
         }
 
+        /// Like `openspec_script`, but logs its argv as its **last** act, on
+        /// `openspec_script_failing`'s terms: a predicate watching for this line cannot
+        /// fire while the child is still running, so the worker's remaining work is
+        /// in-process only and fits inside `UntilReady`'s settle window.
+        fn openspec_script_logging_last(dir: &Path, log: &Path, root: &Path) -> PathBuf {
+            write_script(
+                dir,
+                "openspec",
+                &format!(
+                    "printf '%s' '{{\"changes\":[],\"root\":{{\"path\":\"{root}\",\"source\":\"nearest\"}}}}'\n\
+                     printf '%s\\n' \"$*\" >> \"{log}\"\n",
+                    log = log.display(),
+                    root = root.display(),
+                ),
+            )
+        }
+
         /// `degraded-coverage`'s two CLI-cycle failure fixtures: a scratch `openspec`
         /// program that either reports a repository root disagreeing with `root`, or exits
         /// non-zero. Unlike `openspec_script`, it logs its argv as its **last** act before
@@ -3707,11 +3724,14 @@ apply:
         /// scratch base repository, a scratch member tree, a scratch `git` answering the four
         /// `worktree-overlay` commands, and the existing scratch `openspec`/`herdr` programs.
         ///
-        /// The `UntilReady` predicate, "the git log records a `status` call", goes true only
-        /// once `run` has handed `Startup::git` to the refresh worker and the worker has walked
-        /// the member through `merge-base` and `diff-tree` to `status` — see `live-refresh`'s own
-        /// history, design.md -> Test Strategy: a `run` that never calls the collaborator it was
-        /// handed passes every unit test and fails only here.
+        /// The `UntilReady` predicate, "a `status` call followed by an `openspec list` call",
+        /// goes true only once `run` has handed `Startup::git` to the refresh worker, the
+        /// worker has walked the member through `merge-base` and `diff-tree` to `status` — see
+        /// `live-refresh`'s own history, design.md -> Test Strategy: a `run` that never calls
+        /// the collaborator it was handed passes every unit test and fails only here — and the
+        /// CLI step that follows has finished its one child. `git` and `openspec` share one log
+        /// so that order is visible; `status` alone left that whole `openspec` spawn inside the
+        /// settle window, and under a loaded `make check` `q` beat the merged answer.
         #[test]
         fn run_wired_shows_a_worktree_copy_with_its_marker() {
             let scratch = scratch_repo_with_x_untouched();
@@ -3719,10 +3739,9 @@ apply:
             let member_scratch = scratch_member_tree_with_x_in_progress();
             let member_root = member_scratch.path().to_path_buf();
 
-            let git_log = root.join("git.log");
-            let openspec_log = root.join("openspec.log");
+            let git_log = root.join("calls.log");
             let git = git_script(root, &git_log, root, &member_root);
-            let openspec = openspec_script(root, &openspec_log, root);
+            let openspec = openspec_script_logging_last(root, &git_log, root);
             let herdr = root.join("does-not-exist-herdr");
 
             let config = Config {
@@ -3734,7 +3753,8 @@ apply:
                 std::fs::read_to_string(&git_log)
                     .unwrap_or_default()
                     .lines()
-                    .any(|line| line.starts_with("status"))
+                    .skip_while(|line| !line.starts_with("status"))
+                    .any(|line| line.starts_with("list"))
             };
 
             let backend = ratatui::backend::TestBackend::new(120, 20);
