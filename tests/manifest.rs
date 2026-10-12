@@ -63,6 +63,7 @@ fn manifest_parses_and_declares_the_two_tables() {
         "build",
         "panes",
         "actions",
+        "startup",
     ] {
         assert!(
             manifest.contains_key(key),
@@ -236,5 +237,33 @@ fn readme_and_the_manifest_agree_on_the_action_titles() {
     assert!(
         !collapsed.contains("these action-menu entries arrive with a later change"),
         "README.md still carries the deferral sentence"
+    );
+}
+
+#[test]
+fn the_startup_hook_runs_the_restore_subcommand() {
+    let manifest = manifest();
+    let startup = table_array(&manifest, "startup");
+    assert_eq!(startup.len(), 1, "expected exactly one [[startup]] entry");
+
+    let entry = startup[0].as_table().expect("[[startup]] is a table");
+    let keys: Vec<&str> = entry.keys().map(String::as_str).collect();
+    assert_eq!(keys, vec!["command"], "[[startup]]'s only key is command");
+
+    let command = entry["command"].as_array().expect("command is an array");
+    assert_eq!(command.len(), 2, "command is the binary path then a token");
+
+    let path = command[0].as_str().expect("command[0] is a string");
+    let file_name = Path::new(path)
+        .file_name()
+        .expect("command path has a file name")
+        .to_string_lossy();
+    assert_eq!(file_name, crate_binary_basename());
+
+    let tail = command[1].as_str().expect("command[1] is a string");
+    assert_eq!(
+        herdr_openspec::parse(&[tail]),
+        herdr_openspec::Invocation::Restore,
+        "startup command tail {tail:?} does not classify as Invocation::Restore"
     );
 }
