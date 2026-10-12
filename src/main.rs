@@ -29,6 +29,7 @@ fn main() {
                 .expect("Open and OpenTab always map to a placement");
             run_open(placement);
         }
+        Invocation::Restore => report_and_exit(open::restore_from_env()),
         Invocation::Reject(token) => {
             eprint!("{}", rejection_text(token.as_deref()));
             exit(2);
@@ -40,7 +41,11 @@ fn main() {
 /// lines to stderr and its exit status. No branch of `main`'s own — both decisions are
 /// pure functions in `src/open.rs` (design.md -> Decision 10).
 fn run_open(placement: Placement) -> ! {
-    let report = open::run_from_env(placement);
+    report_and_exit(open::run_from_env(placement))
+}
+
+/// The shared reporter: `open::report_output`'s lines to stderr, then its exit status.
+fn report_and_exit(report: open::Report) -> ! {
     let (lines, status) = open::report_output(&report);
     for line in lines {
         eprintln!("{line}");

@@ -314,7 +314,15 @@ pub fn placement_for(invocation: &crate::Invocation) -> Option<Placement> {
     match invocation {
         crate::Invocation::Open => Some(Placement::Split),
         crate::Invocation::OpenTab => Some(Placement::Tab),
-        crate::Invocation::Ui | crate::Invocation::Reject(_) => None,
+        crate::Invocation::Ui | crate::Invocation::Restore | crate::Invocation::Reject(_) => None,
+    }
+}
+
+/// `restore`'s entry point. Stub until the restore group lands: no warnings, success.
+pub fn restore_from_env() -> Report {
+    Report {
+        warnings: Vec::new(),
+        outcome: Ok(()),
     }
 }
 

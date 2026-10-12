@@ -1078,6 +1078,8 @@ pub enum Invocation {
     Open,
     /// `open-tab` alone: open or focus the dashboard, in a new tab.
     OpenTab,
+    /// `restore` alone: replace stale dashboard panes in place (a Herdr `[[startup]]` hook).
+    Restore,
     /// Anything else. Carries the offending token, when there is one — the
     /// unrecognised first argument, or the trailing argument after `ui`,
     /// `open`, or `open-tab`. `None` means the argument list was empty.
@@ -1094,16 +1096,18 @@ pub fn parse(args: &[&str]) -> Invocation {
         [first] if *first == "ui" => Invocation::Ui,
         [first] if *first == "open" => Invocation::Open,
         [first] if *first == "open-tab" => Invocation::OpenTab,
+        [first] if *first == "restore" => Invocation::Restore,
         ["ui", rest, ..] => Invocation::Reject(Some((*rest).to_string())),
         ["open", rest, ..] => Invocation::Reject(Some((*rest).to_string())),
         ["open-tab", rest, ..] => Invocation::Reject(Some((*rest).to_string())),
+        ["restore", rest, ..] => Invocation::Reject(Some((*rest).to_string())),
         [first, ..] => Invocation::Reject(Some((*first).to_string())),
     }
 }
 
 /// Usage text printed to stderr for any rejected invocation.
 pub fn usage() -> &'static str {
-    "usage: herdr-openspec <ui|open|open-tab>\n\nCommands:\n  ui        Run the OpenSpec dashboard pane\n  open      Open or focus the dashboard pane, split from the invoking pane\n  open-tab  Open or focus the dashboard pane, in a new tab\n"
+    "usage: herdr-openspec <ui|open|open-tab|restore>\n\nCommands:\n  ui        Run the OpenSpec dashboard pane\n  open      Open or focus the dashboard pane, split from the invoking pane\n  open-tab  Open or focus the dashboard pane, in a new tab\n  restore   Replace stale dashboard panes after a Herdr restore\n"
 }
 
 /// The full stderr text for a rejected invocation: an optional line naming
