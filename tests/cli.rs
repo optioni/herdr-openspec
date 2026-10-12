@@ -212,8 +212,8 @@ fn failing_statuses_are_distinct() {
     for (name, output) in [("wat", &wat), ("ui --tab", &ui_tab), ("no-args", &none)] {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("ui"), "{name} stderr: {stderr}");
-        // The Commands: block now names three whole tokens — see
-        // specs/pane-open/spec.md -> "Usage names all three commands".
+        // The Commands: block now names every whole token — see
+        // specs/pane-open/spec.md -> "Usage names all three commands" (restore joined later).
         assert!(stderr.contains("open-tab"), "{name} stderr: {stderr}");
         assert!(
             stderr.contains("usage: herdr-openspec <ui|open|open-tab|restore>"),

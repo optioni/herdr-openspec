@@ -227,12 +227,12 @@ new test selects it by its exact name.
   foreground set is not the lone shell] → it classifies `Live` and is left alone; `open`
   recovers it later. The live check records whether this happens in practice.
 - [The hook's environment might not carry the named session's `HERDR_SOCKET_PATH`, sending
-  the sweep to the default session] → **Resolved (M8):** a startup command's environment carries
+  the sweep to the default session] → **Resolved (M8):** (inferred from a sibling [[startup]] probe, M8) a startup command's environment carries
   `HERDR_SOCKET_PATH` naming the instance's own socket, plus `HERDR_PLUGIN_ID`,
   `HERDR_PLUGIN_EVENT=startup`, `HERDR_WORKSPACE_ID`, `HERDR_TAB_ID`, `HERDR_PANE_ID` and
   `HERDR_PLUGIN_CONTEXT_JSON` with `workspace_cwd`; no follow-up is needed.
 - [A replacement opened from the hook may receive a context without `workspace_cwd`] →
-  **Resolved (M7, M8, M11):** the replacement reported the repo as `cwd`, `foreground_cwd` and
+  **Resolved (M7, M8, M11):** (inferred from a sibling [[startup]] probe, M8) the replacement reported the repo as `cwd`, `foreground_cwd` and
   process `cwd`, whether opened by the hook or by the `open` action; the hook's context JSON
   carries `workspace_cwd`, and `ui::startup_cwd`'s `focused_pane_cwd` fallback was not needed.
 - [Herdr runs the hook again after a live handoff] → live dashboards classify `Live` (M5, M6)

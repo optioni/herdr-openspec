@@ -352,7 +352,7 @@ tier = "integration"
 proof = ["open_outside_herdr_exits_one"]
 verdict = "confirmed"
 why = "the real binary, spawned with no HERDR_WORKSPACE_ID, exits 1 with an empty Herdr argv log"
-covers = ["src/open.rs:72-76"]
+covers = ["src/open.rs:79-83"]
 
 [[row]]
 condition = "`open`/`open-tab`'s `pane list` call fails or its payload is unparseable"
@@ -360,7 +360,7 @@ tier = "unit"
 proof = ["listing_failure_warns_and_still_opens", "listing_unparseable_warns_and_still_opens"]
 verdict = "confirmed"
 why = "open::run's own unit proof that a failed or unparseable pane list still opens the pane"
-covers = ["src/open.rs:541-557"]
+covers = ["src/open.rs:555-571"]
 
 [[row]]
 condition = "`open`/`open-tab`'s `plugin pane focus` call fails with a usage error (code 2)"
@@ -368,7 +368,7 @@ tier = "unit"
 proof = ["focus_usage_error_warns_and_opens_once"]
 verdict = "confirmed"
 why = "open::run's own unit proof that a usage-error focus warns and still opens once"
-covers = ["src/open.rs:593-599"]
+covers = ["src/open.rs:607-613"]
 
 [[row]]
 condition = "`open`/`open-tab`'s `plugin pane focus` call fails with a domain error, or `plugin pane open` itself fails"
@@ -376,7 +376,7 @@ tier = "unit"
 proof = ["focus_domain_error_stops_and_opens_nothing"]
 verdict = "spec-corrected"
 why = "herdr_reason's own formatted prefix, not Herdr's raw message verbatim, is what reaches stderr"
-covers = ["src/open.rs:600-605", "src/open.rs:622-627"]
+covers = ["src/open.rs:614-619", "src/open.rs:636-641"]
 
 [[row]]
 condition = "`open`/`open-tab`'s **post-open** `pane list` call fails, is unparseable, or names no dashboard pane"
@@ -384,7 +384,7 @@ tier = "unit"
 proof = ["a_failed_second_listing_warns_and_succeeds", "an_unparseable_second_listing_warns_and_succeeds", "an_empty_second_listing_warns_rather_than_focusing_nothing"]
 verdict = "implemented"
 why = "open::run's own unit proofs over cli::FakeCli, asserted on the recorded argv sequence rather than outcome alone; none render anything, which is why this row stays unit rather than the capability spec's stated integration preference for one-shot commands"
-covers = ["src/open.rs:634-636", "src/open.rs:644-653"]
+covers = ["src/open.rs:648-650", "src/open.rs:658-667"]
 
 [[row]]
 condition = "`open`/`open-tab`'s **post-open** `plugin pane focus` call fails, on any code"
@@ -392,7 +392,7 @@ tier = "unit"
 proof = ["a_post_open_focus_failure_warns_on_every_code"]
 verdict = "implemented"
 why = "open::run's own unit proof looping over Failed{code:Some(1)}, Failed{code:Some(2)}, and NotStarted, asserted on the recorded focus argv and the warning text; it renders nothing, which is why this row stays unit rather than the capability spec's stated integration preference for one-shot commands"
-covers = ["src/open.rs:640-642"]
+covers = ["src/open.rs:654-656"]
 
 [[row]]
 condition = "`restore`'s `pane list` call fails or its payload is unparseable"
@@ -400,7 +400,7 @@ tier = "unit"
 proof = ["herdr_unreachable_makes_no_further_call"]
 verdict = "implemented"
 why = "restore's own unit proof over FakeCli that an unreachable listing returns Err and records no further call"
-covers = ["src/open.rs:430-442"]
+covers = ["src/open.rs:444-456"]
 
 [[row]]
 condition = "`restore` cannot read a candidate pane's `pane process-info`, or its answer is unparseable"
@@ -408,7 +408,7 @@ tier = "unit"
 proof = ["an_unreadable_candidate_is_left_alone_and_warned_about"]
 verdict = "implemented"
 why = "restore's own unit proof that an unreadable candidate is left alone with a pane-id warning"
-covers = ["src/open.rs:444-447", "src/open.rs:450-450"]
+covers = ["src/open.rs:458-461", "src/open.rs:464-464"]
 
 [[row]]
 condition = "`restore`'s replacement `plugin pane open` fails for one stale pane"
@@ -416,7 +416,7 @@ tier = "unit"
 proof = ["one_failed_replacement_does_not_stop_the_sweep"]
 verdict = "implemented"
 why = "restore's own unit proof that one failed replacement warns and the sweep reaches the later candidates"
-covers = ["src/open.rs:453-453"]
+covers = ["src/open.rs:467-467"]
 
 [[row]]
 condition = "`restore`'s `pane close` of a stale pane fails after its replacement opened"
@@ -424,7 +424,7 @@ tier = "unit"
 proof = ["a_failed_close_keeps_the_replacement_and_warns", "a_failed_close_after_a_successful_replacement_warns_and_still_focuses"]
 verdict = "implemented"
 why = "replace's and open::run's own unit proofs that a failed close keeps the replacement and warns"
-covers = ["src/open.rs:410-413"]
+covers = ["src/open.rs:424-427"]
 
 [[row]]
 condition = "`open`/`open-tab` cannot classify the existing dashboard pane (its `pane process-info` fails or is unparseable)"
@@ -432,7 +432,7 @@ tier = "unit"
 proof = ["an_unclassifiable_match_is_focused_never_replaced"]
 verdict = "implemented"
 why = "open::run's own unit proof that an unclassifiable match is warned about and focused, never replaced"
-covers = ["src/open.rs:563-566", "src/open.rs:581-583"]
+covers = ["src/open.rs:577-580", "src/open.rs:595-597"]
 
 [[row]]
 condition = "`open`/`open-tab`'s replacement `plugin pane open` of a stale dashboard pane fails"
@@ -440,7 +440,7 @@ tier = "unit"
 proof = ["a_failed_replacement_open_stops_and_closes_nothing"]
 verdict = "implemented"
 why = "open::run's own unit proof that a failed replacement open returns Err and records no close"
-covers = ["src/open.rs:573-578"]
+covers = ["src/open.rs:587-592"]
 
 [[row]]
 condition = "The dashboard process opened by `open`/`open-tab` finds no workspace cwd in its own injected Herdr context (`ui::startup_cwd` returns `None`)"

@@ -15,6 +15,13 @@
 //! decisions `src/main.rs` would otherwise make itself (design.md -> Decision 10); and
 //! `run_from_env` is the one-line production binding, on `cli::worker_cli_from_env`'s
 //! terms.
+//!
+//! The `restore` subcommand (a Herdr `[[startup]]` hook) is the same seam's session-wide
+//! sweep: `classify` reads one `pane process-info` payload as `Live`, `Stale` or
+//! `Unreadable`; `restore_candidates` lists every pane of a `pane list`; `plugin_id` names
+//! the plugin from the injected environment; `replace` swaps one stale pane for a fresh
+//! dashboard in its own slot; `restore` is the driver over them, and `restore_from_env`
+//! its production binding (design.md of `dashboard-restore`).
 
 use std::path::Path;
 
@@ -355,12 +362,18 @@ pub fn classify(stdout: &str) -> Classification {
     let Some(name) = only.get("name").and_then(|v| v.as_str()) else {
         return unreadable("the foreground process has no string name");
     };
-    if pid == shell_pid && name != "herdr-openspec" {
+    if pid == shell_pid && name != BINARY_NAME {
         Classification::Stale
     } else {
         Classification::Live
     }
 }
+
+/// The dashboard binary's process name, as Herdr reports a foreground process.
+const BINARY_NAME: &str = "herdr-openspec";
+
+/// The plugin id used when `HERDR_PLUGIN_ID` is absent or blank.
+const DEFAULT_PLUGIN_ID: &str = "herdr-openspec";
 
 /// Every candidate in a `herdr pane list` payload: `(pane_id, focused)`, any workspace.
 pub fn restore_candidates(listing: &str) -> Result<Vec<(String, bool)>, String> {
@@ -378,7 +391,8 @@ pub fn restore_candidates(listing: &str) -> Result<Vec<(String, bool)>, String> 
 
 /// The plugin id: `HERDR_PLUGIN_ID`, blank-filtered, falling back to `herdr-openspec`.
 pub fn plugin_id(env: &dyn Fn(&str) -> Option<String>) -> String {
-    crate::config::non_blank(env("HERDR_PLUGIN_ID")).unwrap_or_else(|| "herdr-openspec".to_string())
+    crate::config::non_blank(env("HERDR_PLUGIN_ID"))
+        .unwrap_or_else(|| DEFAULT_PLUGIN_ID.to_string())
 }
 
 /// Replace stale pane `pane_id` in its own slot: split it with a fresh dashboard, then
@@ -1349,6 +1363,40 @@ mod tests {
             ]
         );
         assert!(calls.iter().all(|c| !c.iter().any(|a| a == "--cwd")));
+    }
+
+    #[test]
+    fn replace_and_restore_pass_the_given_plugin_id() {
+        let fake = FakeCli::new();
+        let mut open = replace_open_with("--no-focus");
+        open[4] = "other-id";
+        fake.register_herdr(&open, Ok(String::new()));
+        fake.register_herdr(&["pane", "close", "w1:p3"], Ok(String::new()));
+        assert_eq!(replace(&fake, "other-id", "w1:p3", false), Ok(Vec::new()));
+        let calls = fake.calls();
+        assert_eq!(calls[0].1[3..5], ["--plugin", "other-id"]);
+
+        let fake = FakeCli::new();
+        fake.register_herdr(
+            &["pane", "list"],
+            Ok(format!(
+                r#"{{"result":{{"panes":[{{"pane_id":"w1:p3","label":"{DASHBOARD_LABEL}","workspace_id":"w1","focused":false}}]}}}}"#
+            )),
+        );
+        fake.register_herdr(
+            &["pane", "process-info", "--pane", "w1:p3"],
+            Ok(M6_SHELL.to_string()),
+        );
+        fake.register_herdr(&open, Ok(String::new()));
+        fake.register_herdr(&["pane", "close", "w1:p3"], Ok(String::new()));
+        let report = restore(&fake, "other-id");
+        assert!(
+            call_lines(&fake)
+                .iter()
+                .any(|l| l.contains("--plugin other-id")),
+            "{:?} {report:?}",
+            call_lines(&fake)
+        );
     }
 
     #[test]
@@ -2498,6 +2546,20 @@ mod tests {
             let report = restore(&fake, "herdr-openspec");
             assert!(report.outcome.is_err(), "{report:?}");
             assert_eq!(call_lines(&fake), vec!["pane list"]);
+            assert_eq!(report_output(&report).1, 1);
         }
+        let fake = FakeCli::new();
+        fake.register_herdr(
+            &list,
+            Err(CliError::NotStarted {
+                program: "herdr".to_string(),
+                args: vec!["pane".to_string(), "list".to_string()],
+                reason: "no such file".to_string(),
+            }),
+        );
+        let report = restore(&fake, "herdr-openspec");
+        assert!(report.outcome.is_err(), "{report:?}");
+        assert_eq!(call_lines(&fake), vec!["pane list"]);
+        assert_eq!(report_output(&report).1, 1);
     }
 }

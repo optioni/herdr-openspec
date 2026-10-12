@@ -1054,7 +1054,7 @@ launch of its own.
 
 `min_herdr_version` is `0.7.5`: that is the first Herdr release carrying the `[[startup]]`
 manifest table, which `dashboard-restore` uses to run `herdr-openspec restore` once per
-Herdr start and re-place a dashboard pane a restored session left stale. Earlier floors
+Herdr start (and again after a live handoff, where live dashboards classify `Live` and are left alone) and re-place a dashboard pane a restored session left stale. Earlier floors
 (0.7.0) covered manifest-declared actions, managed plugin panes, pane placement, and
 plugin invocation-context and environment injection. `herdr plugin pane focus`, which
 `open`/`open-tab` use to avoid duplicating an already-open dashboard, appears nowhere in

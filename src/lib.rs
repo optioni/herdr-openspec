@@ -1082,7 +1082,7 @@ pub enum Invocation {
     Restore,
     /// Anything else. Carries the offending token, when there is one — the
     /// unrecognised first argument, or the trailing argument after `ui`,
-    /// `open`, or `open-tab`. `None` means the argument list was empty.
+    /// `open`, `open-tab`, or `restore`. `None` means the argument list was empty.
     Reject(Option<String>),
 }
 

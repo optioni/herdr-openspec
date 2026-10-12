@@ -260,6 +260,16 @@ fn the_startup_hook_runs_the_restore_subcommand() {
         .to_string_lossy();
     assert_eq!(file_name, crate_binary_basename());
 
+    let panes = table_array(&manifest, "panes");
+    for pane in panes {
+        let pane_command = pane["command"].as_array().expect("pane command array");
+        assert_eq!(
+            pane_command[0].as_str(),
+            Some(path),
+            "[[startup]] command[0] must be the same path as the panes' command[0]"
+        );
+    }
+
     let tail = command[1].as_str().expect("command[1] is a string");
     assert_eq!(
         herdr_openspec::parse(&[tail]),
