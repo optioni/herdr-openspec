@@ -67,9 +67,9 @@ Planning-time evidence at HEAD `e678de5` (code identical to `49e3fc7`), run 2026
 ## 7. Degraded-states rows
 <!-- kind: operational -->
 
-- [ ] 7.1 CHECK: run `cargo test -q --test degraded_coverage` and record the green baseline count.
-- [ ] 7.2 CHANGE: add the six rows of design.md → Decision 12 to `SPEC.md` → Degraded states and bind each in `tests/degraded-coverage.toml` with `tier`, `proof`, `verdict`, `why`, and `covers`; re-point the six existing `src/open.rs` `covers` ranges that group 5 shifted; change the `0.7.0` floor in the row at `SPEC.md` ~1229 and its verbatim `condition` at `tests/degraded-coverage.toml` ~207 to `0.7.5` together.
-- [ ] 7.3 VERIFY: `cargo test -q --test degraded_coverage` — green, count = baseline + 6.
+- [x] 7.1 CHECK: run `cargo test -q --test degraded_coverage` and record the green baseline count.
+- [x] 7.2 CHANGE: add the six rows of design.md → Decision 12 to `SPEC.md` → Degraded states and bind each in `tests/degraded-coverage.toml` with `tier`, `proof`, `verdict`, `why`, and `covers`; re-point the six existing `src/open.rs` `covers` ranges that group 5 shifted; change the `0.7.0` floor in the row at `SPEC.md` ~1229 and its verbatim `condition` at `tests/degraded-coverage.toml` ~207 to `0.7.5` together.
+- [x] 7.3 VERIFY: `cargo test -q --test degraded_coverage` — green, count = baseline + 6.
 
 ## 8. Acceptance Test — Outer Loop GREEN
 <!-- kind: behavior -->
