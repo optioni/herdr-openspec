@@ -14,49 +14,6 @@ capabilities.
 
 ## Requirements
 
-### Requirement: `open` and `open-tab` are subcommands of their own, with no flag grammar
-
-`parse` SHALL classify the single argument `open` as `Invocation::Open` and the single
-argument `open-tab` as `Invocation::OpenTab`. The binary SHALL NOT accept a flag on any
-subcommand: `open --tab` SHALL be rejected exactly as `ui --tab` already is, carrying the
-offending token. `usage()` SHALL list all three commands — `ui`, `open`, `open-tab` — one
-line each.
-
-`SPEC.md` → Herdr integration → Manifest shows the tab action's command as
-`["./target/release/herdr-openspec", "open", "--tab"]`, which contradicts
-`openspec/IMPLEMENTATION-ORDER.md`'s Phase 6 row ("the `open` and `open-tab` binary
-subcommands"). The flat form is chosen and `SPEC.md` is corrected: `parse` stays a total
-function over a flat token list with no flag state, and its landed rejection scenario for
-`ui --tab` keeps its meaning rather than becoming an exception to a flag grammar that
-exists elsewhere.
-
-#### Scenario: `open` alone classifies as the split-pane invocation
-
-- **WHEN** `parse(&["open"])` is called
-- **THEN** it returns `Invocation::Open`
-- **AND** no filesystem, process, or environment access occurs during classification
-
-#### Scenario: `open-tab` alone classifies as the tab invocation
-
-- **WHEN** `parse(&["open-tab"])` is called
-- **THEN** it returns `Invocation::OpenTab`
-
-#### Scenario: A flag after a subcommand is rejected, carrying the token
-
-- **WHEN** `parse(&["open", "--tab"])` is called
-- **THEN** it returns `Invocation::Reject(Some("--tab"))`
-- **AND** `parse(&["open-tab", "x"])` returns `Invocation::Reject(Some("x"))`
-- **AND** `parse(&["ui", "--tab"])` still returns `Invocation::Reject(Some("--tab"))`,
-  unchanged by this change
-
-#### Scenario: Usage names all three commands
-
-- **WHEN** `usage()` is called and its `Commands:` block is split into lines
-- **THEN** there are exactly three command lines, whose first whitespace-delimited tokens
-  are `ui`, `open`, and `open-tab` — asserted as whole tokens, because `open` is a
-  substring of `open-tab` and a `contains` check would be satisfied by either alone
-- **AND** the summary line reads `usage: herdr-openspec <ui|open|open-tab>`
-
 ### Requirement: The invocation context is read from Herdr's injected environment through one injected lookup
 
 Herdr injects the invocation context into every process it starts for a plugin action.
@@ -160,12 +117,34 @@ indistinguishable in `pane list` and each will focus the other's pane. This is t
 behaviour — "show me the dashboard" has one answer per workspace — and is why the tab pane
 is not given a distinct title.
 
+**A matching pane may be stale** (`dashboard-restore`'s addition). After a Herdr server
+restart a dashboard pane keeps its id, its `OpenSpec` label, and its workspace, but its
+process is replaced by a fresh shell (`dashboard-restore` → "A stale dashboard pane is
+recognised from its process, not its label"). Before focusing the first match, both
+subcommands SHALL classify it with `herdr pane process-info --pane <id>`. A **stale** match
+SHALL be replaced in place by `dashboard-restore` → "A stale dashboard pane is replaced in
+its own slot", with the replacement opened `--focus`; no `plugin pane focus` call names the
+stale pane. A successful replacement open is a successful open: "A newly opened dashboard
+pane is focused after opening" then applies unchanged — the second `pane list`, and a
+`plugin pane focus` on the pane it identifies — because `--focus` alone does not raise a pane
+in a background tab. The stale pane's id is among the pre-open ids and is gone from the
+second listing, so "The pane to focus after opening is identified by difference from the
+pre-open listing" identifies the replacement. If the replacement open fails, the command
+stops exactly as a failed `plugin pane open` does (exit 1, Herdr's reason verbatim, the stale
+pane not closed, no post-open call). If only the close fails, the failure is a warning and the
+post-open listing and focus still follow. A match that is not stale, or whose classification
+call fails or answers with something unparseable, SHALL be focused exactly as before — an
+unclassifiable pane is never replaced, and the classification failure is a warning. Only the
+first match is classified; later matches are neither classified nor replaced by `open`.
+
 #### Scenario: A matching pane is focused and nothing is opened
 
 - **WHEN** `open` runs with a workspace id of `w8`, and `herdr pane list` answers with a
   pane `{"pane_id":"w8:pG","label":"OpenSpec","workspace_id":"w8"}`
-- **THEN** exactly two Herdr calls are made: `["pane","list"]` then
-  `["plugin","pane","focus","w8:pG"]`
+- **AND** `herdr pane process-info --pane w8:pG` reports a foreground process other than
+  the pane's own shell
+- **THEN** exactly three Herdr calls are made: `["pane","list"]`, then
+  `["pane","process-info","--pane","w8:pG"]`, then `["plugin","pane","focus","w8:pG"]`
 - **AND** no `plugin pane open` call is made
 - **AND** the process exits 0
 
@@ -200,6 +179,43 @@ is not given a distinct title.
 - **THEN** that pane is focused and no tab is created
 - **AND** the symmetric case — `open` while only the tab dashboard is listed — focuses the
   tab's pane
+
+#### Scenario: A stale match is replaced in place and the replacement focused
+
+- **WHEN** `open` runs with a workspace id of `w8`, `herdr pane list` lists
+  `{"pane_id":"w8:pG","label":"OpenSpec","workspace_id":"w8"}`, and
+  `herdr pane process-info --pane w8:pG` answers with `"shell_pid":4100` and exactly one
+  foreground process, `{"name":"zsh","pid":4100}`
+- **AND** the second `pane list` reports `w8:pK` labelled `OpenSpec` in `w8` and no `w8:pG`
+- **THEN** the calls after the classification are
+  `["plugin","pane","open","--plugin","herdr-openspec","--entrypoint","dashboard","--placement","split","--target-pane","w8:pG","--direction","right","--focus"]`,
+  `["pane","close","w8:pG"]`, `["pane","list"]`, then `["plugin","pane","focus","w8:pK"]`
+- **AND** no `["plugin","pane","focus","w8:pG"]` call is made
+- **AND** the process exits 0
+
+#### Scenario: A failed replacement open stops the command and closes nothing
+
+- **WHEN** the first match `w8:pG` classifies as stale and the replacement `plugin pane open`
+  exits 1 with `{"error":{"code":"plugin_pane_open_failed"}}`
+- **THEN** no `pane close`, no second `pane list`, and no focus call follow
+- **AND** the process exits 1 with Herdr's stderr verbatim
+
+#### Scenario: A failed close after a successful replacement warns and still focuses
+
+- **WHEN** the replacement open succeeds and `pane close w8:pG` exits 1
+- **THEN** the second `pane list` and the focus of the pane it identifies still follow
+- **AND** the close failure is a warning and the process exits 0
+
+#### Scenario: An unclassifiable match is focused, never replaced
+
+- **WHEN** the first match is `w8:pG` and `herdr pane process-info --pane w8:pG` exits
+  non-zero, and again when it answers with JSON carrying no `foreground_processes` array
+- **THEN** in both cases the next call is `["plugin","pane","focus","w8:pG"]`
+- **AND** no `plugin pane open` and no `pane close` call is made
+- **AND** the classification failure is written to stderr as a warning naming `w8:pG`, and
+  the process exits 0
+- **AND** when instead `process-info` answers with a live dashboard (`"name":"herdr-openspec"`)
+  no warning is recorded
 
 ### Requirement: `open` splits the pane the action was invoked from
 
@@ -333,8 +349,9 @@ reason SHALL be written to stderr as a warning and the open call SHALL still be 
 because refusing to open is the "fail closed" behaviour this project forbids, and a socket
 too broken to list is one whose open call will report its own reason.
 
-`open` SHALL parse **only** `pane list`'s output — both of its `pane list` calls, and nothing
-else. The `plugin pane open` response — measured
+`open` SHALL parse **only** `pane list`'s and `pane process-info`'s output — both of its
+`pane list` calls and the one classification of its first match (`dashboard-restore`'s
+addition) — and nothing else. The `plugin pane open` response — measured
 as `{"id":"cli:plugin","result":{"plugin_pane":{"entrypoint":…,"plugin_id":…,"pane":{"pane_id":…}}}}`,
 a **different** envelope shape from `pane split`'s `result.pane.pane_id` — is not read at
 all, so its shape cannot break this command. The post-open focus does not weaken this:
@@ -364,7 +381,9 @@ enters the crate.
 
 - **WHEN** a matching pane was listed but `plugin pane focus` fails with
   `plugin_pane_not_found` at exit **1**
-- **THEN** exactly two Herdr calls were made — `pane list` then `plugin pane focus`
+- **AND** `pane process-info` classified it as not stale
+- **THEN** exactly three Herdr calls were made — `pane list`, `pane process-info`, then
+  `plugin pane focus`
 - **AND** no `plugin pane open` call follows
 - **AND** the process exits 1 with the reason on stderr
 
@@ -372,8 +391,9 @@ enters the crate.
 
 - **WHEN** a matching pane was listed but `plugin pane focus` fails with plain text at exit
   **2** — what a Herdr that does not know the subcommand produces
-- **THEN** the first three Herdr calls are `pane list`, `plugin pane focus`, then
-  `plugin pane open`, and the post-open listing and focus of "A newly opened dashboard pane is
+- **AND** `pane process-info` classified it as not stale
+- **THEN** the first four Herdr calls are `pane list`, `pane process-info`,
+  `plugin pane focus`, then `plugin pane open`, and the post-open listing and focus of "A newly opened dashboard pane is
   focused after opening" follow them
 - **AND** `Report.warnings` carries the focus reason
 - **AND** the process exits 0 when the open succeeds, so the user gets a dashboard rather
@@ -411,7 +431,8 @@ action and nothing visibly happens. The same measurement shows `herdr plugin pan
 <pane id>` **does** switch the workspace's active tab: focusing pane `wG:p0` flipped tab
 `wG:tB` from `"focused":false` to `"focused":true` in the next `herdr tab list`.
 
-After a `plugin pane open` that succeeds, `open::run` SHALL issue `herdr pane list` a second
+After a `plugin pane open` that succeeds — including the replacement open of a stale match
+(`dashboard-restore`'s addition), after its `pane close` — `open::run` SHALL issue `herdr pane list` a second
 time and, when that listing identifies the pane just opened (see the next requirement), SHALL
 issue `plugin pane focus <pane id>` on it. This SHALL apply to **both** placements with no
 placement branch: a split whose pane already took focus is unharmed by a second focus, and
@@ -489,16 +510,17 @@ be *raised* would be the fail-closed behaviour this project forbids.
 
 #### Scenario: The post-open focus names the newly opened pane, not the one already listed
 
-This is the only scenario in which `run` passes a **non-empty** pre-open id list to the
-chooser, and so the only one that can falsify an implementation that hardcodes an empty one.
+This and the stale-match replacement (`dashboard-restore`'s addition) are the only scenarios
+in which `run` passes a **non-empty** pre-open id list to the chooser, and so the only ones
+that can falsify an implementation that hardcodes an empty one.
 Every other scenario either starts from an empty listing or ends with `before` and `after`
 equal, where the chooser's fallback returns the same pane either way.
 
 - **WHEN** the first `pane list` carries `{"pane_id":"w8:pG","label":"OpenSpec","workspace_id":"w8"}`,
-  `plugin pane focus w8:pG` fails as a usage error at exit **2** so the command falls through
-  and opens once, `plugin pane open` succeeds, and the second `pane list` carries `w8:pG`
-  **and then** `w8:pH`, both matching
-- **THEN** five Herdr calls are made, and the fifth is `["plugin","pane","focus","w8:pH"]`
+  `pane process-info` classifies it as not stale, `plugin pane focus w8:pG` fails as a usage
+  error at exit **2** so the command falls through and opens once, `plugin pane open`
+  succeeds, and the second `pane list` carries `w8:pG` **and then** `w8:pH`, both matching
+- **THEN** six Herdr calls are made, and the sixth is `["plugin","pane","focus","w8:pH"]`
 - **AND** it is not `["plugin","pane","focus","w8:pG"]` — the pane already known not to be
   focusable, which is what an implementation ignoring the pre-open ids would raise
 - **AND** the process exits 0 with the usage-error warning recorded
@@ -512,9 +534,10 @@ equal, where the chooser's fallback returns the same pane either way.
 
 #### Scenario: The already-open path is untouched
 
-- **WHEN** the first `pane list` already reports a dashboard pane for this workspace and
-  `plugin pane focus` on it succeeds
-- **THEN** exactly two Herdr calls are made, exactly as before this change
+- **WHEN** the first `pane list` already reports a dashboard pane for this workspace,
+  `pane process-info` classifies it as not stale, and `plugin pane focus` on it succeeds
+- **THEN** exactly three Herdr calls are made — `pane list`, `pane process-info`, then
+  `plugin pane focus`
 - **AND** no open call and no second listing follow
 
 ### Requirement: The pane to focus after opening is identified by difference from the pre-open listing
@@ -711,3 +734,54 @@ the exit status.
 
 - **WHEN** every `.rs` file under `src/ui/` is searched for `HerdrCli`
 - **THEN** nothing matches, unchanged by this change
+
+### Requirement: `open`, `open-tab`, and `restore` are subcommands of their own, with no flag grammar
+
+`parse` SHALL classify the single argument `open` as `Invocation::Open`, the single
+argument `open-tab` as `Invocation::OpenTab`, and the single argument `restore` as
+`Invocation::Restore` (`dashboard-restore`'s addition). The binary SHALL NOT accept a flag on any
+subcommand: `open --tab` SHALL be rejected exactly as `ui --tab` already is, carrying the
+offending token. `usage()` SHALL list all four commands — `ui`, `open`, `open-tab`, `restore` —
+one line each.
+
+`SPEC.md` → Herdr integration → Manifest shows the tab action's command as
+`["./target/release/herdr-openspec", "open", "--tab"]`, which contradicts
+`openspec/IMPLEMENTATION-ORDER.md`'s Phase 6 row ("the `open` and `open-tab` binary
+subcommands"). The flat form is chosen and `SPEC.md` is corrected: `parse` stays a total
+function over a flat token list with no flag state, and its landed rejection scenario for
+`ui --tab` keeps its meaning rather than becoming an exception to a flag grammar that
+exists elsewhere.
+
+#### Scenario: `open` alone classifies as the split-pane invocation
+
+- **WHEN** `parse(&["open"])` is called
+- **THEN** it returns `Invocation::Open`
+- **AND** no filesystem, process, or environment access occurs during classification
+
+#### Scenario: `open-tab` alone classifies as the tab invocation
+
+- **WHEN** `parse(&["open-tab"])` is called
+- **THEN** it returns `Invocation::OpenTab`
+
+#### Scenario: A flag after a subcommand is rejected, carrying the token
+
+- **WHEN** `parse(&["open", "--tab"])` is called
+- **THEN** it returns `Invocation::Reject(Some("--tab"))`
+- **AND** `parse(&["open-tab", "x"])` returns `Invocation::Reject(Some("x"))`
+- **AND** `parse(&["ui", "--tab"])` still returns `Invocation::Reject(Some("--tab"))`,
+  unchanged by this change
+- **AND** `parse(&["restore", "--all"])` returns `Invocation::Reject(Some("--all"))`
+
+#### Scenario: `restore` alone classifies as the restore invocation
+
+- **WHEN** `parse(&["restore"])` is called
+- **THEN** it returns `Invocation::Restore`
+- **AND** no filesystem, process, or environment access occurs during classification
+
+#### Scenario: Usage names all four commands
+
+- **WHEN** `usage()` is called and its `Commands:` block is split into lines
+- **THEN** there are exactly four command lines, whose first whitespace-delimited tokens
+  are `ui`, `open`, `open-tab`, and `restore` — asserted as whole tokens, because `open` is
+  a substring of `open-tab` and a `contains` check would be satisfied by either alone
+- **AND** the summary line reads `usage: herdr-openspec <ui|open|open-tab|restore>`

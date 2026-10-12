@@ -17,7 +17,7 @@ site.
 
 `herdr-plugin.toml` SHALL exist at the repository root and SHALL declare
 `id = "herdr-openspec"`, `name = "OpenSpec"`, `version = "0.1.0"`,
-`min_herdr_version = "0.7.0"`, and `platforms = ["macos", "linux"]`. `version`
+`min_herdr_version = "0.7.5"`, and `platforms = ["macos", "linux"]`. `version`
 is a Herdr-required top-level manifest key, independent of the crate's own
 `Cargo.toml` version, and is kept equal to it by convention rather than by any
 enforced link. It SHALL declare exactly one `[[build]]` step with
@@ -31,6 +31,8 @@ running `command = ["./target/release/herdr-openspec", "ui"]`:
 | `dashboard` | `split` |
 | `dashboard-tab` | `tab` |
 
+exactly **one** `[[startup]]` entry (`dashboard-restore`'s addition), with
+`command = ["./target/release/herdr-openspec", "restore"]` and no other key,
 and exactly **two** `[[actions]]` entries, both with `contexts = ["workspace"]`:
 
 | `id` | `title` | `command` |
@@ -38,16 +40,18 @@ and exactly **two** `[[actions]]` entries, both with `contexts = ["workspace"]`:
 | `open` | `OpenSpec: dashboard` | `["./target/release/herdr-openspec", "open"]` |
 | `open-tab` | `OpenSpec: dashboard (tab)` | `["./target/release/herdr-openspec", "open-tab"]` |
 
-`min_herdr_version` SHALL remain `0.7.0`: Herdr's own changelog records manifest-declared
-actions, managed plugin panes, plugin pane placement, and plugin invocation context and
-environment injection as 0.7.0 additions, so nothing this change declares raises the floor.
+`min_herdr_version` SHALL be `0.7.5`, raised from `0.7.0` by `dashboard-restore`: Herdr's
+own changelog records manifest-declared actions, managed plugin panes, plugin pane
+placement, plugin invocation context and environment injection, and `pane.process_info` as
+0.7.0 additions, and one-shot plugin `[[startup]]` hooks as a 0.7.5 addition — the newest
+key this manifest declares, so it sets the floor.
 Every key SHALL match the manifest format documented in `SPEC.md` → Herdr integration →
 Manifest, which this change corrects: the tab action's command is `open-tab`, not
 `["open", "--tab"]`.
 
 #### Scenario: Herdr links the working tree
 
-- **WHEN** `herdr plugin link .` is run from the repository root with Herdr 0.7.0 or later
+- **WHEN** `herdr plugin link .` is run from the repository root with Herdr 0.7.5 or later
 - **THEN** the command exits 0 — `plugin link` does not run `[[build]]` steps; those
   run only during a GitHub-managed `plugin install`, so the working tree must already
   be built (`scripts/build.sh` or `make build`) for the pane to have a binary to run
@@ -73,10 +77,15 @@ Manifest, which this change corrects: the tab action's command is `open-tab`, no
 #### Scenario: The manifest parses and its declared paths resolve
 
 - **WHEN** `herdr-plugin.toml` is parsed as TOML
-- **THEN** parsing succeeds and all eight required top-level keys above are present and
+- **THEN** parsing succeeds and all nine required top-level keys above are present and
   non-empty
-- **AND** the two `[[panes]]` and two `[[actions]]` tables are present with exactly the
-  ids, titles, placements, contexts, and commands tabulated above, and no others
+- **AND** the two `[[panes]]`, the one `[[startup]]`, and the two `[[actions]]` tables are
+  present with exactly the ids, titles, placements, contexts, and commands stated above,
+  and no others
+- **AND** the `[[startup]]` command's first element names the same path as the panes' and
+  actions' commands, and its second element is a token `parse` classifies as
+  `Invocation::Restore` — so a manifest that omits `[[startup]]`, declares a second one, or
+  misspells `restore` fails this check rather than failing silently in Herdr's plugin log
 - **AND** `scripts/build.sh` — the one `command` path that is committed to the repository —
   exists and is executable, resolved relative to the repository root
 
