@@ -23,7 +23,7 @@ spec is wrong, update the spec as part of that change rather than letting the tw
 `schema-model`, `task-parsing`, `changes-from-files`, `subprocess-seam`,
 `changes-from-cli`, `tui-shell`, `list-view`, `markdown-viewer`,
 `detail-view`, `tasks-tab`, `live-refresh`, `agent-polling`,
-`agent-attribution`, `agent-launch`, `plugin-actions`,
+`agent-attribution`, `agent-launch`, `plugin-actions`, `dashboard-restore`,
 `markdown-legibility`, and `worktree-changes` have landed: the crate builds with six third-party dependencies (`toml`,
 `yaml-rust2`, `serde_json`, `ratatui` — reached through `ratatui::crossterm`'s
 re-export, not a direct dependency — `pulldown-cmark`, and `notify`), `make check` runs
@@ -203,10 +203,11 @@ resort. That read happens **lazily, once per session, on the launcher's own
 worker thread** — on the first `a`/`c`/`s` press and never at startup, never from
 `src/ui/`, and never for `g` — and the resolved choice is cached for the process.
 A future change that resolves the kind on the render path breaks that rule; the
-worker is where blocking is allowed. Two more binary subcommands, `open` and `open-tab` (`src/open.rs`,
+worker is where blocking is allowed. Three more binary subcommands, `open`, `open-tab`, and `restore` (`src/open.rs`,
 the crate's third `HerdrCli` consumer and the fifth file on the seam gates'
-`ALLOWED` list), open or focus the dashboard pane from Herdr's action menu —
-`herdr-plugin.toml` declares both `[[actions]]` and a second, tab-placed
+`ALLOWED` list), open or focus the dashboard pane from Herdr's action menu, and `restore`
+replaces the dead shells a restored session leaves as dashboards — `herdr-plugin.toml`
+declares both `[[actions]]`, a `[[startup]]` hook running `restore`, and a second, tab-placed
 `[[panes]]` entry alongside the original split one. Neither subcommand renders
 or needs a terminal, and neither ever passes `--cwd` to `herdr plugin pane
 open`: Herdr 0.8.2 was measured to resolve the manifest's relative pane
@@ -244,7 +245,7 @@ Important files:
 - **python3** — required by `make check`: `scripts/gates/deps.sh` parses `cargo
   metadata`'s JSON through it. Present on both GitHub runners and on the reference
   machine; no crate is added to do this instead.
-- **Herdr** 0.7.0 or later, for the plugin manifest format and the `plugin`,
+- **Herdr** 0.7.5 or later, for the plugin manifest format and the `plugin`,
   `agent`, and `pane` CLI surfaces.
 - **OpenSpec CLI** (`@fission-ai/openspec`) — optional for the plugin at runtime,
   required for the workflow below. Installed by Homebrew here, at

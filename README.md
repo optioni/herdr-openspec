@@ -36,6 +36,9 @@ new tab. Pressing either again focuses the existing dashboard rather than
 opening a second one. The same pane is also reachable directly with
 `herdr plugin pane open --plugin herdr-openspec --entrypoint dashboard`.
 
+Herdr 0.7.5 or later is required. Dashboards come back after a Herdr restart, and
+an idle shell labelled `OpenSpec` is treated as a dead dashboard and replaced.
+
 **An already-linked plugin must be relinked** (`herdr plugin link .`, or a
 `plugin install` reinstall) or the Herdr server restarted for these two new
 actions to appear — Herdr re-reads the manifest only then.

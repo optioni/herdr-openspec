@@ -8,8 +8,9 @@
 
 `herdr-openspec` is a Herdr plugin providing a read-only dashboard for OpenSpec
 state, plus the ability to launch an agent onto a change. It ships a single Rust
-binary invoked two ways by the manifest: as a pane process rendering the TUI, and
-as an action process that opens or focuses that pane.
+binary invoked three ways by the manifest: as a pane process rendering the TUI, as an
+action process that opens or focuses that pane, and as a startup hook that re-places the
+dashboard panes a restored session left as dead shells.
 
 **Stack:** Rust, `ratatui` (TUI) — `crossterm` is reached through `ratatui`'s own
 re-export and is not itself a declared dependency, so a backend type and an event
@@ -106,7 +107,7 @@ binding, not its only one — `NOBLOCK` leg 2 covers it identically.
 | `watch` | The recursive `notify` watch, the debounce, and classifying a touched path to a per-change `Selection` |
 | `worktrees` | The worktree family value type; the one derivation of which member a change's directory belongs to; parsing `git worktree list --porcelain -z`'s own stdout and labelling a member; choosing a family's base and members; and classifying which change directories a member touched |
 | `refresh` | The worker thread, the non-blocking `Refresher` seam it answers through, and the worktree family derivation (four `git` commands, an idle re-check) it overlays onto the `ChangeSet` |
-| `open` | The `open` and `open-tab` subcommands that open or focus the dashboard pane through `herdr plugin pane`; the crate's third `HerdrCli` consumer |
+| `open` | The `open`, `open-tab`, and `restore` subcommands that open, focus, or replace the dashboard pane through `herdr plugin pane`, and classify a pane as a stale dashboard; the crate's third `HerdrCli` consumer |
 | `ui` | Views (the change-row grammar, the detail region's header/tab-bar/content grammar, markdown rendering, `ui::tasks`' checklist-and-progress-bar grammar for the tracked-tasks tab, and `ui::help`'s help band — its row grammar and, in `ui::help::INVENTORY`, the crate's one list of what every key and gesture does, which `?` renders and `tests/doc_contract.rs` binds back to the driver), the semantic-role colour palette (`ui::palette`, the one table from a role to a `Style` and the crate's only `ratatui::style::Color` — see Colour and style), layout, the dashboard's own state (selection, the `/` filter, the detail region's section list — one section per resolved file and, inside a spec-shaped or tracked task file, one per heading, a tracked task file's document title excepted, each carrying a `depth` — and its fold set, the detail cursor, the width of the content area last drawn — the one piece of geometry the dashboard stores, and only so a keypress taken between frames can resolve against what the last frame did, never as a source of what is drawn — the selected artifact tab, the live tier's refresh flag and standing problems, the help overlay's own layer state — open or not, and its scroll — and the injected artifact-read binding), key handling, terminal lifecycle, and the event loop |
 | `cli` | The three subprocess traits and their real implementations |
 
@@ -1105,6 +1106,20 @@ stays a total function over a flat token list with no flag state, and the landed
 rejection keeps its meaning rather than becoming an exception to a flag grammar introduced
 for one boolean (`plugin-actions` design.md → Decision 1).
 
+### Restoring after a restart
+
+Herdr restores a session's layout but not a dashboard's process: the pane returns as a login
+shell keeping its pane id and `OpenSpec` label. `herdr-plugin.toml`'s `[[startup]]` runs
+`herdr-openspec restore` once per Herdr start (and again after a live handoff). It lists every
+pane, takes each one labelled `OpenSpec` (`open::restore_candidates`), and classifies it via
+`herdr pane process-info`: **stale** only when its sole foreground process has the pane's own
+`shell_pid`. A stale pane gets a replacement through `plugin pane open --target-pane` and is
+then closed, so the new dashboard takes the old pane's exact slot; live, user-started, and
+unreadable panes are left alone (unreadable ones with a warning). One failure never stops the
+sweep: exit 0 when it ran, 1 when `pane list` failed. The replacement starts fresh and nothing
+is written to the state directory. Measured live in `dashboard-restore`'s
+`notes/measurements.md` (M7-M11).
+
 ### Opening the pane
 
 `open` and `open-tab` are one-shot binary subcommands, not part of the render path — they
@@ -1127,7 +1142,10 @@ distinguished only by a `label` carrying the manifest pane's `title`, which both
 entries deliberately share (`OpenSpec`), so `open` and `open-tab` focus each other's pane —
 "show me the dashboard" has one answer per workspace. A listed pane counts as this
 workspace's dashboard when it carries a string `pane_id`, its `label` matches, and its
-`workspace_id` matches; the first match in list order wins.
+`workspace_id` matches; the first match in list order wins. That match is then classified
+(`open::classify`, over `herdr pane process-info`): a **stale** dashboard — a pane whose only
+foreground process is its own shell, which is what a restored session leaves — is replaced in
+place and the replacement raised, while a live or unreadable one is focused as before.
 
 `--focus` on the open call is **not sufficient for a tab**: measured live against Herdr
 **0.9.0**, `plugin pane open --placement tab --focus` creates the tab and focuses the pane
@@ -1400,11 +1418,13 @@ is tested against scratch `#!/bin/sh` programs rather than the real `openspec`,
   most two problems (a `state::record` failure and an `agent prompt` failure), never silently
   dropping either
 - `open::context`, `open::existing_pane`, `open::open_args`/`open::focus_args`, `open::run`,
-  and `open::placement_for`/`open::report_output` — the invocation context read through one
+  `open::placement_for`/`open::report_output`, and the restore functions `open::classify`,
+  `open::restore_candidates`, `open::plugin_id`, `open::replace`, and `open::restore` — the invocation context read through one
   injected environment lookup, the pane-list match against `DASHBOARD_LABEL` and the
   workspace id, the exact `plugin pane open`/`plugin pane focus` argument vectors, the
-  list-then-focus-or-open driver run against a `FakeCli`, and the two pure decisions
-  `src/main.rs` would otherwise make itself
+  list-then-focus-or-open driver run against a `FakeCli`, the two pure decisions
+  `src/main.rs` would otherwise make itself, and the stale-dashboard classifier, the
+  restore sweep's candidate list, and the replace-in-place operation run against a `FakeCli`
 - `config::config_dir` and `config::load` — the configuration directory resolved from an
   injected environment lookup (`&dyn Fn(&str) -> Option<String>`, never `std::env::var`
   directly), and `config.toml` read into a `Config` with a documented default for every key,

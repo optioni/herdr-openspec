@@ -104,7 +104,7 @@ Enforced gates, failing the build when unmet:
 
 ## Constraints and dependencies
 
-- **Herdr** 0.7.0 or later, for the plugin manifest format and the `plugin`,
+- **Herdr** 0.7.5 or later, for the plugin manifest format and the `plugin`,
   `agent`, and `pane` CLI surfaces this relies on.
 - **OpenSpec CLI** optional. When present it is authoritative; when absent the
   plugin reads `openspec/` directly. The CLI is a Node binary and is commonly
